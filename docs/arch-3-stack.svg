@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="680" viewBox="0 0 680 406" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Anchor 技术栈分层</title>
+<desc>从地基到界面五层，各标注使用的语言与工具，右侧是横跨各层的三个工具。</desc>
+<style>
+text{font-family:-apple-system,system-ui,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
+.th{font-size:14px;font-weight:500}.ts{font-size:12px;font-weight:400}.lbl{fill:#3d3d3a}
+.b-gray{fill:#F1EFE8;stroke:#5F5E5A}.tx-gray{fill:#444441}
+.b-teal{fill:#E1F5EE;stroke:#0F6E56}.tx-teal{fill:#085041}
+.b-blue{fill:#E6F1FB;stroke:#185FA5}.tx-blue{fill:#0C447C}
+.b-purple{fill:#EEEDFE;stroke:#534AB7}.tx-purple{fill:#3C3489}
+.b-coral{fill:#FAECE7;stroke:#993C1D}.tx-coral{fill:#712B13}
+.b-amber{fill:#FAEEDA;stroke:#854F0B}.tx-amber{fill:#633806}
+.b-green{fill:#EAF3DE;stroke:#3B6D11}.tx-green{fill:#27500A}
+@media (prefers-color-scheme:dark){
+.lbl{fill:#c2c0b6}
+.b-gray{fill:#444441;stroke:#B4B2A9}.tx-gray{fill:#F1EFE8}
+.b-teal{fill:#085041;stroke:#5DCAA5}.tx-teal{fill:#E1F5EE}
+.b-blue{fill:#0C447C;stroke:#85B7EB}.tx-blue{fill:#E6F1FB}
+.b-purple{fill:#3C3489;stroke:#AFA9EC}.tx-purple{fill:#EEEDFE}
+.b-coral{fill:#712B13;stroke:#F0997B}.tx-coral{fill:#FAECE7}
+.b-amber{fill:#633806;stroke:#EF9F27}.tx-amber{fill:#FAEEDA}
+.b-green{fill:#27500A;stroke:#97C459}.tx-green{fill:#EAF3DE}}
+</style>
+<rect x="40" y="56" width="380" height="54" rx="8" class="b-coral" stroke-width="0.5"/>
+<text class="th tx-coral" x="230" y="79" text-anchor="middle">① 桌宠界面（你看到的）</text>
+<text class="ts tx-coral" x="230" y="97" text-anchor="middle">React + Tailwind + shadcn/ui + SVG/Lottie</text>
+<rect x="40" y="120" width="380" height="54" rx="8" class="b-blue" stroke-width="0.5"/>
+<text class="th tx-blue" x="230" y="143" text-anchor="middle">② 决策半 · 判断该不该开口</text>
+<text class="ts tx-blue" x="230" y="161" text-anchor="middle">纯 TypeScript + XState 状态机</text>
+<rect x="40" y="184" width="380" height="54" rx="8" class="b-teal" stroke-width="0.5"/>
+<text class="th tx-teal" x="230" y="207" text-anchor="middle">③ 感知半 · 算四个信号</text>
+<text class="ts tx-teal" x="230" y="225" text-anchor="middle">纯 TypeScript</text>
+<rect x="40" y="248" width="380" height="54" rx="8" class="b-green" stroke-width="0.5"/>
+<text class="th tx-green" x="230" y="271" text-anchor="middle">④ 信号采集 · 翻译浏览器动静</text>
+<text class="ts tx-green" x="230" y="289" text-anchor="middle">TypeScript + chrome.tabs / idle / visibility</text>
+<rect x="40" y="312" width="380" height="54" rx="8" class="b-gray" stroke-width="0.5"/>
+<text class="th tx-gray" x="230" y="335" text-anchor="middle">⑤ 浏览器平台（地基）</text>
+<text class="ts tx-gray" x="230" y="353" text-anchor="middle">Chrome 扩展 · Manifest V3</text>
+<text class="ts lbl" x="450" y="76">横跨各层的工具</text>
+<rect x="450" y="92" width="190" height="54" rx="8" class="b-purple" stroke-width="0.5"/>
+<text class="th tx-purple" x="545" y="115" text-anchor="middle">Anthropic API</text>
+<text class="ts tx-purple" x="545" y="133" text-anchor="middle">分类 + 措辞（LLM）</text>
+<rect x="450" y="156" width="190" height="54" rx="8" class="b-amber" stroke-width="0.5"/>
+<text class="th tx-amber" x="545" y="179" text-anchor="middle">storage.local</text>
+<text class="ts tx-amber" x="545" y="197" text-anchor="middle">本地存储</text>
+<rect x="450" y="220" width="190" height="54" rx="8" class="b-gray" stroke-width="0.5"/>
+<text class="th tx-gray" x="545" y="243" text-anchor="middle">Vite</text>
+<text class="ts tx-gray" x="545" y="261" text-anchor="middle">打包成可加载文件</text>
+</svg>
