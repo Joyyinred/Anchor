@@ -1,8 +1,9 @@
 {
   "_meta": {
-    "schema": "SignalEvent[] per scenario（见 docs/契约v3.md §2）",
+    "schema": "SignalEvent[] per scenario（见 docs/契约v4.md §2）",
     "convention": "timestamp 为相对毫秒（场景起点=0）；时长用真实毫秒（10min=600000），测试时按场景压缩比例由 A 感知半单测自行处理；systemIdle 为事件发生时快照",
-    "anchorConvention": "isAnchor=true 标记锚点页事件；VIEWER 画像锚点=课程视频页本身"
+    "anchorConvention": "isAnchor=true 标记锚点页事件；VIEWER 画像锚点=课程视频页本身（matchMode=prefix 时按系列前缀匹配）",
+    "v4_note": "场景 21 验证 CREATOR 打字型走神盲区修复；场景 24 验证 DEMO_MODE 时间压缩；场景 16 验证锚点 prefix 匹配"
   },
   "scenarios": [
     {
@@ -36,11 +37,14 @@
       "name": "CREATOR · 飘到 youtube 娱乐视频 + 锚点 10min 没碰 + 被动刷 → CHECK_IN_DRIFT",
       "profile": "CREATOR",
       "expectedAction": "CHECK_IN_DRIFT",
+      "_note": "v4：连续 passive 段 ≥60s 验证；MEDIA_PLAY 无人为操作→passive 继续；30s 间隔采样验证连续段不被中间事件打断",
       "events": [
         { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
         { "timestamp": 30000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false },
-        { "timestamp": 240000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun456", "title": "Best Fails Compilation", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "autoplay", "systemIdle": false },
-        { "timestamp": 630000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun789", "title": "Try Not To Laugh", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "autoplay", "systemIdle": false }
+        { "timestamp": 60000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false },
+        { "timestamp": 90000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false },
+        { "timestamp": 120000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false },
+        { "timestamp": 630000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false }
       ]
     },
     {
@@ -139,7 +143,7 @@
       "name": "VIEWER · 网课自动连播翻转到无关视频 → CHECK_IN_DRIFT（锚点降级路径）",
       "profile": "VIEWER",
       "expectedAction": "CHECK_IN_DRIFT",
-      "_note": "锚点未超 20min，但 mutePassiveTexture=true 且 entryIntent=feed_driven，走 VIEWER 降级路径",
+      "_note": "v4：锚点未超 20min，但 mutePassiveTexture=true 且 entryIntent=feed_driven→走 VIEWER 降级路径；v4 已知限制：entryIntent 不可靠（SPA pushState 下 webNavigation 不触发），此处假设 entryIntent 可获取；若拿不到，降级路径不触发→DO_NOTHING（保守）",
       "events": [
         { "timestamp": 0, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=mlcourse1", "title": "MIT 6.006 Lecture 5: Sorting", "contentKind": "video", "isAnchor": true, "interactionType": "MEDIA_PLAY", "entryIntent": "search", "systemIdle": false },
         { "timestamp": 600000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=xyz999", "title": "自动连播：极限运动集锦", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "autoplay", "systemIdle": false },
@@ -190,7 +194,7 @@
       "name": "VIEWER · 系列课连播：Lecture5 看完自动进 Lecture6 → DO_NOTHING",
       "profile": "VIEWER",
       "expectedAction": "DO_NOTHING",
-      "_note": "锚点=课程系列前缀（同一播放列表）；连播视频经 LLM 判 RELEVANT，detachedMs 不因换视频累计",
+      "_note": "v4：锚点 matchMode=prefix（同一播放列表 list=PLcourse）；连播视频经 LLM 判 RELEVANT，detachedMs 不因换视频累计；MEDIA_PLAY 无人为操作→passive 但锚点命中→anchorDetachedMs 归零",
       "events": [
         { "timestamp": 0, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=lec5&list=PLcourse", "title": "Lecture 5: Sorting", "contentKind": "video", "isAnchor": true, "interactionType": "MEDIA_PLAY", "entryIntent": "search", "systemIdle": false },
         { "timestamp": 2700000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=lec6&list=PLcourse", "title": "Lecture 6: Trees", "contentKind": "video", "isAnchor": true, "interactionType": "MEDIA_PLAY", "entryIntent": "autoplay", "systemIdle": false }
@@ -247,7 +251,7 @@
       "name": "CREATOR · 打字型走神：飘到微信网页版 10min 打字聊天 → CHECK_IN_DRIFT（v4 盲区修复）",
       "profile": "CREATOR",
       "expectedAction": "CHECK_IN_DRIFT",
-      "_note": "v4：contextRelevance=IRRELEVANT 时 ACTIVE_INPUT 不升级 texture→保持在 passive（解决你#5）",
+      "_note": "v4 核心验证：contextRelevance=IRRELEVANT 时 ACTIVE_INPUT 不升级 texture→保持在 passive；若未修复，ACTIVE_INPUT 会顶成 purposeful→DRIFT 永不触发（CREATOR 主打人群盲区）",
       "events": [
         { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "app.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
         { "timestamp": 60000, "domain": "web.wechat.com", "url": "https://web.wechat.com/chat", "title": "微信群聊", "contentKind": "social_feed", "isAnchor": false, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
@@ -287,6 +291,19 @@
         { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
         { "timestamp": 1000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false },
         { "timestamp": 5000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 25,
+      "name": "CREATOR · lastAnchorSnapshot 数据源验证：check-in 措辞需要锚点最后活动快照",
+      "profile": "CREATOR",
+      "expectedAction": "CHECK_IN_DRIFT",
+      "_note": "v4：check-in 措辞「你大概 X 分钟前在《{lastAnchorSnapshot.title}》那里——还在查，还是走神了？」需要锚点最后活动快照；验证 lastAnchorSnapshot.ts=最后一次锚点有意义交互时间戳",
+      "events": [
+        { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx 调试中", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 120000, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx 调试中", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 180000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false },
+        { "timestamp": 780000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false }
       ]
     }
   ]

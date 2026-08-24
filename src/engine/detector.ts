@@ -69,8 +69,12 @@ export function isDrifting(
   if (now - state.lastCheckInTs < CHECKIN_COOLDOWN_MS) return false;
   if (now < ctx.graceUntil) return false;
 
+  // DEMO_MODE 下 policy 里的阈值常量本身也要压缩（契约v4 §3.2），否则 demo 事件流用的是
+  // 压缩后的小时间戳，而阈值仍是真实 8min/15min，比较永远不成立。
+  const anchorDetachedThresholdMs = scaled(p.anchorDetachedThresholdMs, isDemoMode);
+
   // 1. 形态硬判：Shorts + 锚点抛弃
-  if (f.contentFormat === 'short_feed' && f.anchorDetachedMs > p.anchorDetachedThresholdMs) {
+  if (f.contentFormat === 'short_feed' && f.anchorDetachedMs > anchorDetachedThresholdMs) {
     return sustainedWithWindow(state.driftSustainer, true, now, SUSTAINED_EVIDENCE_MS);
   }
 
@@ -79,7 +83,7 @@ export function isDrifting(
     return sustainedWithWindow(state.driftSustainer, false, now, SUSTAINED_EVIDENCE_MS);
   }
 
-  const anchorAbandoned = f.anchorDetachedMs > p.anchorDetachedThresholdMs;
+  const anchorAbandoned = f.anchorDetachedMs > anchorDetachedThresholdMs;
 
   // 纹理证据：连续 passive 达到门槛
   const textureEvidence =
@@ -127,10 +131,11 @@ export function isStuck(
 
   // 净时长（扣除上次回答后的影响）
   const effectiveStillnessMs = Math.min(f.stillnessMs, now - state.lastAnswerTs);
+  const stuckThresholdMs = scaled(state.stuckThresholdMs, isDemoMode);
 
   return sustainedWithWindow(
     state.stuckSustainer,
-    effectiveStillnessMs > state.stuckThresholdMs,
+    effectiveStillnessMs > stuckThresholdMs,
     now,
     SUSTAINED_EVIDENCE_MS
   );
@@ -141,7 +146,7 @@ export function isStuck(
  */
 export function evaluateFrame(
   frame: FeatureFrame,
-  archetype: 'CREATOR' | 'READER' | 'VIEWER',
+  _archetype: 'CREATOR' | 'READER' | 'VIEWER', // 目前判定只依赖 policy；archetype 保留在签名里供调用方/措辞层使用
   policy: SignalPolicy,
   ctx: SessionContext,
   state: BState,
