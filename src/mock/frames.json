@@ -187,7 +187,7 @@
     },
     {
       "id": 13,
-      "desc": "跟教程敲代码：视频↔IDE 交替（task_orbit）",  "_note": "but ide usually not a web tab how can we detect?",
+      "desc": "跟教程敲代码：视频↔IDE 交替（task_orbit）",  
       "archetype": "CREATOR",
       "graceUntil": 0,
       "steps": [
