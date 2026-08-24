@@ -1,0 +1,356 @@
+{
+  "note": "所有时间单位 ms，以会话开始 (sessionStart=0) 为基准。initialState 中的 *SinceOffset 字段表示：在 steps[0].now 之前多少 ms，对应持续器就已经开始计时（用于直接命中「证据已持续够久」的边界，等价于真实多帧推进后的状态，避免逐帧重放）。",
+  "scenarios": [
+    {
+      "id": 1,
+      "desc": "IDE↔docs↔AI↔SO 快切",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "steps": [
+        {
+          "now": 600000,
+          "frame": { "contextRelevance": "RELEVANT", "jumpPattern": "task_orbit", "texture": "purposeful", "currentDomain": "stackoverflow.com" },
+          "expectedAction": "DO_NOTHING"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "desc": "同页文献 20min（STUCK 已终态：15min 处已答“在专注”，阈值升到 20min，此刻未答未答的净时长只有 5min）",
+      "archetype": "READER",
+      "graceUntil": 0,
+      "initialState": { "stuckLadderIndex": 1, "stuckThresholdMs": 1200000, "lastAnswerTs": 900000 },
+      "steps": [
+        {
+          "now": 1200000,
+          "frame": { "contextRelevance": "RELEVANT", "texture": "idle", "stillnessMs": 1200000, "currentContentKind": "pdf" },
+          "expectedAction": "DO_NOTHING"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "desc": "youtube 娱乐 + 锚点脱离 10min + 被动刷（分三帧展示证据从 0 累积到触发）",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "steps": [
+        {
+          "now": 600000,
+          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 610000, "texture": "passive", "currentDomain": "youtube.com" },
+          "expectedAction": "DO_NOTHING",
+          "note": "证据刚出现，passiveSince/driftSustainer 都刚起计时"
+        },
+        {
+          "now": 665000,
+          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 675000, "texture": "passive", "currentDomain": "youtube.com" },
+          "expectedAction": "DO_NOTHING",
+          "note": "65s：连续 passive 段刚过 60s 门槛，textureEvidence 才变 true，driftSustainer 才开始计时"
+        },
+        {
+          "now": 696000,
+          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 706000, "texture": "passive", "currentDomain": "youtube.com" },
+          "expectedAction": "CHECK_IN_DRIFT",
+          "note": "距上一帧 31s，driftSustainer 的 30s 持续窗口满足"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "desc": "答“我在查资料”→白名单命中，A 侧已将 contextRelevance 短路为 RELEVANT",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "steps": [
+        {
+          "now": 600000,
+          "frame": { "contextRelevance": "RELEVANT", "currentDomain": "zhihu.com", "currentContentKind": "article" },
+          "expectedAction": "DO_NOTHING",
+          "note": "sessionWhitelist 短路发生在 A 的感知半；B 只需确认收到 RELEVANT 后不触发"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "desc": "开场 2min 内切到无关域（宽限期兜住）",
+      "archetype": "CREATOR",
+      "graceUntil": 120000,
+      "steps": [
+        {
+          "now": 60000,
+          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 500000, "texture": "passive", "currentDomain": "weibo.com" },
+          "expectedAction": "DO_NOTHING",
+          "note": "now < graceUntil，双通道公共闸口直接拦下"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "desc": "文献静止 10min（READER 首个阶梯 10min）",
+      "archetype": "READER",
+      "graceUntil": 0,
+      "steps": [
+        {
+          "now": 600001,
+          "frame": { "contextRelevance": "RELEVANT", "texture": "idle", "stillnessMs": 600001, "currentContentKind": "pdf" },
+          "expectedAction": "DO_NOTHING",
+          "note": "刚越过阈值，stuckSustainer 刚起计时"
+        },
+        {
+          "now": 631001,
+          "frame": { "contextRelevance": "RELEVANT", "texture": "idle", "stillnessMs": 631001, "currentContentKind": "pdf" },
+          "expectedAction": "CHECK_IN_STUCK",
+          "note": "31s 后 stuckSustainer 满足 30s 持续窗口"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "desc": "答“在专注”→阈值升到 20min，此刻 15min，未到新阈值",
+      "archetype": "READER",
+      "graceUntil": 0,
+      "initialState": { "stuckLadderIndex": 1, "stuckThresholdMs": 1200000, "lastAnswerTs": 650000 },
+      "steps": [
+        {
+          "now": 1550000,
+          "frame": { "contextRelevance": "RELEVANT", "texture": "idle", "stillnessMs": 900000, "currentContentKind": "pdf" },
+          "expectedAction": "DO_NOTHING"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "desc": "YT 搜索进教程 + 暂停/回拖（学习式观看签名）",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "steps": [
+        {
+          "now": 600000,
+          "frame": { "contextRelevance": "RELEVANT", "texture": "purposeful", "jumpPattern": "task_orbit", "currentDomain": "youtube.com", "currentContentKind": "video" },
+          "expectedAction": "DO_NOTHING"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "desc": "YT 首页连播 + 锚点脱离 12min",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "initialState": { "driftSustainerSinceOffset": 31000, "passiveSinceOffset": 61000 },
+      "steps": [
+        {
+          "now": 720000,
+          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 720000, "texture": "passive", "currentDomain": "youtube.com" },
+          "expectedAction": "CHECK_IN_DRIFT"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "desc": "Shorts 流 + 锚点抛弃（contentFormat 硬判分支，跳过 contextRelevance 判断）",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "initialState": { "driftSustainerSinceOffset": 31000 },
+      "steps": [
+        {
+          "now": 600000,
+          "frame": { "contentFormat": "short_feed", "anchorDetachedMs": 540000, "currentDomain": "youtube.com", "currentContentKind": "short_feed" },
+          "expectedAction": "CHECK_IN_DRIFT"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "desc": "网课 40min 连续观看（VIEWER，锚点内）",
+      "archetype": "VIEWER",
+      "graceUntil": 0,
+      "steps": [
+        {
+          "now": 2400000,
+          "frame": { "contextRelevance": "RELEVANT", "texture": "passive", "anchorDetachedMs": 0, "currentDomain": "coursera.org", "currentContentKind": "video" },
+          "expectedAction": "DO_NOTHING"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "desc": "网课连播翻转到无关（VIEWER，anchorDetachedThresholdMs 降级为充分条件，feed_driven 加速器 15s 生效）",
+      "archetype": "VIEWER",
+      "graceUntil": 0,
+      "initialState": { "driftSustainerSinceOffset": 16000 },
+      "steps": [
+        {
+          "now": 120000,
+          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 120000, "entryIntent": "feed_driven", "texture": "passive", "currentDomain": "youtube.com" },
+          "expectedAction": "CHECK_IN_DRIFT",
+          "note": "anchorDetachedMs=2min 远低于 20min 阈值，但 mutePassiveTexture+feed_driven 组合已构成充分条件"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "desc": "跟教程敲代码：视频↔IDE 交替（task_orbit）",  "_note": "but ide usually not a web tab how can we detect?",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "steps": [
+        {
+          "now": 600000,
+          "frame": { "contextRelevance": "RELEVANT", "texture": "purposeful", "jumpPattern": "task_orbit" },
+          "expectedAction": "DO_NOTHING"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "desc": "CREATOR 静止：12min 未到阈值，15min31s 越过 15min 阈值并持续满 30s",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "steps": [
+        {
+          "now": 720000,
+          "frame": { "contextRelevance": "RELEVANT", "texture": "idle", "stillnessMs": 720000 },
+          "expectedAction": "DO_NOTHING",
+          "note": "12min < CREATOR 首阶梯 15min"
+        },
+        {
+          "now": 931000,
+          "frame": { "contextRelevance": "RELEVANT", "texture": "idle", "stillnessMs": 931000 },
+          "expectedAction": "CHECK_IN_STUCK",
+          "note": "15min31s，越过阈值且已持续 30s 以上（v4 CREATOR 阶梯首档=15min，与原始 v0 的 16min 数字不同，按 v4 校正）"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "desc": "课件滚动翻页精读（PASSIVE_SCROLL 命中锚点，anchorDetachedMs 随之归零）",
+      "archetype": "READER",
+      "graceUntil": 0,
+      "steps": [
+        {
+          "now": 600000,
+          "frame": { "contextRelevance": "RELEVANT", "texture": "passive", "anchorDetachedMs": 0, "currentContentKind": "pdf" },
+          "expectedAction": "DO_NOTHING"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "desc": "系列课连播 Lecture5→6，anchor.matchMode='prefix' 命中同播放列表，不计入 anchorDetachedMs",
+      "archetype": "VIEWER",
+      "graceUntil": 0,
+      "steps": [
+        {
+          "now": 600000,
+          "frame": { "contextRelevance": "RELEVANT", "texture": "passive", "anchorDetachedMs": 0, "currentDomain": "coursera.org", "currentContentKind": "video" },
+          "expectedAction": "DO_NOTHING"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "desc": "答“飘了”后微重启执行期：lastAnswerTs + 持续器重置 + 冷却三重兜底，此刻仍在 5min 冷却内",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "initialState": { "lastCheckInTs": 60000, "driftSustainerSinceOffset": 31000, "passiveSinceOffset": 61000 },
+      "steps": [
+        {
+          "now": 120000,
+          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 600000, "texture": "passive", "currentDomain": "youtube.com" },
+          "expectedAction": "DO_NOTHING",
+          "note": "now-lastCheckInTs=60s < 300s 冷却，即便证据齐全也被冷却闸门拦下"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "desc": "用户主动点“休息”，双通道全静默",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "initialState": { "restUntil": 1800000, "driftSustainerSinceOffset": 31000, "stuckSustainerSinceOffset": 31000 },
+      "steps": [
+        {
+          "now": 600000,
+          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 600000, "texture": "idle", "stillnessMs": 600000 },
+          "expectedAction": "DO_NOTHING",
+          "note": "restUntil=1800000 > now=600000，两条通道第一行就短路返回 false"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "desc": "断网：知乎某帖分类失败，contextRelevance=UNKNOWN（保守）",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "steps": [
+        {
+          "now": 600000,
+          "frame": { "contextRelevance": "UNKNOWN", "anchorDetachedMs": 900000, "texture": "passive", "currentDomain": "zhihu.com" },
+          "expectedAction": "DO_NOTHING",
+          "note": "UNKNOWN 永远不推动 DRIFT，即便时长很长"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "desc": "手滑误入 youtube，3s 内切回（短停豁免，task_orbit）",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "steps": [
+        {
+          "now": 600000,
+          "frame": { "contextRelevance": "RELEVANT", "jumpPattern": "task_orbit" },
+          "expectedAction": "DO_NOTHING"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "desc": "CREATOR 打字型走神：飘到微信 10min 打字聊天。A 侧已按 v4 规则把 IRRELEVANT 页上的 ACTIVE_INPUT 降级，texture 不会被误判成 purposeful",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "initialState": { "driftSustainerSinceOffset": 31000, "passiveSinceOffset": 61000 },
+      "steps": [
+        {
+          "now": 600000,
+          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 600000, "texture": "passive", "currentDomain": "weixin.qq.com", "currentContentKind": "social_feed" },
+          "expectedAction": "CHECK_IN_DRIFT",
+          "note": "关键验证点：texture 必须是 passive/idle 而不是 purposeful，否则会被误判为 DO_NOTHING——这条盲区修复的责任在 A，B 这里只是确认收到正确 texture 后行为正确"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "desc": "DEMO 模式：youtube 娱乐视频，时间压缩 120x，4s 内触发 check-in",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "demoMode": true,
+      "initialState": { "driftSustainerSinceOffset": 251, "passiveSinceOffset": 501 },
+      "steps": [
+        {
+          "now": 4001,
+          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 4001, "texture": "passive", "currentDomain": "youtube.com" },
+          "expectedAction": "CHECK_IN_DRIFT",
+          "note": "scaled(8min)=4000ms，scaled(30s)=250ms，scaled(60s)=500ms，全部在 <5000ms 内完成"
+        }
+      ]
+    }
+  ],
+  "metaScenarios": {
+    "22": {
+      "desc": "无起步教练默认策略：自动推断锚点 + CREATOR 默认，基础陪伴可用",
+      "checks": [
+        "defaultSessionContext(...).profile.archetype === 'CREATOR'",
+        "defaultSessionContext(...).graceUntil === now + 120000",
+        "defaultSessionContext(...).anchor.matchMode === 'exact'",
+        "validatePolicy 对空 stuckLadderMs / 非法 anchorDetachedThresholdMs 有兜底默认值"
+      ]
+    },
+    "23": {
+      "desc": "休息模式无人应答：15min 首次轻声提醒，之后每 5min 重复（20min/25min...）",
+      "checks": [
+        "restReminderDue(state, restStartTs + 15min) === true",
+        "restReminderDue(state, restStartTs + 20min) === true",
+        "restReminderDue(state, restStartTs + 17min) === false",
+        "这是独立于 DRIFT/STUCK 的第三条提醒逻辑，不产出 DetectionResult.action，只产出 UI 侧的轻声提醒事件"
+      ]
+    }
+  }
+}
