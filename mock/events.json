@@ -241,6 +241,53 @@
         { "timestamp": 180000, "domain": "stackoverflow.com", "url": "https://stackoverflow.com/q/123", "title": "useEffect infinite loop", "contentKind": "code", "isAnchor": false, "interactionType": "PASSIVE_SCROLL", "entryIntent": "search", "systemIdle": false },
         { "timestamp": 240000, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "app.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false }
       ]
+    },
+    {
+      "id": 21,
+      "name": "CREATOR · 打字型走神：飘到微信网页版 10min 打字聊天 → CHECK_IN_DRIFT（v4 盲区修复）",
+      "profile": "CREATOR",
+      "expectedAction": "CHECK_IN_DRIFT",
+      "_note": "v4：contextRelevance=IRRELEVANT 时 ACTIVE_INPUT 不升级 texture→保持在 passive（解决你#5）",
+      "events": [
+        { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "app.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 60000, "domain": "web.wechat.com", "url": "https://web.wechat.com/chat", "title": "微信群聊", "contentKind": "social_feed", "isAnchor": false, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 300000, "domain": "web.wechat.com", "url": "https://web.wechat.com/chat", "title": "微信群聊", "contentKind": "social_feed", "isAnchor": false, "interactionType": "ACTIVE_INPUT", "entryIntent": "unknown", "systemIdle": false },
+        { "timestamp": 660000, "domain": "web.wechat.com", "url": "https://web.wechat.com/chat", "title": "微信群聊", "contentKind": "social_feed", "isAnchor": false, "interactionType": "ACTIVE_INPUT", "entryIntent": "unknown", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 22,
+      "name": "无起步教练 · 用户跳过声明直接工作 → 自动推断锚点 + CREATOR 默认",
+      "profile": "CREATOR",
+      "expectedAction": "DO_NOTHING",
+      "_note": "v4 默认策略：无 SessionContext→默认 CREATOR policy + 活跃最久 tab 自动推断锚点 + graceUntil=2min",
+      "events": [
+        { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "app.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 60000, "domain": "react.dev", "url": "https://react.dev/reference/hooks", "title": "Hooks Reference", "contentKind": "docs", "isAnchor": false, "interactionType": "PASSIVE_SCROLL", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 180000, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "app.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 23,
+      "name": "休息模式 · 15min 提醒无人应答 → 20min、25min 重复提醒",
+      "profile": "CREATOR",
+      "expectedAction": "DO_NOTHING",
+      "_note": "v4 休息修订：首次 15min 提醒，之后每 5min 重复，直到用户回来点「继续专注」或「结束专注」",
+      "events": [
+        { "timestamp": 0, "domain": "weibo.com", "url": "https://weibo.com/hot", "title": "热搜", "contentKind": "social_feed", "isAnchor": false, "interactionType": "PASSIVE_SCROLL", "entryIntent": "direct_link", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 24,
+      "name": "DEMO 模式 · youtube 娱乐视频 4s 触发 CHECK_IN_DRIFT（时间压缩 120x）",
+      "profile": "CREATOR",
+      "expectedAction": "CHECK_IN_DRIFT",
+      "_note": "v4 DEMO_MODE：TIME_SCALE=1/120，anchorDetachedThresholdMs=8min→4s，SUSTAINED_EVIDENCE=30s→250ms；从切到 youtube 到 check-in ≤5 秒",
+      "events": [
+        { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 1000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false },
+        { "timestamp": 5000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false }
+      ]
     }
   ]
 }
