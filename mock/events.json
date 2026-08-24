@@ -1,0 +1,246 @@
+{
+  "_meta": {
+    "schema": "SignalEvent[] per scenario（见 docs/契约v3.md §2）",
+    "convention": "timestamp 为相对毫秒（场景起点=0）；时长用真实毫秒（10min=600000），测试时按场景压缩比例由 A 感知半单测自行处理；systemIdle 为事件发生时快照",
+    "anchorConvention": "isAnchor=true 标记锚点页事件；VIEWER 画像锚点=课程视频页本身"
+  },
+  "scenarios": [
+    {
+      "id": 1,
+      "name": "CREATOR · IDE↔docs↔AI↔SO 疯狂快切（全相关域）→ 全程 DO_NOTHING",
+      "profile": "CREATOR",
+      "expectedAction": "DO_NOTHING",
+      "events": [
+        { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 45000, "domain": "react.dev", "url": "https://react.dev/reference/hooks", "title": "Hooks Reference", "contentKind": "docs", "isAnchor": false, "interactionType": "PASSIVE_SCROLL", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 90000, "domain": "claude.ai", "url": "https://claude.ai/chat/abc", "title": "debug login flow", "contentKind": "ai_chat", "isAnchor": false, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 150000, "domain": "stackoverflow.com", "url": "https://stackoverflow.com/q/123", "title": "useEffect infinite loop", "contentKind": "code", "isAnchor": false, "interactionType": "PASSIVE_SCROLL", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 200000, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 260000, "domain": "react.dev", "url": "https://react.dev/reference/hooks", "title": "Hooks Reference", "contentKind": "docs", "isAnchor": false, "interactionType": "ACTIVE_INPUT", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 320000, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "READER · 同页文献 20min 没切没动（STUCK 阶梯已静音后）→ DO_NOTHING",
+      "profile": "READER",
+      "expectedAction": "DO_NOTHING",
+      "_note": "衔接场景6/7：用户已两次答「在专注」，stuckThresholdMs=Infinity",
+      "events": [
+        { "timestamp": 0, "domain": "arxiv.org", "url": "https://arxiv.org/pdf/2301.00001", "title": "Attention Is All You Need", "contentKind": "pdf", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 1200000, "domain": "arxiv.org", "url": "https://arxiv.org/pdf/2301.00001", "title": "Attention Is All You Need", "contentKind": "pdf", "isAnchor": true, "interactionType": "IDLE", "entryIntent": "unknown", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "CREATOR · 飘到 youtube 娱乐视频 + 锚点 10min 没碰 + 被动刷 → CHECK_IN_DRIFT",
+      "profile": "CREATOR",
+      "expectedAction": "CHECK_IN_DRIFT",
+      "events": [
+        { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 30000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false },
+        { "timestamp": 240000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun456", "title": "Best Fails Compilation", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "autoplay", "systemIdle": false },
+        { "timestamp": 630000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun789", "title": "Try Not To Laugh", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "autoplay", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "CREATOR · 答「我在查资料」→ 该域进白名单，此后不报 → DO_NOTHING",
+      "profile": "CREATOR",
+      "expectedAction": "DO_NOTHING",
+      "_note": "前置：场景3的 CHECK_IN 用户答「我在查资料」，youtube.com/watch?v=fun123 进 sessionWhitelist；本场景验证白名单短路",
+      "events": [
+        { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 60000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "任意画像 · 开场 2min 就切无关域 → DO_NOTHING（宽限期）",
+      "profile": "CREATOR",
+      "expectedAction": "DO_NOTHING",
+      "events": [
+        { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 120000, "domain": "weibo.com", "url": "https://weibo.com/hot", "title": "热搜", "contentKind": "social_feed", "isAnchor": false, "interactionType": "PASSIVE_SCROLL", "entryIntent": "direct_link", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "READER · 文献页静止 10min（系统非 idle）→ CHECK_IN_STUCK",
+      "profile": "READER",
+      "expectedAction": "CHECK_IN_STUCK",
+      "events": [
+        { "timestamp": 0, "domain": "arxiv.org", "url": "https://arxiv.org/pdf/2301.00001", "title": "Attention Is All You Need", "contentKind": "pdf", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 600001, "domain": "arxiv.org", "url": "https://arxiv.org/pdf/2301.00001", "title": "Attention Is All You Need", "contentKind": "pdf", "isAnchor": true, "interactionType": "IDLE", "entryIntent": "unknown", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "READER · 答「在专注」后阈值升 20min，15min 静止 → DO_NOTHING",
+      "profile": "READER",
+      "expectedAction": "DO_NOTHING",
+      "_note": "前置：场景6的 STUCK 用户答「在专注」，stuckThresholdMs 10min→20min",
+      "events": [
+        { "timestamp": 0, "domain": "arxiv.org", "url": "https://arxiv.org/pdf/2301.00001", "title": "Attention Is All You Need", "contentKind": "pdf", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 900000, "domain": "arxiv.org", "url": "https://arxiv.org/pdf/2301.00001", "title": "Attention Is All You Need", "contentKind": "pdf", "isAnchor": true, "interactionType": "IDLE", "entryIntent": "unknown", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "CREATOR · YouTube 搜索进教程 + 频繁暂停/回拖 → DO_NOTHING",
+      "profile": "CREATOR",
+      "expectedAction": "DO_NOTHING",
+      "events": [
+        { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 60000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=reacthooks", "title": "React Hooks Tutorial 2026", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 180000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=reacthooks", "title": "React Hooks Tutorial 2026", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PAUSE", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 200000, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 300000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=reacthooks", "title": "React Hooks Tutorial 2026", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_SEEK", "entryIntent": "search", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "CREATOR · YouTube 首页连播 + 锚点 12min 没碰 → CHECK_IN_DRIFT",
+      "profile": "CREATOR",
+      "expectedAction": "CHECK_IN_DRIFT",
+      "events": [
+        { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 90000, "domain": "youtube.com", "url": "https://www.youtube.com/", "title": "YouTube 首页", "contentKind": "social_feed", "isAnchor": false, "interactionType": "PASSIVE_SCROLL", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 150000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=rec001", "title": "推荐：搞笑合集", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false },
+        { "timestamp": 500000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=rec002", "title": "自动连播：街头魔术", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "autoplay", "systemIdle": false },
+        { "timestamp": 810000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=rec003", "title": "自动连播：猫咪视频", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "autoplay", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "任意画像 · Shorts 流 + 锚点抛弃 → CHECK_IN_DRIFT（形态硬判）",
+      "profile": "CREATOR",
+      "expectedAction": "CHECK_IN_DRIFT",
+      "events": [
+        { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 100000, "domain": "youtube.com", "url": "https://www.youtube.com/shorts/abc123", "title": "编程小技巧 shorts", "contentKind": "short_feed", "isAnchor": false, "interactionType": "PASSIVE_SCROLL", "entryIntent": "feed", "systemIdle": false },
+        { "timestamp": 620000, "domain": "youtube.com", "url": "https://www.youtube.com/shorts/def456", "title": "shorts 连刷", "contentKind": "short_feed", "isAnchor": false, "interactionType": "PASSIVE_SCROLL", "entryIntent": "autoplay", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 11,
+      "name": "VIEWER · 网课视频 40min 连续观看无操作 → DO_NOTHING（被动纹理被 policy 静音）",
+      "profile": "VIEWER",
+      "expectedAction": "DO_NOTHING",
+      "_note": "VIEWER 画像锚点=课程视频页本身；MEDIA_PAUSE/SEEK 会归零 anchorDetachedMs，本场景故意全程 PLAY 验证静音逻辑",
+      "events": [
+        { "timestamp": 0, "domain": "coursera.org", "url": "https://www.coursera.org/learn/ml/lecture/abc", "title": "Machine Learning Week 3 Lecture", "contentKind": "video", "isAnchor": true, "interactionType": "MEDIA_PLAY", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 1200000, "domain": "coursera.org", "url": "https://www.coursera.org/learn/ml/lecture/abc", "title": "Machine Learning Week 3 Lecture", "contentKind": "video", "isAnchor": true, "interactionType": "MEDIA_PLAY", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 2400000, "domain": "coursera.org", "url": "https://www.coursera.org/learn/ml/lecture/abc", "title": "Machine Learning Week 3 Lecture", "contentKind": "video", "isAnchor": true, "interactionType": "MEDIA_PLAY", "entryIntent": "direct_link", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 12,
+      "name": "VIEWER · 网课自动连播翻转到无关视频 → CHECK_IN_DRIFT（锚点降级路径）",
+      "profile": "VIEWER",
+      "expectedAction": "CHECK_IN_DRIFT",
+      "_note": "锚点未超 20min，但 mutePassiveTexture=true 且 entryIntent=feed_driven，走 VIEWER 降级路径",
+      "events": [
+        { "timestamp": 0, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=mlcourse1", "title": "MIT 6.006 Lecture 5: Sorting", "contentKind": "video", "isAnchor": true, "interactionType": "MEDIA_PLAY", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 600000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=xyz999", "title": "自动连播：极限运动集锦", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "autoplay", "systemIdle": false },
+        { "timestamp": 900000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=xyz998", "title": "自动连播：美食探店", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "autoplay", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 13,
+      "name": "CREATOR · 跟教程敲代码：视频页与 IDE 来回切 → DO_NOTHING",
+      "profile": "CREATOR",
+      "expectedAction": "DO_NOTHING",
+      "events": [
+        { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "app.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 60000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=reacthooks", "title": "React Hooks Tutorial 2026", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 240000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=reacthooks", "title": "React Hooks Tutorial 2026", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PAUSE", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 260000, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "app.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 420000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=reacthooks", "title": "React Hooks Tutorial 2026", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_SEEK", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 440000, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "app.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 14,
+      "name": "CREATOR · 编程中静止思考 12min 不问（<15min），16min 触发 → CHECK_IN_STUCK",
+      "profile": "CREATOR",
+      "expectedAction": "CHECK_IN_STUCK",
+      "_note": "CREATOR 阶梯首档 15min：12min 采样应 DO_NOTHING，16min 采样应 CHECK_IN_STUCK；单测需对两个时间点各断言一次",
+      "events": [
+        { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "hard-bug.ts", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 720000, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "hard-bug.ts", "contentKind": "code", "isAnchor": true, "interactionType": "IDLE", "entryIntent": "unknown", "systemIdle": false },
+        { "timestamp": 960001, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "hard-bug.ts", "contentKind": "code", "isAnchor": true, "interactionType": "IDLE", "entryIntent": "unknown", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 15,
+      "name": "READER · 网页课件滚动翻页精读 30min（v3.1 信号2 滚动归零）→ DO_NOTHING",
+      "profile": "READER",
+      "expectedAction": "DO_NOTHING",
+      "_note": "v3.1：PASSIVE_SCROLL 在锚点上归零 anchorDetachedMs——滚动翻页、前后呼应是正常专注学习行为",
+      "events": [
+        { "timestamp": 0, "domain": "course.edu.cn", "url": "https://course.edu.cn/slides/ch3", "title": "第3章课件 P1-20", "contentKind": "pdf", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 300000, "domain": "course.edu.cn", "url": "https://course.edu.cn/slides/ch3", "title": "第3章课件 P1-20", "contentKind": "pdf", "isAnchor": true, "interactionType": "PASSIVE_SCROLL", "entryIntent": "unknown", "systemIdle": false },
+        { "timestamp": 900000, "domain": "course.edu.cn", "url": "https://course.edu.cn/slides/ch3", "title": "第3章课件 P1-20", "contentKind": "pdf", "isAnchor": true, "interactionType": "PASSIVE_SCROLL", "entryIntent": "unknown", "systemIdle": false },
+        { "timestamp": 1800000, "domain": "course.edu.cn", "url": "https://course.edu.cn/slides/ch3", "title": "第3章课件 P1-20", "contentKind": "pdf", "isAnchor": true, "interactionType": "PASSIVE_SCROLL", "entryIntent": "unknown", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 16,
+      "name": "VIEWER · 系列课连播：Lecture5 看完自动进 Lecture6 → DO_NOTHING",
+      "profile": "VIEWER",
+      "expectedAction": "DO_NOTHING",
+      "_note": "锚点=课程系列前缀（同一播放列表）；连播视频经 LLM 判 RELEVANT，detachedMs 不因换视频累计",
+      "events": [
+        { "timestamp": 0, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=lec5&list=PLcourse", "title": "Lecture 5: Sorting", "contentKind": "video", "isAnchor": true, "interactionType": "MEDIA_PLAY", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 2700000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=lec6&list=PLcourse", "title": "Lecture 6: Trees", "contentKind": "video", "isAnchor": true, "interactionType": "MEDIA_PLAY", "entryIntent": "autoplay", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 17,
+      "name": "任意画像 · 答「飘了」→ 微重启执行期 40s 内 → DO_NOTHING（v3.1 反死循环）",
+      "profile": "CREATOR",
+      "expectedAction": "DO_NOTHING",
+      "_note": "前置：DRIFT check-in 用户答「飘了」，threshold 重置但条件仍成立；lastAnswerTs + sustained 30s + cooldown 三重兜底",
+      "events": [
+        { "timestamp": 0, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false },
+        { "timestamp": 40000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 18,
+      "name": "任意画像 · 用户主动进入休息模式 → 双通道全静默",
+      "profile": "CREATOR",
+      "expectedAction": "DO_NOTHING",
+      "_note": "B 侧 gate：restUntil > now 时双通道 return false；A 感知半照常上报 FeatureFrame",
+      "events": [
+        { "timestamp": 0, "domain": "weibo.com", "url": "https://weibo.com/hot", "title": "热搜", "contentKind": "social_feed", "isAnchor": false, "interactionType": "PASSIVE_SCROLL", "entryIntent": "direct_link", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 19,
+      "name": "断网 · LLM 失败，当前页为知乎某帖 → DO_NOTHING（UNKNOWN 保守）",
+      "profile": "READER",
+      "expectedAction": "DO_NOTHING",
+      "_note": "v3.1 优雅降级：LLM 失败只兜底娱乐域黑名单，混合站一律 UNKNOWN；Shorts 硬判（不依赖网络）继续生效",
+      "events": [
+        { "timestamp": 0, "domain": "zhihu.com", "url": "https://www.zhihu.com/question/123", "title": "如何理解注意力机制？", "contentKind": "article", "isAnchor": false, "interactionType": "PASSIVE_SCROLL", "entryIntent": "search", "systemIdle": false }
+      ]
+    },
+    {
+      "id": 20,
+      "name": "CREATOR · 手滑误入 youtube 3s 立即切回 IDE → DO_NOTHING（v3.2 手滑容忍+短停豁免）",
+      "profile": "CREATOR",
+      "expectedAction": "DO_NOTHING",
+      "_note": "v3.2：task_orbit 容忍 ≤1 个 IRRELEVANT 离群点；rabbit_hole 要求每个 IRRELEVANT 域停留 >10s——3s 误入即关被短停豁免",
+      "events": [
+        { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "app.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 60000, "domain": "react.dev", "url": "https://react.dev/reference/hooks", "title": "Hooks Reference", "contentKind": "docs", "isAnchor": false, "interactionType": "PASSIVE_SCROLL", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 120000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "HIDDEN", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 123000, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "app.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
+        { "timestamp": 180000, "domain": "stackoverflow.com", "url": "https://stackoverflow.com/q/123", "title": "useEffect infinite loop", "contentKind": "code", "isAnchor": false, "interactionType": "PASSIVE_SCROLL", "entryIntent": "search", "systemIdle": false },
+        { "timestamp": 240000, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "app.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false }
+      ]
+    }
+  ]
+}
