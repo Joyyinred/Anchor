@@ -153,3 +153,44 @@ export function createInitialBState(profile: 'CREATOR' | 'READER' | 'VIEWER'): B
     passiveSince: null,
   };
 }
+
+// ── 无起步教练时的默认策略（契约v4 §2「无起步教练时的默认策略」，场景22）──
+export const DEFAULT_GRACE_MS = 2 * 60_000; // graceUntil = now + 2分钟
+export const DEFAULT_TASK_DECLARATION = '未声明任务（默认陪伴模式）';
+
+// 自动推断出的锚点：来自 A 平台层「前两次 tab 切换后，当前活跃时长最久的 tab」这一推断结果。
+// 推断过程本身依赖多次 tab 切换事件的累计观察，不是纯函数，不适合放在决策半引擎里；
+// 这里只负责把推断结果组装进 SessionContext。
+export interface InferredAnchor {
+  domain: string;
+  url: string;
+}
+
+/**
+ * 用户跳过起步教练、直接开始工作时的兜底 SessionContext。
+ * - 默认画像 = CREATOR + 默认 policy（过 validatePolicy 兜底，防御性处理，防止预设被意外改坏）
+ * - 锚点 = 调用方传入的推断结果；调用方尚无法推断时（比如刚开始还没攒够 tab 切换样本）可不传，
+ *   此时锚点留空，等 A 侧推断出结果后由调用方另行更新 SessionContext.anchor
+ * - graceUntil = now + 2分钟
+ */
+export function defaultSessionContext(
+  now: number,
+  inferredAnchor: InferredAnchor = { domain: '', url: '' },
+  sessionId: string = `default-${now}`
+): SessionContext {
+  return {
+    sessionId,
+    taskDeclaration: DEFAULT_TASK_DECLARATION,
+    profile: {
+      archetype: 'CREATOR',
+      policy: validatePolicy({ ...PROFILE_PRESETS.CREATOR }),
+    },
+    anchor: {
+      domain: inferredAnchor.domain,
+      url: inferredAnchor.url,
+      matchMode: 'exact',
+    },
+    sessionWhitelist: [],
+    graceUntil: now + DEFAULT_GRACE_MS,
+  };
+}
