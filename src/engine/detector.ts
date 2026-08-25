@@ -141,6 +141,37 @@ export function isStuck(
   );
 }
 
+
+// ── 休息模式提醒（契约v4 §3.8，场景23）：独立于 DRIFT/STUCK 的第三条提醒逻辑 ──
+// 不产出 DetectionResult.action，只产出 UI 侧的轻声提醒事件；不经过公共闸口/持续器。
+export interface RestState {
+  restUntil: number;
+  restStartTs: number;
+}
+
+const REST_FIRST_REMINDER_MS = 15 * 60_000; // 首次轻声提醒：休息满 15 分钟
+const REST_REPEAT_REMINDER_MS = 5 * 60_000; // 之后每 5 分钟重复提醒，直到用户回来
+
+/**
+ * 用户主动点"休息"时创建 RestState：restUntil = now + 20min（契约v4 §3.8），
+ * 期间 isDrifting/isStuck 的公共闸口 `state.restUntil > now` 会让双通道全静默。
+ */
+export function createRestState(restStartTs: number): RestState {
+  return { restStartTs, restUntil: restStartTs + 20 * 60_000 };
+}
+
+/**
+ * 判断此刻是否该发一次"还在休息吗"的轻声提醒。
+ * 纯函数：只看 now 相对 restStartTs 的经过时长是否恰好落在提醒节拍（15/20/25...分钟）上。
+ * 注：真实系统里心跳节拍要与 restStartTs 对齐（休息开始时另起一个专属 alarm，而不是复用
+ * 全局 1 分钟心跳的任意相位）才能稳定命中整除点，这是已知的对齐假设，不是本函数要处理的问题。
+ */
+export function restReminderDue(state: Pick<RestState, 'restStartTs'>, now: number): boolean {
+  const elapsed = now - state.restStartTs;
+  if (elapsed < REST_FIRST_REMINDER_MS) return false;
+  return (elapsed - REST_FIRST_REMINDER_MS) % REST_REPEAT_REMINDER_MS === 0;
+}
+
 /**
  * 决策入口函数
  */
