@@ -75,4 +75,5 @@ complete A1234（A1 平台预研 + A2 分类黑白名单 + A3 扩展骨架 + A4 
     - `npm run dev`：`vite`，CRXJS 开发模式（带 HMR）。
     - `npm run typecheck:engine`：`tsc -p tsconfig.engine.json --noEmit`，验证 `src/engine` 零 chrome 依赖。
     - `npm run typecheck:platform`：`tsc -p tsconfig.platform.json --noEmit`，验证平台层类型正确。
+6. New Branch 'J4' is for integrating A,B's jobs when A7, B4 are completed. A will work on personal brance 'A7' before merging to J4. B is suggested to create own branch 'B4' and work on B1-B4 before merging to J4.
 
