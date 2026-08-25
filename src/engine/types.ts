@@ -92,6 +92,21 @@ export interface DetectionResult {
   currentTitle: string;
 }
 
+// ── CheckInFeedback：用户对一次 check-in 的回答（B2 自适应退让的输入，分工v2 §2 B 职责）──
+// channel 记录这次 check-in 是哪个通道触发的，决定 answer 该怎么解读：
+//   STUCK + FOCUSED       → "在专注"：阶梯往上走一格（契约v4 §3.6）
+//   STUCK + DRIFTED       → "飘了"：微重启，阶梯重置回第 0 格
+//   DRIFT + DRIFTED       → "飘了"：微重启，不涉及阶梯（DRIFT 没有阶梯概念）
+//   DRIFT + FALSE_POSITIVE→ "我在查资料"/"没有"：误判，调用方另行把 domain 写进
+//                           SessionContext.sessionWhitelist（不是 BState 字段，这里不管）
+export type CheckInChannel = 'DRIFT' | 'STUCK';
+export type CheckInAnswer = 'FOCUSED' | 'DRIFTED' | 'FALSE_POSITIVE';
+
+export interface CheckInFeedback {
+  channel: CheckInChannel;
+  answer: CheckInAnswer;
+}
+
 // ── B 内部持久化状态（契约v4 §3.1）──
 export interface BStatePersistable {
   stuckThresholdMs: number;
