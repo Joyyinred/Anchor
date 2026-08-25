@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.engine.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "types": ["chrome"]
+  },
+  "include": ["src/platform", "src/sidepanel"]
+}

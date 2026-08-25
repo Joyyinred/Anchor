@@ -51,6 +51,94 @@ describe('resolveContextRelevance (signal 1)', () => {
     expect(resolveContextRelevance(event, ctx, new Map())).toBe('UNKNOWN');
   });
 
+  it('built-in entertainment blacklist hard-rules IRRELEVANT (A2 兜底表)', () => {
+    const ctx = mkCtx();
+    const event: SignalEvent = { ...anchorEvent, domain: 'douyin.com', url: 'https://www.douyin.com/video/123', contentKind: 'video', isAnchor: false };
+    expect(resolveContextRelevance(event, ctx, new Map())).toBe('IRRELEVANT');
+  });
+
+  it('newly added blacklist domains (netflix/hulu/disneyplus) resolve IRRELEVANT', () => {
+    const ctx = mkCtx();
+    for (const domain of ['netflix.com', 'hulu.com', 'disneyplus.com']) {
+      const event: SignalEvent = { ...anchorEvent, domain, url: `https://${domain}/watch`, contentKind: 'video', isAnchor: false };
+      expect(resolveContextRelevance(event, ctx, new Map())).toBe('IRRELEVANT');
+    }
+  });
+
+  it('x/facebook/pinterest are mixed sites, not blacklisted — fall through to UNKNOWN like youtube/zhihu', () => {
+    const ctx = mkCtx();
+    for (const domain of ['x.com', 'facebook.com', 'pinterest.com']) {
+      const event: SignalEvent = { ...anchorEvent, domain, url: `https://${domain}/some-post`, contentKind: 'social_feed', isAnchor: false };
+      expect(resolveContextRelevance(event, ctx, new Map())).toBe('UNKNOWN');
+    }
+  });
+
+  it('shopping/ticketing aggregator domains hard-rule IRRELEVANT (head platforms, bounded list)', () => {
+    const ctx = mkCtx();
+    const domains = [
+      'taobao.com', 'tmall.com', 'jd.com', 'amazon.com',
+      'ctrip.com', '12306.cn', 'ticketmaster.com', 'booking.com', 'getyourguide.com',
+      'zalando.com', 'temu.com',
+    ];
+    for (const domain of domains) {
+      const event: SignalEvent = { ...anchorEvent, domain, url: `https://${domain}/order`, contentKind: 'unknown', isAnchor: false };
+      expect(resolveContextRelevance(event, ctx, new Map())).toBe('IRRELEVANT');
+    }
+  });
+
+  it('sessionWhitelist can recover a shopping-domain false positive (declared task genuinely involves buying something)', () => {
+    const ctx = mkCtx({ sessionWhitelist: ['jd.com'] });
+    const event: SignalEvent = { ...anchorEvent, domain: 'jd.com', url: 'https://jd.com/product/monitor', contentKind: 'unknown', isAnchor: false };
+    expect(resolveContextRelevance(event, ctx, new Map())).toBe('RELEVANT');
+  });
+
+  it('browser mini-game sites hard-rule IRRELEVANT (poki/crazygames/miniclip/y8/addictinggames)', () => {
+    const ctx = mkCtx();
+    const domains = ['poki.com', 'crazygames.com', 'miniclip.com', 'y8.com', 'addictinggames.com'];
+    for (const domain of domains) {
+      const event: SignalEvent = { ...anchorEvent, domain, url: `https://${domain}/game/some-game`, contentKind: 'unknown', isAnchor: false };
+      expect(resolveContextRelevance(event, ctx, new Map())).toBe('IRRELEVANT');
+    }
+  });
+
+  it('brand storefront long-tail (nike/adidas/zara) is NOT blacklisted — unbounded domain space, left to LLM/UNKNOWN', () => {
+    const ctx = mkCtx();
+    for (const domain of ['nike.com', 'adidas.com', 'zara.com']) {
+      const event: SignalEvent = { ...anchorEvent, domain, url: `https://${domain}/product/123`, contentKind: 'unknown', isAnchor: false };
+      expect(resolveContextRelevance(event, ctx, new Map())).toBe('UNKNOWN');
+    }
+  });
+
+  it('sessionWhitelist overrides the blacklist (whitelist takes priority)', () => {
+    const ctx = mkCtx({ sessionWhitelist: ['netflix.com'] });
+    const event: SignalEvent = { ...anchorEvent, domain: 'netflix.com', url: 'https://netflix.com/watch/documentary', contentKind: 'video', isAnchor: false };
+    expect(resolveContextRelevance(event, ctx, new Map())).toBe('RELEVANT');
+  });
+
+  it('blacklist matches real-world www./subdomain hostnames, not just the bare registered domain', () => {
+    const ctx = mkCtx();
+    const event: SignalEvent = { ...anchorEvent, domain: 'www.taobao.com', url: 'https://www.taobao.com/item', contentKind: 'unknown', isAnchor: false };
+    expect(resolveContextRelevance(event, ctx, new Map())).toBe('IRRELEVANT');
+  });
+
+  it('demo preset cache matches www./subdomain hostnames', () => {
+    const ctx = mkCtx();
+    const event: SignalEvent = { ...anchorEvent, domain: 'www.github.com', url: 'https://www.github.com/anthropics', isAnchor: false };
+    expect(resolveContextRelevance(event, ctx, new Map())).toBe('RELEVANT');
+  });
+
+  it('sessionWhitelist domain entry matches www./subdomain hostnames', () => {
+    const ctx = mkCtx({ sessionWhitelist: ['netflix.com'] });
+    const event: SignalEvent = { ...anchorEvent, domain: 'www.netflix.com', url: 'https://www.netflix.com/watch/documentary', contentKind: 'video', isAnchor: false };
+    expect(resolveContextRelevance(event, ctx, new Map())).toBe('RELEVANT');
+  });
+
+  it('subdomain matching respects the dot boundary — notdouyin.com is NOT douyin.com', () => {
+    const ctx = mkCtx();
+    const event: SignalEvent = { ...anchorEvent, domain: 'notdouyin.com', url: 'https://notdouyin.com/page', contentKind: 'unknown', isAnchor: false };
+    expect(resolveContextRelevance(event, ctx, new Map())).toBe('UNKNOWN');
+  });
+
   it('LLM classification cache resolves once populated (Day6 hook point)', () => {
     const ctx = mkCtx();
     const event: SignalEvent = { ...anchorEvent, domain: 'youtube.com', url: 'https://www.youtube.com/watch?v=fun123', isAnchor: false };

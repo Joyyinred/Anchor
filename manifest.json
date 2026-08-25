@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Anchor",
+  "version": "0.1.0",
+  "description": "A focus companion that notices when you drift and gently pulls you back.",
+  "permissions": ["tabs", "idle", "storage", "alarms", "webNavigation", "sidePanel"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "src/platform/background/index.ts",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/platform/content/content-script.ts"],
+      "run_at": "document_idle"
+    }
+  ]
+}

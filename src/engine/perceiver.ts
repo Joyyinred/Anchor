@@ -30,12 +30,40 @@ export const DEMO_PRESET_CACHE: Record<string, ContextRelevance> = {
   'weibo.com': 'IRRELEVANT',
 };
 
-// 内置纯娱乐域黑名单（§1 信号1：不含 youtube/bilibili 等学习+娱乐混合站，那些走 LLM 内容级分类）
+// 内置纯娱乐/购物/票务/网页游戏域黑名单（§1 信号1：不含 youtube/bilibili/reddit/x/facebook/pinterest 等
+// 学习+娱乐混合站——那些站点内容形态因页面而异，域级拉黑会误伤真正相关的用法，一律走 LLM 内容级分类）
+// 购物/票务站（淘宝/京东/Amazon/携程/12306/Ticketmaster/booking/getyourguide/zalando/temu）+
+// 网页小游戏站（poki/crazygames/miniclip/y8/addictinggames）纳入本表：
+// 误判概率极小（内容同质、纯被动/摸鱼消费，几乎不会是任务相关场景），即使误判，用户也能通过 sessionWhitelist
+// 手动申诉纠正（见本文件底部优先级说明），成本可控。
+// 注意：只收纳数量有限、体量巨大的头部聚合平台——不收纳品牌官网长尾（Nike/Adidas/Zara 等数量不可枚举，
+// 且相关性依赖具体任务声明，交给 LLM 内容级分类兜底，见 docs/分类prompt-v0.md §3.2）
 export const BUILTIN_ENTERTAINMENT_BLACKLIST = new Set<string>([
   'douyin.com',
   'xiaohongshu.com',
   'tiktok.com',
   'instagram.com',
+  'kuaishou.com',
+  'snapchat.com',
+  'netflix.com',
+  'hulu.com',
+  'disneyplus.com',
+  'taobao.com',
+  'tmall.com',
+  'jd.com',
+  'amazon.com',
+  'ctrip.com',
+  '12306.cn',
+  'ticketmaster.com',
+  'booking.com',
+  'getyourguide.com',
+  'zalando.com',
+  'temu.com',
+  'poki.com',
+  'crazygames.com',
+  'miniclip.com',
+  'y8.com',
+  'addictinggames.com',
 ]);
 
 // 域名分类缓存：cacheKey(domain+pathPattern) -> 分类结果
@@ -57,6 +85,13 @@ export function cacheKey(domain: string, url: string): string {
   return `${domain}${pathPattern(url)}`;
 }
 
+// 真实 SignalEvent.domain 来自 URL.hostname（见 src/platform/background 的 domainOf()），
+// 绝大多数真实流量带 www./m. 等子域前缀，而下面三张表只登记裸域名——必须按"同域或其子域"匹配，
+// 不能用精确相等，否则 www.taobao.com 匹配不到表里的 taobao.com（黑名单/白名单/预置缓存全部失效）。
+function domainMatches(domain: string, registered: string): boolean {
+  return domain === registered || domain.endsWith(`.${registered}`);
+}
+
 /**
  * 信号 1：上下文相关性
  * 短路优先级（§1）：演示域预置缓存 > sessionWhitelist > short_feed 硬判 > 内置娱乐黑名单 > LLM 分类缓存 > UNKNOWN
@@ -66,16 +101,21 @@ export function resolveContextRelevance(
   ctx: SessionContext,
   cache: ClassificationCache
 ): ContextRelevance {
-  if (event.domain in DEMO_PRESET_CACHE) return DEMO_PRESET_CACHE[event.domain];
+  const presetMatch = Object.entries(DEMO_PRESET_CACHE).find(([registered]) =>
+    domainMatches(event.domain, registered)
+  );
+  if (presetMatch) return presetMatch[1];
 
   const key = cacheKey(event.domain, event.url);
-  if (ctx.sessionWhitelist.includes(event.domain) || ctx.sessionWhitelist.includes(key)) {
+  const domainWhitelisted = ctx.sessionWhitelist.some((w) => domainMatches(event.domain, w));
+  if (domainWhitelisted || ctx.sessionWhitelist.includes(key)) {
     return 'RELEVANT';
   }
 
   if (event.contentKind === 'short_feed') return 'IRRELEVANT';
 
-  if (BUILTIN_ENTERTAINMENT_BLACKLIST.has(event.domain)) return 'IRRELEVANT';
+  const blacklisted = [...BUILTIN_ENTERTAINMENT_BLACKLIST].some((d) => domainMatches(event.domain, d));
+  if (blacklisted) return 'IRRELEVANT';
 
   // entryIntent === purposeful 时即使判不出也不升级为 IRRELEVANT——本实现天然满足：
   // 未命中缓存时统一落到 UNKNOWN，从不主动升级为 IRRELEVANT。
