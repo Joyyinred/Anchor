@@ -65,7 +65,8 @@
   position: absolute;
   top: -6px;
   left: 50%;
-  transform: translate(-50%, -100%) scale(0.9);
+  transform: translate(-50%, -100%) scale(0.2);   /* was scale(0.9) — bigger delta so it visibly "pops" from a point */
+  transform-origin: 188px 100%;                 /* pinned to the badge's x, bottom edge — bubble grows out of the badge, not its own center */
   width: 220px;
   background: var(--ap-card);
   border: 1.5px solid var(--ap-checkin);
@@ -84,7 +85,7 @@
   content: '';
   position: absolute;
   bottom: -8px;
-  left: 50%;
+  left: 188px;                          /* was 50% — tail now points at the badge instead of the cat's center */
   transform: translateX(-50%) rotate(45deg);
   width: 14px;
   height: 14px;
@@ -166,6 +167,12 @@
   stroke: #fff;
 }
 
+/*add a matching little "pop" on the badge itself, right where the bubble roots into it, so the two motions read as one gesture*/
+.anchor-pet-stage[data-state="checkin"] .anchor-pet-badge {
+  background: var(--ap-state);
+  animation: ap-badge-pop 0.4s cubic-bezier(.34,1.56,.64,1);   /* plays once each time it enters checkin */
+}
+
 /* 角落专注时长标签 */
 .anchor-pet-focus-tag {
   position: absolute;
@@ -191,4 +198,10 @@
 @keyframes ap-badge-ping {
   0%   { transform: scale(1); opacity: 0.7; }
   100% { transform: scale(1.6); opacity: 0; }
+}
+
+@keyframes ap-badge-pop {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.3); }
+  100% { transform: scale(1); }
 }
