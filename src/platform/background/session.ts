@@ -2,17 +2,10 @@
 // 契约v4"无起步教练默认策略"：当前活动 tab 设为锚点、CREATOR 档、graceUntil = now + 2min
 import type { SessionContext } from '../../engine/types';
 import { PROFILE_PRESETS } from '../../engine/types';
+import { domainOf } from './domain';
 
 const SESSION_KEY = 'anchor_default_session';
 const DEFAULT_GRACE_MS = 2 * 60_000;
-
-function domainOf(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return '';
-  }
-}
 
 export async function getOrInitSessionContext(): Promise<SessionContext> {
   const stored = await chrome.storage.local.get(SESSION_KEY);

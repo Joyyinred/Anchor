@@ -32,6 +32,14 @@
 - **⑤两份 tsconfig 拆开后没有合并的 typecheck 命令**（`tsconfig.json`）：根 `tsconfig.json` 现在只 `extends` `tsconfig.engine.json`（只覆盖 `src/engine`/`src/mock`），`src/platform`/`src/sidepanel` 只有 `tsconfig.platform.json` 覆盖，但编辑器/裸 `tsc` 按目录就近查找 tsconfig 时找不到它。后果两头堵：编辑器打开 `src/platform` 下的文件会因为找不到 DOM/chrome 类型报一堆假错误；反过来，如果开发者习惯性只跑 `npm run typecheck:engine`，`src/platform` 里真实的类型错误也不会被拦下来，因为没有一个命令强制两边都测。
 - **⑥`domainOf()` 在两个文件里各写了一份**（`src/platform/background/session.ts` 和 `signals.ts`）：完全一样的函数体重复了两次。目前的风险是维护成本，不是当下就会炸——但两份逻辑分开写，以后任何一次域名处理逻辑的调整（比如进一步规范化域名格式）都得记得两边一起改，漏改一边就会重新引入这类"数据格式不一致"的 bug。
 
+✅（08-26）把 08-25 code review 剩下的③④⑤⑥四条也修了：
+- **③`onActivated` 异步竞态** → `src/platform/background/signals.ts` 新增单调递增的 `activationSeq` 序号，`await chrome.tabs.get(tabId)` 前打卡、resolve 后核对还是不是最新一次，不是就放弃提交，不再让过期请求覆盖新数据。顺手发现 `ensureCurrentTab()` 也是同一类"await 前后没重新检查"的竞态（等查询期间可能已经有一次真正的 `onActivated` 把 `currentTab` 填上了），一并补了 await 后的二次判空。
+- **④`isAnchorMatch` 的 `prefix` 模式无 `.` 边界检查** → 把 `perceiver.ts` 里 fix #1 用的 `domainMatches()` 导出，`signals.ts` 直接复用它做 `prefix` 匹配（不再自己写一份不带边界判断的版本），顺带把 `heuristics.ts` 的 `matchesDomain()` 也改成基于同一个 `domainMatches()`，三处判断逻辑收敛成一处。
+- **⑤缺合并 typecheck 命令** → `package.json` 新增 `"typecheck": "npm run typecheck:engine && npm run typecheck:platform"` 一条命令测两边；另外在 `src/platform/tsconfig.json`、`src/sidepanel/tsconfig.json` 各放一个 `extends: "../../tsconfig.platform.json"` 的小文件，编辑器按目录就近查找 tsconfig 时能直接找到对的那份，不会再对着没有 DOM/chrome 类型的根配置报假错误。
+- **⑥`domainOf()` 重复定义** → 新建 `src/platform/background/domain.ts` 统一导出 `domainOf()`，`session.ts`/`signals.ts` 都改成从这里 import，删掉各自的本地副本。
+
+`npm run typecheck`（新命令，两边一起测）、`npm test`（57/57）、`npm run build` 全部过。今天没有为③④额外补自动化测试——`domainMatches` 本身的边界行为已经在 `perceiver.test.ts` 里覆盖（含 `notdouyin.com` 这种伪装域名的对照测试），`signals.ts` 这层是真实 chrome API 代码，仓库目前没有 chrome API mock 的测试基建，属于遗留缺口，不是今天这次改动引入的。
+
 下一步：A7/A8（把 mock 事件源换成真实浏览器信号 + 真实 LLM 分类）与 B4/B6（桌宠组件、起步教练）
 
 ---

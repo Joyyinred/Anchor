@@ -85,10 +85,13 @@ export function cacheKey(domain: string, url: string): string {
   return `${domain}${pathPattern(url)}`;
 }
 
-// 真实 SignalEvent.domain 来自 URL.hostname（见 src/platform/background 的 domainOf()），
+// 真实 SignalEvent.domain 来自 URL.hostname（见 src/platform/background/domain.ts 的 domainOf()），
 // 绝大多数真实流量带 www./m. 等子域前缀，而下面三张表只登记裸域名——必须按"同域或其子域"匹配，
 // 不能用精确相等，否则 www.taobao.com 匹配不到表里的 taobao.com（黑名单/白名单/预置缓存全部失效）。
-function domainMatches(domain: string, registered: string): boolean {
+// 导出给平台层复用（signals.ts 的 isAnchorMatch、heuristics.ts 的 matchesDomain），
+// 避免"同域或子域"这条边界判断逻辑在多处各写一份、容易一处改另一处忘（引擎依赖方向不变：
+// 这是纯字符串函数，平台层依赖引擎是正常方向，引擎本身依然零 chrome API 依赖）。
+export function domainMatches(domain: string, registered: string): boolean {
   return domain === registered || domain.endsWith(`.${registered}`);
 }
 
