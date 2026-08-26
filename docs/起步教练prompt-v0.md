@@ -59,8 +59,3 @@ Can you be a bit more specific? Something like "review data structures for tomor
   （`src/engine/metascenario.test.ts` 场景22），B6 只负责把校验通过的 `taskDeclaration` 和 LLM 产出的
   `firstAction` 接进这条已有的路径，不重新发明 `SessionContext` 的构造方式。
 
-## 6. 已知不一致（未在本次改动范围内，供你判断要不要一并处理）
-
-`src/engine/types.ts` 里 `DEFAULT_TASK_DECLARATION`（"无起步教练默认策略"兜底文案，契约v4 §2）目前仍是中文
-`'未声明任务（默认陪伴模式）'`。它是用户跳过起步教练时会看到的文案，跟本次"英文项目统一用英文"的要求
-是同一类字符串，但它属于既有文件、不在 B6 这次交付范围内，这里只标注，不直接改。
