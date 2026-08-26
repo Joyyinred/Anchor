@@ -138,8 +138,17 @@ describe('J3: 两半合流 —— events.json 25 场景端到端', () => {
       const state = buildState(scenario.id);
       const demoMode = SCENARIO_OVERRIDES[scenario.id]?.demoMode ?? false;
 
-      const { finalAction, triggerFrame } = simulate(events, ctx, state, demoMode);
-      expect(finalAction).toBe(scenario.expectedAction);
+      const { history, triggerFrame } = simulate(events, ctx, state, demoMode);
+      // fix 2（lastCheckInTs 接线）之前，这里断言的是"整条时间轴走到底时最后采样到的动作"——
+      // 冷却闸门是死的，所以一旦证据满足，后面每一帧都会重复报同一个动作，"最后一帧"和"有没有
+      // 报过"是一回事。冷却闸门接上之后，check-in 触发后会自然进入冷却、之后的帧合理地变回
+      // DO_NOTHING（这正是修复要的效果），"只看最后一帧"就不再等价于"报没报过"，要改成：
+      // 期望 DO_NOTHING 的场景整条时间轴都不该报；期望 CHECK_IN_* 的场景只要报过一次就算过。
+      if (scenario.expectedAction === 'DO_NOTHING') {
+        expect(history.every((h) => h.action === 'DO_NOTHING')).toBe(true);
+      } else {
+        expect(history.some((h) => h.action === scenario.expectedAction)).toBe(true);
+      }
 
       if (scenario.id === 25) {
         // 场景 25 的核心断言：check-in 措辞用的 lastAnchorSnapshot 必须指向"最后一次锚点有意义

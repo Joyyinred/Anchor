@@ -26,14 +26,20 @@ const CROPPED_VIEW_BOX = '-13.86 496.86 1982.71 1109.39';
  * 可爱桌宠：陪伴 / 观察 / check-in 三态，一只抱着红线球的猫（Lottie 矢量动画）。
  *
  * 用法：
- *   <CuteAnchorPet state="checkin" message={result.message} onAnswer={(a) => applyCheckInFeedback(...)} />
+ *   <CuteAnchorPet
+ *     state="checkin"
+ *     channel="DRIFT"
+ *     message={result.message}
+ *     onAnswer={(answer, channel) => applyCheckInFeedback(state, policy, { channel, answer }, now)}
+ *   />
  *
- * B8 接线时预期只需要把 state/message/onAnswer 接到状态机（B9）和 B2 上，组件本身不用改。
+ * B8 接线时预期只需要把 state/channel/message/onAnswer 接到状态机（B9）和 B2 上，组件本身不用改。
  */
 export function CuteAnchorPet({
   state,
   message,
   focusedMinutes,
+  channel,
   onAnswer,
   className,
 }: CuteAnchorPetProps) {
@@ -87,15 +93,20 @@ export function CuteAnchorPet({
         <div className="anchor-pet-wrap">
           <div className="anchor-pet-bubble" role="status" aria-live="polite">
             <span>{bubbleText}</span>
-            {onAnswer && (
+            {/* 气泡本身在非 checkin 态只是靠 CSS opacity/pointer-events 隐藏（cat.css 的
+                [data-state="checkin"] 规则），不是 display:none——只挡鼠标，不挡键盘 tab 顺序。
+                之前这里只判断 onAnswer 是否传了值，state==="companion"/"observing" 时按钮
+                仍然渲染在 DOM 里，键盘用户能 tab 到看不见的按钮上按回车触发 onAnswer。
+                这里额外判断 state === 'checkin'，不在 checkin 态时按钮压根不进 DOM。 */}
+            {state === 'checkin' && onAnswer && (
               <div className="anchor-pet-chips">
-                <button type="button" onClick={() => onAnswer('FOCUSED')}>
+                <button type="button" onClick={() => onAnswer('FOCUSED', channel)}>
                   在专注
                 </button>
-                <button type="button" onClick={() => onAnswer('FALSE_POSITIVE')}>
+                <button type="button" onClick={() => onAnswer('FALSE_POSITIVE', channel)}>
                   查资料呢
                 </button>
-                <button type="button" onClick={() => onAnswer('DRIFTED')}>
+                <button type="button" onClick={() => onAnswer('DRIFTED', channel)}>
                   飘了，拉我一下
                 </button>
               </div>

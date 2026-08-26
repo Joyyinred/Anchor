@@ -56,13 +56,34 @@
 - **④`src/pet/cat.tsx` check-in 按钮隐藏态仍可被键盘 tab 到并触发**：可点性只判断 `onAnswer` 是否传值，不判断 `state === 'checkin'`；隐藏用的是 CSS `opacity`/`pointer-events` 而非 `display:none`，键盘用户能在气泡不可见时把 `onAnswer` 触发出去。
 - **⑤`applyCheckInFeedback` 阶梯为空数组（VIEWER 档）时静默跳过重置**（`detector.ts`）：STUCK 通道答"飘了"本该无条件重置回第0格，代码里包了 `ladderLen > 0` 才重置，运行时切到 VIEWER 档会导致这条重置悄悄不生效。
 - **⑥`defaultSessionContext()` 浅拷贝导致 `stuckLadderMs` 数组和全局预设共享引用**（`src/engine/types.ts`）：`validatePolicy({ ...PROFILE_PRESETS.CREATOR })` 只展开一层，数组本身仍是同一个引用，注释声称的"防御性拷贝"没做到，未来原地修改某会话的阶梯会连带污染全局预设。
-- **⑦`src/devpreview/` 本地预览工具路径写错，根本跑不起来**：`main.tsx` 的 `'../src/pet/cat'` 多写了一层 `src/`（应为 `'../pet/cat'`），`Devpreview.vite.config.ts` 的 `root` 也应为 `'src/devpreview'` 而非 `'devpreview'`——这才是 Joy 8.26 记录的"连不上本地预览"的真实原因，不是防火墙/安全软件问题。
+- **⑦`src/devpreview/` 本地预览工具路径写错，根本跑不起来**：`main.tsx` 的 `'../src/pet/cat'` 多写了一层 `src/`（应为 `'../pet/cat'`），`Devpreview.vite.config.ts` 的 `root` 也应为 `'src/devpreview'` 而非 `'devpreview'`——这才是"连不上本地预览"的真实原因，不是防火墙/安全软件问题。
 - **⑧`defaultSessionContext()` 和 `session.ts` 现有默认会话逻辑重复维护**：`session.ts` 的 `getOrInitSessionContext()` 没有改成调用新写好的 `defaultSessionContext()`，两处独立维护同一份"无起步教练默认策略"，容易改一处忘另一处。
 - **⑨`CheckInAnswer` 类型在 `src/pet/types.ts`/`src/engine/types.ts` 各写一份，且 `CuteAnchorPet.onAnswer` 不回传 `channel`**：两个字面量类型没有共享引用会静默漂移；桌宠组件要接到 `applyCheckInFeedback`（需要完整 `CheckInFeedback = {channel, answer}`）时，`channel` 从哪来还没设计。
 - **⑩（小问题）`ladderLen > 0` 判断在 `applyCheckInFeedback` 两个分支里各写一遍**，可以提到外层包一次，避免以后加第三种回答类型时漏包。
 - 这轮只做记录，未改代码。
 
-下一步：先确认①②③（休息静默/冷却闸门/休息提醒三处"看似实现、实际未接线"的功能性 bug）的修复优先级，再动手修剩余7条；同时 A8（真实 LLM 分类）、A9（黑白名单降级路径）仍待开工。
+✅（08-26/Jay）修了①②③——这三条的共同点是"纯函数本身写对了，但没有一个自然会被记住去接线的地方"，所以这次的修法都是**改 API 形状，让接线这一步不再需要人记住**：
+- **①** `createRestState()` 改名 `startRest(state, now)`，从"返回一个调用方要自己记得回填两处的 `RestState` 对象"改成直接**就地写 `state.restUntil`/新增的 `state.restStartTs`**（跟 `applyCheckInFeedback` 已经在用的"就地改 state 并返回"是同一个模式）。`BStatePersistable`/`BState`（`types.ts`/`detector.ts`）都加了 `restStartTs` 字段——这是顺带补的一个真缺口：原来的 `RestState.restStartTs` 根本没地方持久化，`restReminderDue` 需要的这个值原来注定活不过一次 SW 回收。
+- **②** `evaluateFrame()` 在判定要返回 `CHECK_IN_DRIFT`/`CHECK_IN_STUCK` 的那一刻，直接 `state.lastCheckInTs = now`——这就是"UI 真正弹出一次 check-in"的那个时刻，不用等平台层以后接线时再想起来还有这一步。冷却闸门现在真的会拦下来了。
+  - 副作用（预期内，不是新 bug）：`integration.test.ts` 原来断言"整条时间轴走到底时最后采样到的动作"，这个断言方式其实是在无意中依赖冷却闸门是坏的（闸门死的时候，一旦证据满足就会一直重复报同一个动作，"最后一帧"和"报没报过"是一回事）。闸门修好后，check-in 触发一次就会正确进入冷却、之后的帧合理地变回 `DO_NOTHING`——所以把断言方式改成："期望 `DO_NOTHING` 的场景整条时间轴都不该报一次 check-in；期望 `CHECK_IN_*` 的场景只要报过一次就算过"，这个断言方式本身也比原来更贴合"expectedAction 到底有没有发生过"这个意图。
+- **③** `restReminderDue()` 从"经过时长精确整除"改成"落在提醒节拍附近一个心跳节拍宽度（`REST_REMINDER_TOLERANCE_MS = 60_000`）内"，`frames.json` metaScenario 23 给的 15/17/20/25 分钟四个断言点原样验证通过（17min 明确要求 false，1 分钟容差不会让它变成 true）。加了一条新单测直接断言"`startRest` 是就地写 state，不是返回游离对象"。
+- 验证：`npm run typecheck` 两边干净，`npm test` **79/79 全绿**（`integration.test.ts` 断言方式调整后仍是 23 条场景全过，`metascenario.test.ts` 因新增一条断言变成 16 条），`npm run build` 正常出包。
+
+修了④⑤⑥：
+- **④`src/pet/cat.tsx` check-in 按钮键盘可达性** → 按钮渲染条件从 `{onAnswer && (...)}` 改成 `{state === 'checkin' && onAnswer && (...)}`，不在 checkin 态时按钮压根不进 DOM，不再依赖 CSS `opacity`/`pointer-events` 单挡鼠标却挡不住键盘 tab。桌宠组件目前没有测试基建（没接 jsdom/@testing-library/react），这条没能补自动化测试，纯代码改动 + 人工核对 JSX 逻辑。
+- **⑤`applyCheckInFeedback` 阶梯为空数组时静默跳过重置** → STUCK+DRIFTED 分支去掉 `ladderLen > 0` 守卫，`stuckLadderIndex` 无条件归零；`stuckThresholdMs` 优先取 `policy.stuckLadderMs[0]`，取不到（空数组，如 VIEWER 档）时退回 `DEFAULT_STUCK_LADDER[0]`，和 `validatePolicy()` 对空阶梯的兜底策略保持一致，不再留下"跟已微重启的事实不符"的旧索引/旧阈值。补了一条 VIEWER 档回归测试。
+- **⑥`defaultSessionContext()`/`validatePolicy()` 浅拷贝导致数组共享** → 两处都改成显式展开 `stuckLadderMs` 数组（`[...PROFILE_PRESETS.CREATOR.stuckLadderMs]`、`[...DEFAULT_STUCK_LADDER]`），不再是浅拷贝对象却共享数组引用。补了两条回归测试：改动 `defaultSessionContext()` 返回的 policy 不会污染 `PROFILE_PRESETS.CREATOR`；`validatePolicy()` 兜底空阶梯时也不会把 `DEFAULT_STUCK_LADDER` 这个模块常量本身暴露给调用方修改。
+- 验证：`npm run typecheck` 两边干净，`npm test` **82/82 全绿**（新增 3 条回归测试），`npm run build` 正常出包。
+
+修了⑦⑧⑨，⑩确认已经在修⑤时顺带解决：
+- **⑦`src/devpreview/` 路径写错** → `main.tsx` 的 `'../src/pet/cat'` 改成 `'../pet/cat'`；`Devpreview.vite.config.ts` 的 `root` 从 `'devpreview'` 改成 `'src/devpreview'`。改完实际起了一次预览服务器验证：`curl http://localhost:PORT/main.tsx` 返回 200，内容里 `CuteAnchorPet` 正确解析到 `/@fs/.../src/pet/cat.tsx`（不再是不存在的 `src/src/pet/cat`）。
+  - 顺带查到 Joy 8.26 记的"服务器显示 ready 但浏览器/curl 连不上"的**真实原因**：这台机器上 Vite 默认只绑定 IPv6 回环（`::1`），敲 `http://127.0.0.1:PORT` 会连接被拒、敲 `http://localhost:PORT` 却能通（取决于 `localhost`解析成 IPv4 还是 IPv6）——不是防火墙/安全软件。实测复现：同一个服务器，`curl 127.0.0.1` 是 `Connection refused`，`curl localhost` 是 `200 OK`。给 `Devpreview.vite.config.ts` 加了 `server: { host: true }`，让它同时监听 IPv4/IPv6 回环，两种写法都能连上，验证过了。
+- **⑧`defaultSessionContext()` 和 `session.ts` 重复维护** → `session.ts` 的 `getOrInitSessionContext()` 改成直接调用 `defaultSessionContext()`，只保留平台层特有的部分（查当前活动 tab、读写 `chrome.storage.local`），删掉了本地重复的 `DEFAULT_GRACE_MS` 常量和手写的默认值组装逻辑。这个改动顺带修正了一个真实的行为不一致：`session.ts` 原来 `taskDeclaration` 写死是空字符串 `''`，而引擎侧 `defaultSessionContext()` 早就按 metaScenario 22 的要求给了非空默认文案（`DEFAULT_TASK_DECLARATION`）——两处独立维护导致平台层其实一直没吃到这条改进，现在统一了。
+- **⑨`CheckInAnswer`/`CheckInChannel` 类型在 `src/pet/types.ts` 和 `src/engine/types.ts` 各写一份，`onAnswer` 不带 channel** → 桌宠组件的类型文件顶部本来就明确写着"不 import 引擎、保持纯展示层"，这是有意的架构边界，所以没有直接改成共享 import。改法是：①给 `CuteAnchorPetProps` 加一个 `channel` prop + `onAnswer(answer, channel)` 第二参数，`state==='checkin'` 时调用方传的 `channel` 会原样透传回 `onAnswer`，不用再另外想办法拼出完整的 `CheckInFeedback`；②新增 `src/pet/types.contract-check.ts`，用 TypeScript 类型相等断言（`AssertEqual`，纯 type-only import，零运行时代码，不会被打进构建产物）在编译期锁死两份字面量必须完全一致——手动改坏其中一份验证过，`tsc` 会准确报错在这个哨兵文件上。
+- **⑩`ladderLen > 0` 判断在两个分支各写一遍** → 检查后发现这条已经在修⑤的时候顺带解决了：DRIFTED 分支现在是无条件重置，不再需要这个守卫，只有 FOCUSED 分支还留着（这里的守卫是必要的——阶梯为空时"前进一格"本来就无处可进，不是重复代码）。没有额外改动。
+- 验证：`npm run typecheck` 两边干净，`npm test` **82/82 全绿**（数量没变，⑦⑧⑨都是平台层/展示层改动，没有 vitest 覆盖场景），`npm run build` 正常出包（16 模块，`types.contract-check.ts` 没被打进产物，符合预期）。
+
+下一步：10 条 code-review 发现全部处理完。A8（真实 LLM 分类）、A9（黑白名单降级路径）仍待开工；B 侧 B5/B6/B8/B9（真正把桌宠接到 side panel 和状态机）是下一个大头。
 
 ---
 
@@ -73,7 +94,7 @@
 | J1 | Day 1–2 | 共定三契约：`SignalEvent` / `FeatureFrame` / `SessionContext` | ✅ | 契约 v4 已定稿（`docs/契约v4.md`），含 22 条审计修订 |
 | J2 | Day 1–2 | 准备两套 mock：`events.json`（A 用）+ `frames.json`（B 用） | ✅ | 代码核查：`events.json` 25 场景齐全；`frames.json` 覆盖场景 1-21/24 + metaScenarios 22/23，均已就绪 |
 | J3 | Day 5 | 两半合流：感知半（A）+ 决策半（B）纯函数拼接，25 场景端到端全绿 | ✅ | `src/engine/integration.test.ts`：23/23 可测场景全绿（22/23 是独立函数验收，不适用），★关键检查点一达成 |
-| J4 | Day 6–8 | 真实信号接入 + 桌宠组件进 MV3 side panel 联调 | ⬜ | 依赖 J3、A7、B4 |
+| J4 | Day 6–8 | 真实信号接入 + 桌宠组件进 MV3 side panel 联调 | ⬜ | 依赖 J3✅、A7✅、B4✅——三个依赖已全部完成，J4 已解锁，可以开工；需要 B8/B9（桌宠接线、状态机）配合 |
 | J5 | Day 8 | 真实浏览器复现两个反差瞬间（疯狂切 tab 不打扰 + 飘走触发 check-in） | ⬜ | ★关键检查点二；依赖 J4 |
 | J6 | Day 9–10 | 确认 `SessionContext` 正确喂给 A 感知半（B→A 反向缝） | ⬜ | 依赖 J5、B6 |
 | J7 | Day 10 | 端到端闭环验证：起步 → 陪伴 → 拉回 → 收尾反思 | ⬜ | 依赖 J6；过此项即阶段一验收通过 |
@@ -114,10 +135,10 @@
 
 | 编号 | 时间 | 任务 | 状态 | 说明/产出 |
 |---|---|---|---|---|
-| B1 | Day 3–5 | 决策半实现：置信度模型 + `applyProfileMuting` + `isDrifting` / `isStuck` 阈值 + 宽限期 → `DetectionResult` | 🔄 | `isDrifting`/`isStuck`/`evaluateFrame` 齐全，25 场景集成测试验证通过；08-24（Jay） 修了一个 bug：DEMO_MODE 下 `anchorDetachedThresholdMs`/`stuckThresholdMs` 未过 `scaled()`，已修复；仍缺 `defaultSessionContext`/`restReminderDue`（metaScenario 22/23 需要） |
-| B2 | Day 3–5 | 自适应退让启发式（单会话，据 `CheckInFeedback` 调阈值） | 🔄 | 代码核查：`types.ts` 已有阶梯状态结构（`stuckLadderIndex`/`stuckThresholdMs`/`PROFILE_PRESETS`），但未见根据用户回答推进阶梯/更新 `restUntil`/`lastAnswerTs` 的处理函数 |
+| B1 | Day 3–5 | 决策半实现：置信度模型 + `applyProfileMuting` + `isDrifting` / `isStuck` 阈值 + 宽限期 → `DetectionResult` | ✅ | `isDrifting`/`isStuck`/`evaluateFrame` 齐全；`defaultSessionContext`/`restReminderDue`（Joy 08-26 产出）补上了 metaScenario 22/23，`src/engine/metascenario.test.ts` 18 条全绿；08-26 code review 顺带修了 `startRest`/`lastCheckInTs`/共享数组等几个真 bug，见上方日志 |
+| B2 | Day 3–5 | 自适应退让启发式（单会话，据 `CheckInFeedback` 调阈值） | ✅ | `applyCheckInFeedback()`（Joy 08-26 产出，`detector.ts`）：STUCK 通道按回答推进/重置阶梯，DRIFT 通道清空持续计时器，`src/engine/b2.test.ts` 7 条全绿；08-26 code review 修了空阶梯（VIEWER 档）静默跳过重置的 bug |
 | B3 | Day 3–5 | 手写 `frames.json`：25 场景期望 `FeatureFrame` | ✅ | 代码核查：`src/mock/frames.json` 已就绪，含 `lastAnchorSnapshot`/`systemIdle` 相关场景 |
-| B4 | Day 3–5 | 独立 React 桌宠组件（陪伴/观察/check-in 三态），暂不进扩展 | ⬜ | 可与 B1 并行独立开始 |
+| B4 | Day 3–5 | 独立 React 桌宠组件（陪伴/观察/check-in 三态），暂不进扩展 | ✅ | `src/pet/cat.tsx`+`.css`+`assets/cat.json`（Joy 08-26 产出）：Lottie 矢量猫，三态靠锚徽章+气泡颜色区分，不靠猫变色；`src/devpreview/` 本地预览工具（路径 bug 已修，实测能正常打开三态预览）；08-26 code review 修了 check-in 按钮隐藏态仍可被键盘触发的问题 |
 | B5 | Day 5 | 单元测试：`frames.json` → 断言 `DetectionResult` 动作正确 | ⬜ | 依赖 B1、B3 |
 | B6 | Day 9–10 | 起步教练最小版：单次 LLM 调用出第一步物理动作 + 产出 `SessionContext` | ⬜ | 依赖 J1；对应 J6 的产出方；★ v4：`taskDeclaration` ≥8 字符追问义务 |
 | B7 | Day 6–8 | check-in / 微重启措辞 v1（像朋友不像监工） | ⬜ | 依赖 B1，J5 前需备好；★ v4：措辞数据源 `lastAnchorSnapshot` |
