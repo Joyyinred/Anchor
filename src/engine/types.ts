@@ -179,7 +179,7 @@ export function createInitialBState(profile: 'CREATOR' | 'READER' | 'VIEWER'): B
 
 // ── 无起步教练时的默认策略（契约v4 §2「无起步教练时的默认策略」，场景22）──
 export const DEFAULT_GRACE_MS = 2 * 60_000; // graceUntil = now + 2分钟
-export const DEFAULT_TASK_DECLARATION = '未声明任务（默认陪伴模式）';
+export const DEFAULT_TASK_DECLARATION = 'No task declared (default companion mode)';
 
 // 自动推断出的锚点：来自 A 平台层「前两次 tab 切换后，当前活跃时长最久的 tab」这一推断结果。
 // 推断过程本身依赖多次 tab 切换事件的累计观察，不是纯函数，不适合放在决策半引擎里；
