@@ -42,7 +42,7 @@
   width: 100%;
   max-width: 280px;
   margin: 0 auto;
-  padding: 60px 20px 6px;
+  padding: 200px 20px 6px;   /* was 60px 20px 6px — bubble is ~158px tall, 60px clipped it */
   display: flex;
   flex-direction: column;
   align-items: center;

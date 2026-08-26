@@ -13,7 +13,7 @@ createRoot(document.getElementById('c')!).render(
   <CuteAnchorPet
     state="checkin"
     channel="DRIFT"
-    message="你从 10 分钟前那个登录页 bug 上飘走啦，还在查资料，还是走神啦？"
+    message="You drifted from that login-page bug 10 minutes ago — still researching, or did you wander off?"
     onAnswer={(answer, channel) => console.log('answered:', answer, channel)}
   />
 );

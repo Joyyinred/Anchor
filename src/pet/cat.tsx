@@ -10,12 +10,12 @@ import './cat.css';
 import catAnimation from './assets/cat.json';
 import type { CuteAnchorPetProps } from './types';
 
-const DEFAULT_MESSAGE = '你好像飘了一会儿？还在忙这件事，还是走神啦？';
+const DEFAULT_MESSAGE = "Looks like you drifted off for a bit — still on this, or did your mind wander?";
 
 const CAPTION: Record<CuteAnchorPetProps['state'], string> = {
-  companion: '安静陪着你，不打扰。',
-  observing: '有点飘的迹象，先悄悄多看两眼。',
-  checkin: '证据攒够了，问一句——像朋友，不像监工。',
+  companion: 'Quietly keeping you company.',
+  observing: 'Signs of drifting — keeping a closer eye, quietly.',
+  checkin: 'Enough signs now — asking like a friend, not a supervisor.',
 };
 
 // 原始画布是 2000×2000，猫只占中间一小块（还带一大截红线甩到画面外）。
@@ -86,7 +86,7 @@ export function CuteAnchorPet({
             className="anchor-pet-focus-tag"
             data-visible={state === 'companion'}
           >
-            专注 {focusedMinutes} 分钟
+            Focused {focusedMinutes} min
           </span>
         )}
 
@@ -101,13 +101,13 @@ export function CuteAnchorPet({
             {state === 'checkin' && onAnswer && (
               <div className="anchor-pet-chips">
                 <button type="button" onClick={() => onAnswer('FOCUSED', channel)}>
-                  在专注
+                  Still focused
                 </button>
                 <button type="button" onClick={() => onAnswer('FALSE_POSITIVE', channel)}>
-                  查资料呢
+                  Just researching
                 </button>
                 <button type="button" onClick={() => onAnswer('DRIFTED', channel)}>
-                  飘了，拉我一下
+                  Drifted - pull me back
                 </button>
               </div>
             )}
