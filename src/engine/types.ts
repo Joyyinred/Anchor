@@ -78,7 +78,10 @@ export interface SignalPolicy {
 
 // ★ v4 新增：策略校验器（防止 policy 字段缺省导致判断失控）
 export function validatePolicy(p: SignalPolicy): SignalPolicy {
-  if (p.stuckLadderMs.length === 0) p.stuckLadderMs = DEFAULT_STUCK_LADDER;
+  // 兜底时拷贝一份 DEFAULT_STUCK_LADDER，不能直接把模块级常量的引用挂上去——
+  // applyCheckInFeedback/调用方一旦以后有原地改 stuckLadderMs 的操作（本文件已有这个先例），
+  // 会连带把这个全局共享常量也改坏，殃及所有走这条兜底路径的会话。
+  if (p.stuckLadderMs.length === 0) p.stuckLadderMs = [...DEFAULT_STUCK_LADDER];
   if (p.anchorDetachedThresholdMs <= 0) p.anchorDetachedThresholdMs = DEFAULT_ANCHOR_THRESHOLD;
   return p;
 }
@@ -114,6 +117,10 @@ export interface BStatePersistable {
   lastCheckInTs: number;
   lastAnswerTs: number;
   restUntil: number;
+  // 休息开始时刻——restReminderDue() 算"该不该再提醒一次"要靠它。跟 restUntil 一起由
+  // detector.ts 的 startRest() 写入，不再是一个 evaluateFrame() 之外单独游离、容易被忘记
+  // 接线的返回值。
+  restStartTs: number;
 }
 
 // ── B 内部运行时状态（不持久化的部分：持续器）──
@@ -163,6 +170,7 @@ export function createInitialBState(profile: 'CREATOR' | 'READER' | 'VIEWER'): B
     lastCheckInTs: -Infinity,
     lastAnswerTs: -Infinity,
     restUntil: -Infinity,
+    restStartTs: -Infinity,
     driftSustainer: { since: null },
     stuckSustainer: { since: null },
     passiveSince: null,
@@ -198,7 +206,10 @@ export function defaultSessionContext(
     taskDeclaration: DEFAULT_TASK_DECLARATION,
     profile: {
       archetype: 'CREATOR',
-      policy: validatePolicy({ ...PROFILE_PRESETS.CREATOR }),
+      // { ...PROFILE_PRESETS.CREATOR } 只是浅拷贝——stuckLadderMs 这个数组本身还是和模块级
+      // PROFILE_PRESETS.CREATOR.stuckLadderMs 同一个引用，得单独展开一层才是真正的防御性拷贝，
+      // 不然以后谁原地改了某个会话的阶梯，会连带污染全局共享的预设。
+      policy: validatePolicy({ ...PROFILE_PRESETS.CREATOR, stuckLadderMs: [...PROFILE_PRESETS.CREATOR.stuckLadderMs] }),
     },
     anchor: {
       domain: inferredAnchor.domain,

@@ -1,8 +1,12 @@
 // Anchor · A4 真实信号采集：chrome.tabs/idle/webNavigation → SignalEvent
 // 契约v4 §5.1：当前仅支持单一锚点/单一活动 tab 的信号流（多窗口是阶段二已知限制）
 import type { SessionContext, SignalEvent } from '../../engine/types';
+import { domainMatches } from '../../engine/perceiver';
 import { guessContentKind, mapEntryIntent } from './heuristics';
 import { getOrInitSessionContext } from './session';
+import { getDemoMode } from './state';
+import { domainOf } from './domain';
+import { recordEventAndComputeFrame } from './frame-pipeline';
 
 interface LiveTabInfo {
   tabId: number;
@@ -15,22 +19,22 @@ interface LiveTabInfo {
 let currentTab: LiveTabInfo | null = null;
 let currentInteractionType: SignalEvent['interactionType'] = 'ACTIVE_INPUT';
 let systemIdle = false;
+// onActivated 的监听器是异步的（await chrome.tabs.get），快速连续切 tab 时后触发的请求可能反而
+// 先 resolve——用一个单调递增的序号在 await 前后打卡，await 完了发现自己不是"最新一次"就放弃提交，
+// 避免过期请求的结果覆盖掉更新的 currentTab。
+let activationSeq = 0;
 
 const IDLE_DETECTION_INTERVAL_SECONDS = 60;
 
-function domainOf(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return '';
-  }
-}
-
-function isAnchorMatch(domain: string, url: string, anchor: SessionContext['anchor']): boolean {
+// 'prefix' 模式要求"同域或其子域"，不能用裸 endsWith（会把 notexample.com 误判成命中 example.com）——
+// 复用引擎里同一条边界判断逻辑（perceiver.ts 的 domainMatches），别再自己写一份不带 `.` 边界的版本。
+function isAnchorMatch(domain: string, anchor: SessionContext['anchor']): boolean {
   if (anchor.matchMode === 'exact') return domain === anchor.domain;
-  return domain.endsWith(anchor.domain) || url.startsWith(anchor.url);
+  return domainMatches(domain, anchor.domain);
 }
 
+// A7：真实事件流不再只打日志——喂进感知半（computeFeatureFrame）产出 FeatureFrame，
+// 这条路径替换的是 mock events.json 那条测试专用路径
 async function emitSignalEvent(reason: string): Promise<void> {
   if (!currentTab) return;
   const ctx = await getOrInitSessionContext();
@@ -40,12 +44,15 @@ async function emitSignalEvent(reason: string): Promise<void> {
     url: currentTab.url,
     title: currentTab.title,
     contentKind: guessContentKind(currentTab.url, currentTab.domain),
-    isAnchor: isAnchorMatch(currentTab.domain, currentTab.url, ctx.anchor),
+    isAnchor: isAnchorMatch(currentTab.domain, ctx.anchor),
     interactionType: currentInteractionType,
     entryIntent: currentTab.entryIntent,
     systemIdle,
   };
+  const isDemoMode = await getDemoMode();
+  const frame = await recordEventAndComputeFrame(event, ctx, isDemoMode);
   console.log(`[Anchor SW] SignalEvent (${reason})`, event);
+  console.log('[Anchor SW] FeatureFrame', frame);
 }
 
 export function isTrackedTab(tabId: number): boolean {
@@ -59,6 +66,9 @@ export function isTrackedTab(tabId: number): boolean {
 export async function ensureCurrentTab(): Promise<void> {
   if (currentTab) return;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  // 等待查询期间，一次真正的 tabs.onActivated 可能已经把 currentTab 填上了，所以不要用这次
+  // 可能已经过期的查询结果覆盖掉它（同一类 await-期间竞态，和 onActivated 里的问题是一回事）。
+  if (currentTab) return;
   if (!tab?.id || !tab.url) return;
   currentTab = {
     tabId: tab.id,
@@ -78,7 +88,9 @@ export function handleInteractionMessage(interactionType: SignalEvent['interacti
 
 export function registerSignalListeners(): void {
   chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+    const seq = ++activationSeq;
     const tab = await chrome.tabs.get(tabId);
+    if (seq !== activationSeq) return; // 已经被更新的一次 onActivated 超过，这次的结果作废
     if (!tab.url) return;
     currentTab = {
       tabId,

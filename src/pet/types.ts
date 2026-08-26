@@ -10,6 +10,12 @@ export type PetState = 'companion' | 'observing' | 'checkin';
 
 export type CheckInAnswer = 'FOCUSED' | 'DRIFTED' | 'FALSE_POSITIVE';
 
+// DRIFT/STUCK 两条通道触发 check-in 时都收敛成同一个 PetState 'checkin'（组件不靠通道区分视觉），
+// 但调用方拼 CheckInFeedback = {channel, answer} 喂给 applyCheckInFeedback 时需要知道是哪条通道——
+// 跟引擎 CheckInChannel 是同一个概念，这里独立声明一份（组件保持不 import 引擎），
+// src/pet/types.contract-check.ts 有一个编译期哨兵防止两边字面量集合悄悄漂移。
+export type CheckInChannel = 'DRIFT' | 'STUCK';
+
 export interface CuteAnchorPetProps {
   /** 当前该演哪个状态；三态之外没有第四态。 */
   state: PetState;
@@ -23,8 +29,17 @@ export interface CuteAnchorPetProps {
    * 对应分工v2 §4 B15"角落专注时长（配角，别喧宾夺主）"。
    */
   focusedMinutes?: number;
-  /** 用户点了气泡里的回答按钮。调用方通常直接把这个值转给 B2 的 applyCheckInFeedback。 */
-  onAnswer?: (answer: CheckInAnswer) => void;
+  /**
+   * state === 'checkin' 时，这次 check-in 是哪条通道触发的（DRIFT 走神 / STUCK 卡住）。
+   * PetState 本身不区分通道，靠这个字段把信息带进来，再由 onAnswer 原样带出去——
+   * 调用方才拼得出完整的 CheckInFeedback。state !== 'checkin' 时不生效。
+   */
+  channel?: CheckInChannel;
+  /**
+   * 用户点了气泡里的回答按钮。调用方通常直接把 {channel, answer} 转给 B2 的
+   * applyCheckInFeedback——channel 就是原样透传回去的 props.channel。
+   */
+  onAnswer?: (answer: CheckInAnswer, channel?: CheckInChannel) => void;
   /** 透传到最外层容器，方便调用方做定位/尺寸调整。 */
   className?: string;
 }

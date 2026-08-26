@@ -1,18 +1,14 @@
 // Anchor · 今天范围内的默认 SessionContext（A13 才会接真正的起步教练产出）
 // 契约v4"无起步教练默认策略"：当前活动 tab 设为锚点、CREATOR 档、graceUntil = now + 2min
+// 具体默认值规则由 src/engine/types.ts 的 defaultSessionContext()（纯函数，B1 产出，过了
+// metaScenario 22 单测）定义——这里不再手写一份同样的逻辑（之前两处独立维护，容易改一处忘
+// 另一处，见 08-26 code review ⑧）。这一层只负责平台层特有的部分：查当前活动 tab 拿锚点、
+// 读写 chrome.storage.local。
 import type { SessionContext } from '../../engine/types';
-import { PROFILE_PRESETS } from '../../engine/types';
+import { defaultSessionContext } from '../../engine/types';
+import { domainOf } from './domain';
 
 const SESSION_KEY = 'anchor_default_session';
-const DEFAULT_GRACE_MS = 2 * 60_000;
-
-function domainOf(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return '';
-  }
-}
 
 export async function getOrInitSessionContext(): Promise<SessionContext> {
   const stored = await chrome.storage.local.get(SESSION_KEY);
@@ -21,16 +17,8 @@ export async function getOrInitSessionContext(): Promise<SessionContext> {
 
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const url = activeTab?.url ?? '';
-  const preset = PROFILE_PRESETS.CREATOR;
 
-  const ctx: SessionContext = {
-    sessionId: 'default',
-    taskDeclaration: '',
-    profile: { archetype: 'CREATOR', policy: preset },
-    anchor: { domain: domainOf(url), url, matchMode: preset.matchMode },
-    sessionWhitelist: [],
-    graceUntil: Date.now() + DEFAULT_GRACE_MS,
-  };
+  const ctx = defaultSessionContext(Date.now(), { domain: domainOf(url), url }, 'default');
   await chrome.storage.local.set({ [SESSION_KEY]: ctx });
   return ctx;
 }

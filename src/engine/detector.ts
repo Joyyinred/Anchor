@@ -1,4 +1,4 @@
-import { FeatureFrame, SignalPolicy, SessionContext, CheckInFeedback } from './types';
+import { FeatureFrame, SignalPolicy, SessionContext, CheckInFeedback, DEFAULT_STUCK_LADDER } from './types';
 
 // B 侧内部状态接口
 export interface BState {
@@ -7,6 +7,7 @@ export interface BState {
   lastCheckInTs: number;
   lastAnswerTs: number;
   restUntil: number;
+  restStartTs: number;
   driftSustainer: { since: number | null };
   stuckSustainer: { since: number | null };
   passiveSince: number | null;
@@ -144,36 +145,46 @@ export function isStuck(
 
 // ── 休息模式提醒（契约v4 §3.8，场景23）：独立于 DRIFT/STUCK 的第三条提醒逻辑 ──
 // 不产出 DetectionResult.action，只产出 UI 侧的轻声提醒事件；不经过公共闸口/持续器。
-export interface RestState {
-  restUntil: number;
-  restStartTs: number;
-}
 
 const REST_FIRST_REMINDER_MS = 15 * 60_000; // 首次轻声提醒：休息满 15 分钟
 const REST_REPEAT_REMINDER_MS = 5 * 60_000; // 之后每 5 分钟重复提醒，直到用户回来
+// restReminderDue 允许命中时刻在一次心跳节拍宽度内的误差（见下）。真实心跳目前是全局固定
+// 1 分钟节拍，不会特意跟 restStartTs 对齐，所以判断不能要求"精确整除"——那样命中概率约等于 0。
+const REST_REMINDER_TOLERANCE_MS = 60_000;
 
 /**
- * 用户主动点"休息"时创建 RestState：restUntil = now + 20min（契约v4 §3.8），
- * 期间 isDrifting/isStuck 的公共闸口 `state.restUntil > now` 会让双通道全静默。
+ * 用户主动点"休息"：就地把 restStartTs/restUntil 写进 BState（不再返回一个调用方需要
+ * 自己记得回填的独立对象——之前 createRestState() 就是这样被落下的：返回值算对了，
+ * 但从来没有任何调用方把它写回 state.restUntil，isDrifting/isStuck 的公共闸口读到的
+ * 永远是初始值，"休息"点了也没用）。restUntil = now + 20min（契约v4 §3.8），期间
+ * isDrifting/isStuck 的公共闸口 `state.restUntil > now` 会让双通道全静默。
  */
-export function createRestState(restStartTs: number): RestState {
-  return { restStartTs, restUntil: restStartTs + 20 * 60_000 };
+export function startRest(state: BState, now: number): BState {
+  state.restStartTs = now;
+  state.restUntil = now + 20 * 60_000;
+  return state;
 }
 
 /**
  * 判断此刻是否该发一次"还在休息吗"的轻声提醒。
- * 纯函数：只看 now 相对 restStartTs 的经过时长是否恰好落在提醒节拍（15/20/25...分钟）上。
- * 注：真实系统里心跳节拍要与 restStartTs 对齐（休息开始时另起一个专属 alarm，而不是复用
- * 全局 1 分钟心跳的任意相位）才能稳定命中整除点，这是已知的对齐假设，不是本函数要处理的问题。
+ * 只看 now 相对 restStartTs 的经过时长是否落在提醒节拍（15/20/25...分钟）附近一个心跳
+ * 节拍宽度内——不能像之前那样要求经过时长精确整除：真实心跳是全局固定 1 分钟节拍，不会
+ * 特意跟某次"点休息"的时刻对齐，精确取模在真实场景下基本永远不会命中。
+ * 调用方约定：按心跳节拍（不要更密集地）调用本函数，节拍间隔需 ≤ REST_REMINDER_TOLERANCE_MS，
+ * 这样每个提醒节拍只会落进一次心跳窗口，不会在同一节拍内被重复触发。
  */
-export function restReminderDue(state: Pick<RestState, 'restStartTs'>, now: number): boolean {
+export function restReminderDue(state: Pick<BState, 'restStartTs'>, now: number): boolean {
   const elapsed = now - state.restStartTs;
   if (elapsed < REST_FIRST_REMINDER_MS) return false;
-  return (elapsed - REST_FIRST_REMINDER_MS) % REST_REPEAT_REMINDER_MS === 0;
+  const sinceFirstReminder = elapsed - REST_FIRST_REMINDER_MS;
+  return sinceFirstReminder % REST_REPEAT_REMINDER_MS < REST_REMINDER_TOLERANCE_MS;
 }
 
 /**
- * 决策入口函数
+ * 决策入口函数。
+ * 触发 check-in 的这一刻，就地把 state.lastCheckInTs 设成 now——这里就是"UI 真正弹出一次
+ * check-in"的那个时刻，不需要再指望调用方另外记得写这一步（之前没人写，isDrifting/isStuck
+ * 里 5 分钟冷却闸门读到的 lastCheckInTs 永远是初始值 -Infinity，冷却形同虚设）。
  */
 export function evaluateFrame(
   frame: FeatureFrame,
@@ -185,9 +196,11 @@ export function evaluateFrame(
   isDemoMode?: boolean
 ): 'DO_NOTHING' | 'CHECK_IN_DRIFT' | 'CHECK_IN_STUCK' {
   if (isDrifting(frame, policy, ctx, state, now, isDemoMode)) {
+    state.lastCheckInTs = now;
     return 'CHECK_IN_DRIFT';
   }
   if (isStuck(frame, policy, ctx, state, now, isDemoMode)) {
+    state.lastCheckInTs = now;
     return 'CHECK_IN_STUCK';
   }
   return 'DO_NOTHING';
@@ -210,12 +223,11 @@ export function evaluateFrame(
  *   BState 里没有这个字段，调用方自己用 FeatureFrame.currentDomain 去改 SessionContext。
  *
  * 集成待办（不在本函数职责内，留给 B9 状态机接线时处理）：
- *   1. `state.lastCheckInTs` 目前全代码库没有任何地方写它——只有 isDrifting/isStuck 在读它做
- *      冷却闸门。谁触发 UI 真正弹出一次 check-in，谁就要在那一刻把 lastCheckInTs 设成 now，
- *      不然冷却闸门形同虚设（第一次 check-in 后 CHECKIN_COOLDOWN_MS 判断永远比较的是同一个初值）。
- *   2. 契约v4 §3.7 `onCooldownEnd`（冷却期自然结束时清空两个 sustainer，防止用户完全没回答、
- *      冷却一过同一帧立刻又触发）目前也没人实现——这个需要在 state 上加一个"上一帧是否在冷却中"
- *      的边缘检测才能只触发一次，属于比本函数更深一层的改动，先记录，不在这次一并做。
+ *   契约v4 §3.7 `onCooldownEnd`（冷却期自然结束时清空两个 sustainer，防止用户完全没回答、
+ *   冷却一过同一帧立刻又触发）目前还没人实现——这个需要在 state 上加一个"上一帧是否在冷却中"
+ *   的边缘检测才能只触发一次，属于比本函数更深一层的改动，先记录，不在这次一并做。
+ *   （`state.lastCheckInTs` 由谁来写这个问题已经解决：evaluateFrame() 触发 check-in 的那一刻
+ *   就地写了，不用等这里。）
  */
 export function applyCheckInFeedback(
   state: BState,
@@ -230,9 +242,13 @@ export function applyCheckInFeedback(
     if (feedback.answer === 'FOCUSED' && ladderLen > 0) {
       state.stuckLadderIndex = Math.min(state.stuckLadderIndex + 1, ladderLen - 1);
       state.stuckThresholdMs = policy.stuckLadderMs[state.stuckLadderIndex];
-    } else if (feedback.answer === 'DRIFTED' && ladderLen > 0) {
+    } else if (feedback.answer === 'DRIFTED') {
+      // 微重启承诺的是"无条件"重置回第0格——不能因为当前 policy.stuckLadderMs 恰好是空数组
+      // （比如运行时把档位切到了 STUCK 通道本就禁用的 VIEWER）就悄悄跳过，留下一个跟"已经
+      // 微重启"的事实不符的旧索引/旧阈值。索引总是能归零；阈值没有数组可取时退回
+      // DEFAULT_STUCK_LADDER[0]，跟 validatePolicy() 对空 stuckLadderMs 的兜底策略一致。
       state.stuckLadderIndex = 0;
-      state.stuckThresholdMs = policy.stuckLadderMs[0];
+      state.stuckThresholdMs = policy.stuckLadderMs[0] ?? DEFAULT_STUCK_LADDER[0];
     }
     state.stuckSustainer.since = null;
   }
