@@ -1,0 +1,194 @@
+/* Anchor · 桌宠组件样式（Lottie 猫版）
+   所有变量/类名都挂在 .anchor-pet 这个根节点下，避免污染 side panel 里其他组件的样式。
+   猫本体保持 assets/cat.json 原本的配色不做任何改动；三态靠猫耳朵旁边的小锚徽章
+   （陪伴=描边／观察=描边+波纹脉冲／check-in=实心）和 check-in 气泡的颜色区分，
+   卡片本身不再用背景色晕。 */
+
+.anchor-pet {
+  --ap-paper: #eef3f1;
+  --ap-card: #ffffff;
+  --ap-ink: #1f2b29;
+  --ap-ink-soft: #4c5b57;
+  --ap-ink-faint: #8b9995;
+  --ap-line: #d9e3df;
+
+  --ap-companion: #3f9b80;
+  --ap-observing: #c98f22;
+  --ap-checkin: #d76540;
+
+  --ap-shadow: 220 30% 20%;
+
+  font-family: 'Nunito', ui-sans-serif, system-ui, sans-serif;
+  color: var(--ap-ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  .anchor-pet {
+    --ap-paper: #141b1a;
+    --ap-card: #1c2523;
+    --ap-ink: #eef3f1;
+    --ap-ink-soft: #b7c4c0;
+    --ap-ink-faint: #6f7d79;
+    --ap-line: #2a3533;
+    --ap-shadow: 220 40% 2%;
+  }
+}
+
+.anchor-pet * { box-sizing: border-box; }
+
+/* ── 舞台：透明底，不再用状态色晕，只是给气泡/徽章一个定位参照 ── */
+.anchor-pet-stage {
+  position: relative;
+  width: 100%;
+  max-width: 280px;
+  margin: 0 auto;
+  padding: 60px 20px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.anchor-pet-stage[data-state="companion"] { --ap-state: var(--ap-companion); }
+.anchor-pet-stage[data-state="observing"] { --ap-state: var(--ap-observing); }
+.anchor-pet-stage[data-state="checkin"]   { --ap-state: var(--ap-checkin); }
+
+.anchor-pet-wrap {
+  position: relative;
+  width: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── check-in 气泡 ── */
+.anchor-pet-bubble {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translate(-50%, -100%) scale(0.9);
+  width: 220px;
+  background: var(--ap-card);
+  border: 1.5px solid var(--ap-checkin);
+  border-radius: 18px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ap-ink);
+  box-shadow: 0 8px 24px -12px hsl(var(--ap-shadow) / 0.35);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s ease, transform 0.35s cubic-bezier(.34,1.56,.64,1);
+  z-index: 5;
+}
+.anchor-pet-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 14px;
+  height: 14px;
+  background: var(--ap-card);
+  border-right: 1.5px solid var(--ap-checkin);
+  border-bottom: 1.5px solid var(--ap-checkin);
+}
+.anchor-pet-stage[data-state="checkin"] .anchor-pet-bubble {
+  opacity: 1;
+  transform: translate(-50%, -100%) scale(1);
+  pointer-events: auto;
+}
+.anchor-pet-chips { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.anchor-pet-chips button {
+  font-family: 'Nunito', sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  border: 1px solid var(--ap-line);
+  background: var(--ap-paper);
+  color: var(--ap-ink-soft);
+  border-radius: 999px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.anchor-pet-chips button:hover {
+  border-color: var(--ap-checkin);
+  color: var(--ap-checkin);
+  transform: translateY(-1px);
+}
+
+/* ── 猫（Lottie），裁过 viewBox 让它撑满容器 ── */
+.anchor-pet-lottie-wrap {
+  position: relative;
+  width: 170px;
+  height: 118px;
+}
+.anchor-pet-lottie { width: 100%; height: 100%; }
+.anchor-pet-lottie svg { display: block; }
+
+/* ── 小锚徽章：贴着猫耳朵，是三态唯一的"变色"信号 ── */
+.anchor-pet-badge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ap-card);
+  border: 2px solid var(--ap-state, var(--ap-companion));
+  box-shadow: 0 4px 10px -4px hsl(var(--ap-shadow) / 0.35);
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+.anchor-pet-badge svg {
+  width: 16px;
+  height: 16px;
+  stroke: var(--ap-state, var(--ap-companion));
+  transition: stroke 0.3s ease;
+}
+.anchor-pet-badge::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 2px solid var(--ap-state, var(--ap-companion));
+  opacity: 0;
+}
+.anchor-pet-stage[data-state="observing"] .anchor-pet-badge::before {
+  opacity: 1;
+  animation: ap-badge-ping 1.6s ease-out infinite;
+}
+.anchor-pet-stage[data-state="checkin"] .anchor-pet-badge {
+  background: var(--ap-state);
+}
+.anchor-pet-stage[data-state="checkin"] .anchor-pet-badge svg {
+  stroke: #fff;
+}
+
+/* 角落专注时长标签 */
+.anchor-pet-focus-tag {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ap-ink-faint);
+  background: var(--ap-paper);
+  border: 1px solid var(--ap-line);
+  padding: 3px 8px;
+  border-radius: 999px;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  font-variant-numeric: tabular-nums;
+}
+.anchor-pet-stage[data-state="companion"] .anchor-pet-focus-tag[data-visible="true"] { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anchor-pet, .anchor-pet * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
+}
+
+@keyframes ap-badge-ping {
+  0%   { transform: scale(1); opacity: 0.7; }
+  100% { transform: scale(1.6); opacity: 0; }
+}

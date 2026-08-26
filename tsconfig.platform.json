@@ -2,7 +2,8 @@
   "extends": "./tsconfig.engine.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM"],
-    "types": ["chrome"]
+    "types": ["chrome"],
+    "jsx": "react-jsx"
   },
-  "include": ["src/platform", "src/sidepanel"]
+  "include": ["src/platform", "src/sidepanel","src/pet"]
 }
