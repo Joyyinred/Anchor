@@ -1,6 +1,7 @@
 // Anchor · A4 简单启发式：contentKind / entryIntent 映射
 // 真实语义分类（contextRelevance）是 A8 的事，这里只产出 SignalEvent 字段本身
 import type { SignalEvent } from '../../engine/types';
+import { domainMatches } from '../../engine/perceiver';
 
 const CODE_DOMAINS = ['github.com', 'vscode.dev', 'gitlab.com', 'stackoverflow.com'];
 const DOCS_DOMAINS = ['react.dev', 'docs.google.com', 'developer.mozilla.org'];
@@ -9,7 +10,7 @@ const AI_CHAT_DOMAINS = ['claude.ai', 'chat.openai.com'];
 const MUSIC_DOMAINS = ['open.spotify.com', 'music.163.com'];
 
 function matchesDomain(domain: string, list: string[]): boolean {
-  return list.some((d) => domain === d || domain.endsWith(`.${d}`));
+  return list.some((d) => domainMatches(domain, d));
 }
 
 export function guessContentKind(url: string, domain: string): SignalEvent['contentKind'] {

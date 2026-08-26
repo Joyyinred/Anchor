@@ -32,7 +32,22 @@
 - **⑤两份 tsconfig 拆开后没有合并的 typecheck 命令**（`tsconfig.json`）：根 `tsconfig.json` 现在只 `extends` `tsconfig.engine.json`（只覆盖 `src/engine`/`src/mock`），`src/platform`/`src/sidepanel` 只有 `tsconfig.platform.json` 覆盖，但编辑器/裸 `tsc` 按目录就近查找 tsconfig 时找不到它。后果两头堵：编辑器打开 `src/platform` 下的文件会因为找不到 DOM/chrome 类型报一堆假错误；反过来，如果开发者习惯性只跑 `npm run typecheck:engine`，`src/platform` 里真实的类型错误也不会被拦下来，因为没有一个命令强制两边都测。
 - **⑥`domainOf()` 在两个文件里各写了一份**（`src/platform/background/session.ts` 和 `signals.ts`）：完全一样的函数体重复了两次。目前的风险是维护成本，不是当下就会炸——但两份逻辑分开写，以后任何一次域名处理逻辑的调整（比如进一步规范化域名格式）都得记得两边一起改，漏改一边就会重新引入这类"数据格式不一致"的 bug。
 
-下一步：A7/A8（把 mock 事件源换成真实浏览器信号 + 真实 LLM 分类）与 B4/B6（桌宠组件、起步教练）
+✅（08-26）把 08-25 code review 剩下的③④⑤⑥四条也修了：
+- **③`onActivated` 异步竞态** → `src/platform/background/signals.ts` 新增单调递增的 `activationSeq` 序号，`await chrome.tabs.get(tabId)` 前打卡、resolve 后核对还是不是最新一次，不是就放弃提交，不再让过期请求覆盖新数据。顺手发现 `ensureCurrentTab()` 也是同一类"await 前后没重新检查"的竞态（等查询期间可能已经有一次真正的 `onActivated` 把 `currentTab` 填上了），一并补了 await 后的二次判空。
+- **④`isAnchorMatch` 的 `prefix` 模式无 `.` 边界检查** → 把 `perceiver.ts` 里 fix #1 用的 `domainMatches()` 导出，`signals.ts` 直接复用它做 `prefix` 匹配（不再自己写一份不带边界判断的版本），顺带把 `heuristics.ts` 的 `matchesDomain()` 也改成基于同一个 `domainMatches()`，三处判断逻辑收敛成一处。
+- **⑤缺合并 typecheck 命令** → `package.json` 新增 `"typecheck": "npm run typecheck:engine && npm run typecheck:platform"` 一条命令测两边；另外在 `src/platform/tsconfig.json`、`src/sidepanel/tsconfig.json` 各放一个 `extends: "../../tsconfig.platform.json"` 的小文件，编辑器按目录就近查找 tsconfig 时能直接找到对的那份，不会再对着没有 DOM/chrome 类型的根配置报假错误。
+- **⑥`domainOf()` 重复定义** → 新建 `src/platform/background/domain.ts` 统一导出 `domainOf()`，`session.ts`/`signals.ts` 都改成从这里 import，删掉各自的本地副本。
+
+`npm run typecheck`（新命令，两边一起测）、`npm test`（57/57）、`npm run build` 全部过。今天没有为③④额外补自动化测试——`domainMatches` 本身的边界行为已经在 `perceiver.test.ts` 里覆盖（含 `notdouyin.com` 这种伪装域名的对照测试），`signals.ts` 这层是真实 chrome API 代码，仓库目前没有 chrome API mock 的测试基建，属于遗留缺口，不是今天这次改动引入的。
+
+✅（08-26）A7：真实 `SignalEvent` 流接入感知半，替换 mock `events.json` 那条测试专用路径（`docs/分工v2.md` Day6-8 既定安排，`FeatureFrame` 缝早已约定，B 的决策半 `detector.ts` 一行没改）。
+- 新增 `src/platform/background/frame-pipeline.ts`：维护一份事件历史（内存 + `chrome.storage.local` 持久化，按会话 id 分 key），每次 `signals.ts` 产出新 `SignalEvent` 就把它计入历史，再用完整历史跑一次 `computeFeatureFrame`，产出真实 `FeatureFrame`。历史持久化是 A4 当时特意留到今天补的（SW 被回收后内存数组会归零，跟 `currentTab` 用 `ensureCurrentTab()` 补状态是同一套"重新水合"思路），加载用同一个"第一次用到前查一次 storage"模式。事件历史裁剪到最近 4 小时/500 条以内，避免真实长会话下无限增长。
+- `signals.ts` 的 `emitSignalEvent()` 现在会调用 `recordEventAndComputeFrame()`，控制台同时打印 `SignalEvent` 和算出来的 `FeatureFrame`，用于手动验证感知半在真实信号下算出的四信号（`contextRelevance`/`anchorDetachedMs`/`texture`/`jumpPattern`）是否合理。
+- 域名分类沿用 A2/A9 已有的黑白名单兜底（`DEMO_PRESET_CACHE`/`BUILTIN_ENTERTAINMENT_BLACKLIST`），LLM 分类缓存暂时是个空 `Map`——A8（真实 LLM 分类）还没接，未命中一律保守 `UNKNOWN`，符合红线1。
+- 时间戳直接复用 `Date.now()`（真实 epoch 毫秒），不做相对时间转换：`computeFeatureFrame` 内部所有判断都是"两个时间戳的差值"，只要事件时间戳和传入的 `now` 用的是同一个时钟就自洽，不依赖 mock 测试里"会话起点=0"这个约定本身。
+- 验证：`npm run typecheck`（两边干净）、`npm test`（57/57，本次改动没碰 `src/engine`，数量不变）、`npm run build`（16 模块，新增的 `frame-pipeline.ts` 被正常打包）。没有为 `frame-pipeline.ts` 补自动化测试——它和 `signals.ts` 一样依赖真实 `chrome.storage.local`，仓库目前没有 chrome API mock 的测试基建（同 08-26 早些时候记录的遗留缺口）。
+
+下一步：A8（真实 LLM 分类）、A9（本地黑白名单兜底接入降级路径，目前黑白名单已经在跑但还没有"LLM 失败时显式降级"的路径）与 B4/B6（桌宠组件、起步教练）——J4（真实信号 + 桌宠联调）依赖 A7（已完成）和 B4（未开始）。
 
 ---
 
@@ -65,7 +80,7 @@
 | A4 | Day 4 | 真实信号采集实现：`chrome.tabs`/`chrome.idle`/Visibility → `SignalEvent` | ✅ | `src/platform/background/{signals,heuristics,session}.ts` + `content-script.ts`：tabs.onActivated/onUpdated、idle.onStateChanged、webNavigation.onCommitted/onHistoryStateUpdated（SPA 跳转对齐契约§5.1 保守判 unknown）、keydown/scroll/visibility/video 交互采集，组装成 `SignalEvent` 结构化 console.log 输出（未做持久化，留给 A7）；默认 SessionContext（CREATOR 档、当前活动 tab 为锚点）支撑 isAnchor 计算；★ v4：`systemIdle`/`entryIntent` 均已采集 |
 | A5 | Day 5 | 感知半四信号计算实现 → `FeatureFrame` | ✅ | `src/engine/perceiver.ts`：四信号 + entryIntent/contentFormat/lastAnchorSnapshot 齐全，可插拔分类缓存留 A8 接真 LLM |
 | A6 | Day 5 | 单元测试：`events.json` → 断言 `FeatureFrame` 各字段正确 | ✅ | `src/engine/perceiver.test.ts`（20 项字段级单测）+ `integration.test.ts`（23 场景端到端）全绿；场景21 盲区修复已验证 |
-| A7 | Day 6 | 真实 `SignalEvent` 流替换 mock，接入感知半 | ⬜ | 依赖 J3（两半合流验证过）、A4 |
+| A7 | Day 6 | 真实 `SignalEvent` 流替换 mock，接入感知半 | ✅ | `src/platform/background/frame-pipeline.ts`：事件历史持久化（`chrome.storage.local`，应对 SW 回收）+ 调用 `computeFeatureFrame` 产出真实 `FeatureFrame`，`signals.ts` 每次事件都会算并打日志；B 侧 `detector.ts` 未改动，LLM 分类缓存暂空（留给 A8）。57/57 测试绿，两份 typecheck 干净，`npm run build` 16 模块正常出包 |
 | A8 | Day 6 | `classifyDomainRelevance` 真实 LLM 实现（异步 + 惰性 + 缓存） | ⬜ | 依赖 A2、A7；未判出前保持 `UNKNOWN`，绝不阻塞引擎（红线1） |
 | A9 | Day 6 | 本地黑白名单兜底接入（断网/API 失败时的降级路径） | ⬜ | 依赖 A2、A8（红线2）；★ v4：演示域预置缓存表优先级高于 LLM |
 | A10 | Day 7 | demo 要用到的域名预热进缓存 | ⬜ | 依赖 A8，演示前必做 |
@@ -84,7 +99,7 @@
 
 | 编号 | 时间 | 任务 | 状态 | 说明/产出 |
 |---|---|---|---|---|
-| B1 | Day 3–5 | 决策半实现：置信度模型 + `applyProfileMuting` + `isDrifting` / `isStuck` 阈值 + 宽限期 → `DetectionResult` | 🔄 | `isDrifting`/`isStuck`/`evaluateFrame` 齐全，25 场景集成测试验证通过；08-24 修了一个真 bug——DEMO_MODE 下 `anchorDetachedThresholdMs`/`stuckThresholdMs` 未过 `scaled()`，已修复；仍缺 `defaultSessionContext`/`restReminderDue`（metaScenario 22/23 需要） |
+| B1 | Day 3–5 | 决策半实现：置信度模型 + `applyProfileMuting` + `isDrifting` / `isStuck` 阈值 + 宽限期 → `DetectionResult` | 🔄 | `isDrifting`/`isStuck`/`evaluateFrame` 齐全，25 场景集成测试验证通过；08-24（Jay） 修了一个 bug：DEMO_MODE 下 `anchorDetachedThresholdMs`/`stuckThresholdMs` 未过 `scaled()`，已修复；仍缺 `defaultSessionContext`/`restReminderDue`（metaScenario 22/23 需要） |
 | B2 | Day 3–5 | 自适应退让启发式（单会话，据 `CheckInFeedback` 调阈值） | 🔄 | 代码核查：`types.ts` 已有阶梯状态结构（`stuckLadderIndex`/`stuckThresholdMs`/`PROFILE_PRESETS`），但未见根据用户回答推进阶梯/更新 `restUntil`/`lastAnswerTs` 的处理函数 |
 | B3 | Day 3–5 | 手写 `frames.json`：25 场景期望 `FeatureFrame` | ✅ | 代码核查：`src/mock/frames.json` 已就绪，含 `lastAnchorSnapshot`/`systemIdle` 相关场景 |
 | B4 | Day 3–5 | 独立 React 桌宠组件（陪伴/观察/check-in 三态），暂不进扩展 | ⬜ | 可与 B1 并行独立开始 |

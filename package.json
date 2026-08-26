@@ -9,7 +9,8 @@
     "build": "vite build",
     "dev": "vite",
     "typecheck:engine": "tsc -p tsconfig.engine.json --noEmit",
-    "typecheck:platform": "tsc -p tsconfig.platform.json --noEmit"
+    "typecheck:platform": "tsc -p tsconfig.platform.json --noEmit",
+    "typecheck": "npm run typecheck:engine && npm run typecheck:platform"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.7.1",
