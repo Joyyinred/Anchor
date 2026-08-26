@@ -133,3 +133,18 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
     - 域名相关性判断还是用现成的黑白名单兜底表，真正的 LLM 判断（A8）还没接，判不出的先按"未知"处理，不会卡住整个流程。
     - 验证：`npm run typecheck`、`npm test`（57/57，没碰引擎代码所以数量没变）、`npm run build`（新文件正常被打包进去）都过了。这块也是真实 chrome API 代码，跟 signals.ts 一样，暂时没有自动化测试覆盖。
 
+6. **合并 `B4` → `J4`**：把 Joy 的 B1/B2/B4 分支合并进当前分支，`ort` 策略自动合并成功，两边都改过的 `detector.ts`/`types.ts`/`perceiver.ts` 没有冲突标记。合并后跑了一遍全套验证：`npm run typecheck` 两边干净、`npm test` **78/78 全绿**（多了 Joy 的 `b2.test.ts` 6 条 + `metascenario.test.ts` 15 条）、`npm run build` 正常出包。
+
+7. **`/code-review` 跑了一轮合并后的 diff，发现10条问题**：
+    - **①`createRestState()` 从没被真正接到 `BState.restUntil` 上**（`detector.ts`）：函数自己文档说"写了 restUntil 就能让 isDrifting/isStuck 静默"，但翻遍仓库没有任何调用方真的把它的返回值赋回 `state.restUntil`（只有测试用例手写死值）。等于"休息"这个功能现在点了也没用，DRIFT/STUCK 该提醒还是会提醒。
+    - **②`state.lastCheckInTs` 从没被写过**（`detector.ts`）：同样只有测试手写。`isDrifting`/`isStuck` 里 5 分钟冷却闸门 `now - state.lastCheckInTs < CHECKIN_COOLDOWN_MS` 因为 `lastCheckInTs` 永远是初始值 `-Infinity`，这个判断永远是 false，冷却机制形同虚设——一旦 `applyCheckInFeedback` 真正接到 UI 上，同一帧可能连续触发好几次 check-in。
+    - **③`restReminderDue()` 用的是精确取模判断**（`detector.ts`）：`(elapsed - 首次提醒延迟) % 重复间隔 === 0`，这种写法只有在心跳节拍和"用户点休息的那一刻"严格对齐时才会命中。真实心跳是全局固定节拍的闹钟（比如整点起 1 分钟一次），跟用户随时可能点下"休息"的时刻基本不可能对上，实际跑起来这个提醒大概率永远不触发——单测能过是因为测试直接传的是 15/20/25 分钟的整数倍时间点。
+    - **④`src/pet/cat.tsx` 的 check-in 按钮隐藏时依然能被键盘 tab 到并触发**：按钮是否可点只看 `onAnswer` 是否传了值，不看 `state === 'checkin'`；气泡隐藏用的是 CSS `opacity`/`pointer-events`，不是 `display:none`，所以不在 checkin 态时按钮还留在 tab 顺序里，键盘用户 tab 过去按回车会在气泡根本没显示的情况下把 `onAnswer` 触发出去。
+    - **⑤`applyCheckInFeedback` 在阶梯为空数组时静默跳过重置**（`detector.ts`）：STUCK 通道下用户答"飘了"应该无条件把阶梯重置回第0格（文档也是这么写的），但代码里包了一层 `ladderLen > 0` 才会重置——VIEWER 档的 `stuckLadderMs` 就是空数组，如果哪天运行时把档位切到 VIEWER，这条重置会悄悄不生效。
+    - **⑥`defaultSessionContext()` 浅拷贝导致数组共享**（`types.ts`）：`validatePolicy({ ...PROFILE_PRESETS.CREATOR })` 只展开了一层，`stuckLadderMs` 这个数组本身还是和模块级 `PROFILE_PRESETS.CREATOR.stuckLadderMs` 同一个引用——函数注释说自己是"防御性拷贝、不会污染预设"，实际上没做到。以后谁要是原地改了某个会话的 `stuckLadderMs`（仓库里 `applyCheckInFeedback` 本来就有原地改 state 的先例），会连带把全局共享的预设值也改坏。
+    - **⑦`src/devpreview/` 本地预览工具路径写错，跑不起来**：`main.tsx` 里 `'../src/pet/cat'` 从 `src/devpreview/` 出发应该是 `../pet/cat`，多写了一层 `src/`，实际会指向不存在的 `src/src/pet/cat`；`Devpreview.vite.config.ts` 又把 `root` 设成了 `'devpreview'` 而不是 `'src/devpreview'`。这俩加一起就是 Joy 8.26 遇到的"连不上本地预览"问题的真实原因，不是防火墙/安全软件的锅（updateNote 里之前记的排查方向猜错了）。
+    - **⑧`defaultSessionContext()` 和 `session.ts` 里原有的默认会话逻辑重复维护**（`types.ts` / `platform/background/session.ts`）：`session.ts` 的 `getOrInitSessionContext()` 还是用自己那份本地写死的 `DEFAULT_GRACE_MS`、`taskDeclaration: ''`、没过 `validatePolicy` 的 `policy: preset`，没有改成调用新写好的 `defaultSessionContext()`。以后契约里"无起步教练默认策略"这块只要改一处（比如宽限期时长），很容易忘了另一处也要同步改。
+    - **⑨`CheckInAnswer` 类型在 `src/pet/types.ts` 和 `src/engine/types.ts` 里各手写了一份**，没有共享引用，两边字面量哪天有一个改了另一个没跟着改，TypeScript 不会报错。而且 `CuteAnchorPet` 的 `onAnswer` 目前只回传 `answer`，不带 `channel`，但 `applyCheckInFeedback` 需要的是 `{channel, answer}` 一整个 `CheckInFeedback`——真要把桌宠气泡接到决策半上时，`channel` 从哪来还没设计。
+    - **⑩（小问题，顺手一提）`applyCheckInFeedback` 里 `ladderLen > 0` 这个判断在"在专注"和"飘了"两个分支里各写了一遍**，其实跟具体答案无关，可以提到外面包一次，不然以后加第三种回答类型很容易忘记也要包这个判断。
+
+
