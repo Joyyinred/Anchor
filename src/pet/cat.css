@@ -42,7 +42,7 @@
   width: 100%;
   max-width: 280px;
   margin: 0 auto;
-  padding: 200px 20px 6px;   /* was 60px 20px 6px — bubble is ~158px tall, 60px clipped it */
+  padding: 236px 20px 6px;   /* was 60px 20px 6px — bubble is ~158px tall, 60px clipped it */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -63,7 +63,7 @@
 /* ── check-in 气泡 ── */
 .anchor-pet-bubble {
   position: absolute;
-  top: -6px;
+  top: -30px;
   left: 50%;
   transform: translate(-50%, -100%) scale(0.2);   /* was scale(0.9) — bigger delta so it visibly "pops" from a point */
   transform-origin: 188px 100%;                 /* pinned to the badge's x, bottom edge — bubble grows out of the badge, not its own center */
@@ -173,23 +173,31 @@
   animation: ap-badge-pop 0.4s cubic-bezier(.34,1.56,.64,1);   /* plays once each time it enters checkin */
 }
 
-/* 角落专注时长标签 */
+/* 角落专注时长标签：常态不显示，鼠标悬停在锚徽章上才弹出（配角数据，别喧宾夺主，见 types.ts 注释） */
 .anchor-pet-focus-tag {
   position: absolute;
-  top: 14px;
-  right: 14px;
+  bottom: calc(100% + 14px);   /* 悬浮在徽章正上方，不再常驻在舞台右上角 */
+  right: -8px;                 /* 跟徽章自己的 right 偏移对齐 */
   font-size: 11px;
   font-weight: 700;
-  color: var(--ap-ink-faint);
-  background: var(--ap-paper);
+  color: var(--ap-ink-soft);
+  background: var(--ap-card);
   border: 1px solid var(--ap-line);
-  padding: 3px 8px;
+  padding: 4px 9px;
   border-radius: 999px;
+  white-space: nowrap;
+  box-shadow: 0 4px 10px -4px hsl(var(--ap-shadow) / 0.35);
   opacity: 0;
-  transition: opacity 0.4s ease;
+  transform: translateY(4px) scale(0.9);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 6;
   font-variant-numeric: tabular-nums;
 }
-.anchor-pet-stage[data-state="companion"] .anchor-pet-focus-tag[data-visible="true"] { opacity: 1; }
+.anchor-pet-badge:hover + .anchor-pet-focus-tag[data-visible="true"] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
 
 @media (prefers-reduced-motion: reduce) {
   .anchor-pet, .anchor-pet * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }

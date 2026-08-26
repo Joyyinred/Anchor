@@ -81,15 +81,6 @@ export function CuteAnchorPet({
   return (
     <div className={wrapperClass}>
       <div className="anchor-pet-stage" data-state={state}>
-        {focusedMinutes !== undefined && (
-          <span
-            className="anchor-pet-focus-tag"
-            data-visible={state === 'companion'}
-          >
-            Focused {focusedMinutes} min
-          </span>
-        )}
-
         <div className="anchor-pet-wrap">
           <div className="anchor-pet-bubble" role="status" aria-live="polite">
             <span>{bubbleText}</span>
@@ -123,6 +114,16 @@ export function CuteAnchorPet({
                 <path d="M4 13h4M16 13h4" />
               </svg>
             </span>
+            {/* 紧跟在锚徽章后面才能吃到 cat.css 里 .anchor-pet-badge:hover + .anchor-pet-focus-tag
+                这条相邻兄弟选择器——鼠标悬停在锚上才弹出，不再是常驻在右上角的标签。 */}
+            {focusedMinutes !== undefined && (
+              <span
+                className="anchor-pet-focus-tag"
+                data-visible={state === 'companion'}
+              >
+                Focused {focusedMinutes} min
+              </span>
+            )}
           </div>
         </div>
       </div>
