@@ -211,10 +211,16 @@
           "note": "12min < CREATOR 首阶梯 15min"
         },
         {
-          "now": 931000,
-          "frame": { "contextRelevance": "RELEVANT", "texture": "idle", "stillnessMs": 931000 },
+          "now": 900001,
+          "frame": { "contextRelevance": "RELEVANT", "texture": "idle", "stillnessMs": 900001 },
+          "expectedAction": "DO_NOTHING",
+          "note": "刚越过 15min 阈值（严格大于，900000 本身不算越过），stuckSustainer 刚起计时"
+        },
+        {
+          "now": 931001,
+          "frame": { "contextRelevance": "RELEVANT", "texture": "idle", "stillnessMs": 931001 },
           "expectedAction": "CHECK_IN_STUCK",
-          "note": "15min31s，越过阈值且已持续 30s 以上（v4 CREATOR 阶梯首档=15min，与原始 v0 的 16min 数字不同，按 v4 校正）"
+          "note": "31s 后 stuckSustainer 满足 30s 持续窗口"
         }
       ]
     },
