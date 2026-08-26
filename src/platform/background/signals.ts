@@ -4,7 +4,9 @@ import type { SessionContext, SignalEvent } from '../../engine/types';
 import { domainMatches } from '../../engine/perceiver';
 import { guessContentKind, mapEntryIntent } from './heuristics';
 import { getOrInitSessionContext } from './session';
+import { getDemoMode } from './state';
 import { domainOf } from './domain';
+import { recordEventAndComputeFrame } from './frame-pipeline';
 
 interface LiveTabInfo {
   tabId: number;
@@ -31,6 +33,8 @@ function isAnchorMatch(domain: string, anchor: SessionContext['anchor']): boolea
   return domainMatches(domain, anchor.domain);
 }
 
+// A7：真实事件流不再只打日志——喂进感知半（computeFeatureFrame）产出 FeatureFrame，
+// 这条路径替换的是 mock events.json 那条测试专用路径
 async function emitSignalEvent(reason: string): Promise<void> {
   if (!currentTab) return;
   const ctx = await getOrInitSessionContext();
@@ -45,7 +49,10 @@ async function emitSignalEvent(reason: string): Promise<void> {
     entryIntent: currentTab.entryIntent,
     systemIdle,
   };
+  const isDemoMode = await getDemoMode();
+  const frame = await recordEventAndComputeFrame(event, ctx, isDemoMode);
   console.log(`[Anchor SW] SignalEvent (${reason})`, event);
+  console.log('[Anchor SW] FeatureFrame', frame);
 }
 
 export function isTrackedTab(tabId: number): boolean {
@@ -59,7 +66,7 @@ export function isTrackedTab(tabId: number): boolean {
 export async function ensureCurrentTab(): Promise<void> {
   if (currentTab) return;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  // 等待查询期间，一次真正的 tabs.onActivated 可能已经把 currentTab 填上了——不要用这次
+  // 等待查询期间，一次真正的 tabs.onActivated 可能已经把 currentTab 填上了，所以不要用这次
   // 可能已经过期的查询结果覆盖掉它（同一类 await-期间竞态，和 onActivated 里的问题是一回事）。
   if (currentTab) return;
   if (!tab?.id || !tab.url) return;
