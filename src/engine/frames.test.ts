@@ -123,7 +123,7 @@ describe('B5: frames.json → evaluateFrame() 的 DetectionResult.action 断言'
       const isDemoMode = scenario.demoMode ?? false;
 
       // 同一场景内多个 steps 共用同一个 state——持续器要跟着真实 now 推进自然累积/清零，
-      // 跟 detector.ts 里 sustainedWithWindow/isContinuouslyPassive 就地改 state 的方式一致。
+      // 跟 detector.ts 里 sustainedWithWindow/isContinuouslyDisengaged 就地改 state 的方式一致。
       for (const step of scenario.steps) {
         const frame = buildFrame(step.now, step.frame, sessionId);
         const action = evaluateFrame(frame, archetype, ctx.profile.policy, ctx, state, step.now, isDemoMode);

@@ -337,6 +337,32 @@
           "note": "scaled(8min)=4000ms，scaled(30s)=250ms，scaled(60s)=500ms，全部在 <5000ms 内完成"
         }
       ]
+    },
+    {
+      "id": 25,
+      "desc": "08-27 回归测试：texture=idle（完全无交互，比 passive 更\"静\"）在 IRRELEVANT 页上也应算作纹理证据——跟场景3 完全同构，唯一区别是 texture 从 passive 换成 idle，验证 isContinuouslyDisengaged 不再把 idle 排除在外（修复前 idle 会一直被判 DO_NOTHING）",
+      "archetype": "CREATOR",
+      "graceUntil": 0,
+      "steps": [
+        {
+          "now": 600000,
+          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 610000, "texture": "idle", "currentDomain": "youtube.com" },
+          "expectedAction": "DO_NOTHING",
+          "note": "证据刚出现，passiveSince/driftSustainer 都刚起计时"
+        },
+        {
+          "now": 665000,
+          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 675000, "texture": "idle", "currentDomain": "youtube.com" },
+          "expectedAction": "DO_NOTHING",
+          "note": "65s：连续 idle 段刚过 60s 门槛，textureEvidence 才变 true，driftSustainer 才开始计时"
+        },
+        {
+          "now": 696000,
+          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 706000, "texture": "idle", "currentDomain": "youtube.com" },
+          "expectedAction": "CHECK_IN_DRIFT",
+          "note": "距上一帧 31s，driftSustainer 的 30s 持续窗口满足——修复前这里会一直是 DO_NOTHING"
+        }
+      ]
     }
   ],
   "metaScenarios": {

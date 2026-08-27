@@ -4,16 +4,16 @@
 // 已经是 B1/08-26 code review 修过的版本）算出 DetectionResult，side panel 要的就是这个，
 // 不是裸 FeatureFrame——B 的纯函数本身不碰 chrome.storage，BState 的持久化/水合仍然是
 // A（平台层）的职责，跟 eventHistory/currentTab 是同一套"SW 回收后重新水合"模式。
-import type { SignalEvent, SessionContext, FeatureFrame, DetectionResult, BState, CheckInFeedback } from '../../engine/types';
+import type { SignalEvent, SessionContext, FeatureFrame, DetectionResult, BState, BStatePersistable, CheckInFeedback } from '../../engine/types';
 import { createInitialBState } from '../../engine/types';
 import { computeFeatureFrame, cacheKey, type ClassificationCache } from '../../engine/perceiver';
 import { evaluateFrame, applyCheckInFeedback } from '../../engine/detector';
 import { classifyDomainRelevance } from './classifier';
+import { getBState, setBState } from './state';
 
 type Archetype = 'CREATOR' | 'READER' | 'VIEWER';
 
 const HISTORY_KEY_PREFIX = 'anchor_event_history_';
-const BSTATE_KEY_PREFIX = 'anchor_bstate_';
 // computeFeatureFrame 的 anchorDetachedMs/jumpPattern 理论上要看完整历史，但实际不需要无限回看：
 // 一旦「距上次锚点交互」超过阈值就已经判定为脱离，再往前找没有额外信息量。留 4 小时窗口/500 条
 // 上限只是防止真实长会话下这个数组和它的持久化副本无限增长，不是契约要求的精确数字。
@@ -41,8 +41,16 @@ function historyKey(sessionId: string): string {
   return `${HISTORY_KEY_PREFIX}${sessionId}`;
 }
 
-function bStateKey(sessionId: string): string {
-  return `${BSTATE_KEY_PREFIX}${sessionId}`;
+// engine/types.ts 把 BState 分成两半是有意为之：BStatePersistable 那些字段该活过 SW 回收，
+// driftSustainer/stuckSustainer/passiveSince（EvidenceSustainer）明确注释是"不持久化的部分"——
+// 持续器记的是"这一次连续证据从什么时候开始累计"，SW 被回收重启后这个"连续"就已经断了，
+// 把旧的 since 时间戳原样存盘再读回来，会让重启后第一次评估拿一个跟当前 now 差很远的旧
+// 时间戳去跟阈值比，可能凭一段其实并不连续的证据就误判"已经持续够久"，提前触发。
+// 落盘只存 BStatePersistable 这一半，持续器每次水合都给一份全新的（跟 createInitialBState
+// 冷启动时用的初值一致），是保守但正确的选择——顶多是重启后重新攒一次证据窗口，不会误判。
+function toPersistable(state: BState): BStatePersistable {
+  const { driftSustainer, stuckSustainer, passiveSince, ...persistable } = state;
+  return persistable;
 }
 
 function trim(events: SignalEvent[], now: number): SignalEvent[] {
@@ -66,9 +74,12 @@ async function ensureHistoryLoaded(sessionId: string): Promise<void> {
 // stuckThresholdMs 的初始值（阶梯第 0 格），跟 evaluateFrame 后续要用的 policy 对应同一个档位。
 async function ensureBStateLoaded(sessionId: string, archetype: Archetype): Promise<BState> {
   if (bStateLoadedForSession === sessionId && bState) return bState;
-  const key = bStateKey(sessionId);
-  const stored = await chrome.storage.local.get(key);
-  bState = (stored[key] as BState | undefined) ?? createInitialBState(archetype);
+  const persisted = await getBState(sessionId);
+  // 持续器不是持久化的一部分（见 toPersistable 的注释）——不管是全新会话还是从存盘的
+  // BStatePersistable 水合回来，持续器都给一份全新初值，不沿用任何"上一次 SW 实例"留下的状态。
+  bState = persisted
+    ? { ...persisted, driftSustainer: { since: null }, stuckSustainer: { since: null }, passiveSince: null }
+    : createInitialBState(archetype);
   bStateLoadedForSession = sessionId;
   return bState;
 }
@@ -88,8 +99,9 @@ async function evaluateAndPersist(
   const state = await ensureBStateLoaded(ctx.sessionId, archetype);
   const action = evaluateFrame(frame, archetype, ctx.profile.policy, ctx, state, now, isDemoMode);
   // evaluateFrame 可能就地改了 state.lastCheckInTs（触发 check-in 的那一刻）——存盘，
-  // 不然下一次 SW 回收重启后冷却闸门会读回没生效前的旧值。
-  void chrome.storage.local.set({ [bStateKey(ctx.sessionId)]: state });
+  // 不然下一次 SW 回收重启后冷却闸门会读回没生效前的旧值。只存 BStatePersistable 那一半
+  // （toPersistable 剥掉持续器），不是完整 BState。
+  void setBState(ctx.sessionId, toPersistable(state));
 
   return {
     action,
@@ -108,9 +120,11 @@ function triggerLazyClassification(event: SignalEvent, ctx: SessionContext, fram
   if (inFlightClassification.has(key) || classificationCache.has(key)) return;
 
   inFlightClassification.add(key);
+  console.log('[Anchor SW] classifying (async)', key);
   void classifyDomainRelevance({ taskDeclaration: ctx.taskDeclaration, url: event.url, title: event.title })
     .then((verdict) => {
       classificationCache.set(key, verdict);
+      console.log('[Anchor SW] classified', key, '->', verdict);
     })
     .finally(() => {
       inFlightClassification.delete(key);
@@ -188,5 +202,5 @@ export async function applyCheckInAnswer(
   const archetype = ctx.profile.archetype as Archetype;
   const state = await ensureBStateLoaded(ctx.sessionId, archetype);
   applyCheckInFeedback(state, ctx.profile.policy, feedback, now);
-  void chrome.storage.local.set({ [bStateKey(ctx.sessionId)]: state });
+  void setBState(ctx.sessionId, toPersistable(state));
 }

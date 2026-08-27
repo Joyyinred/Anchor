@@ -5,7 +5,7 @@ import { getDemoMode, setDemoMode } from './state';
 import { getOrInitSessionContext } from './session';
 import { ensureCurrentTab, handleInteractionMessage, isTrackedTab, registerSignalListeners } from './signals';
 import { applyCheckInAnswer, recomputeOnHeartbeat } from './frame-pipeline';
-import { pushPanelState } from './panel';
+import { pushPanelState, pushCompanionState } from './panel';
 
 const HEARTBEAT_ALARM_NAME = 'anchor-heartbeat';
 const HEARTBEAT_PERIOD_MINUTES = 1;
@@ -42,11 +42,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     // SignalEvent，只靠事件触发那条路径，anchorDetachedMs/stillnessMs 会永远停在最后一个
     // 事件的时间戳上——心跳周期性用当前时刻重新跑一次评估，不需要新事件也能让证据继续累积。
     void (async () => {
+      const now = Date.now(); // 一次心跳只有一个"此刻"——frame/result 和推给 panel 的
+      // 文案（"X 分钟前"）必须算的是同一个 now，不能分两次各取各的，见 08-27 code review。
       const isDemoMode = await getDemoMode();
       const ctx = await getOrInitSessionContext();
-      const outcome = await recomputeOnHeartbeat(ctx, Date.now(), isDemoMode);
+      const outcome = await recomputeOnHeartbeat(ctx, now, isDemoMode);
       if (!outcome) return;
-      await pushPanelState(outcome.frame, outcome.result, Date.now());
+      await pushPanelState(outcome.frame, outcome.result, now);
       console.log('[Anchor SW] heartbeat FeatureFrame', outcome.frame);
       console.log('[Anchor SW] heartbeat DetectionResult', outcome.result);
     })();
@@ -74,6 +76,9 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
     void (async () => {
       const ctx = await getOrInitSessionContext();
       await applyCheckInAnswer(ctx, { channel: message.channel, answer: message.answer }, Date.now());
+      // check-in 已经处理完了——立刻把 panel 摘出 checkin 态，不能干等下一次心跳/事件
+      // 才刷新（那样按钮还留在 UI 上能点，手快的话 applyCheckInFeedback 会被再触发一次）。
+      await pushCompanionState();
       console.log('[Anchor SW] applied check-in feedback', message.answer, message.channel);
     })();
     return;

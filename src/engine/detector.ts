@@ -34,14 +34,21 @@ function sustainedWithWindow(
   return now - sustainer.since >= windowMs;
 }
 
-// 辅助：判断是否连续被动纹理
-function isContinuouslyPassive(
+// 辅助：判断是否连续处于"非主动"纹理（passive 或 idle）。
+// 08-27 修正：原来只认 'passive'，'idle' 会把 passiveSince 重置掉——但 'idle'（120s 窗口内
+// 连 PASSIVE_SCROLL 都没有）语义上比 'passive'（至少还在被动滚动/僵尸连播）更"静"，是
+// 更强的走神证据，不该被排除在外。契约v4 §3.4/§3.5 的参考实现原来就是这样写的（只认
+// 'passive'），核对后确认这是契约本身的设计漏洞，不是刻意排除 idle 的设计边界：结果是
+// "IRRELEVANT + 完全不动"这种比"IRRELEVANT + 还在被动滚动"更明确的走神场景，DRIFT 判不出来
+// （STUCK 又明确排除 IRRELEVANT，见 isStuck），两个通道都接不住。只有 'purposeful'
+// （用户还在主动操作）才应该打断这段连续证据。
+function isContinuouslyDisengaged(
   state: BState,
   f: FeatureFrame,
   now: number,
   thresholdMs: number
 ): boolean {
-  if (f.texture !== 'passive') {
+  if (f.texture === 'purposeful') {
     state.passiveSince = null;
     return false;
   }
@@ -86,9 +93,9 @@ export function isDrifting(
 
   const anchorAbandoned = f.anchorDetachedMs > anchorDetachedThresholdMs;
 
-  // 纹理证据：连续 passive 达到门槛
+  // 纹理证据：连续处于非主动纹理（passive 或 idle）达到门槛——见 isContinuouslyDisengaged 注释。
   const textureEvidence =
-    !p.mutePassiveTexture && isContinuouslyPassive(state, f, now, scaled(60_000, isDemoMode));
+    !p.mutePassiveTexture && isContinuouslyDisengaged(state, f, now, scaled(60_000, isDemoMode));
 
   // 跳转证据
   const jumpEvidence = !p.muteJumpPattern && f.jumpPattern === 'rabbit_hole';

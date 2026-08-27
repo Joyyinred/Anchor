@@ -106,12 +106,35 @@
 
 之后又用真实 YouTube 播放 8 分钟测试 DRIFT/STUCK，`action` 一直是 `DO_NOTHING`。排查发现是比 A8 更底层的问题：**心跳没有真正驱动重新评估**——`content-script.ts` 只在离散 DOM 事件（keydown/scroll/pause/seek/play）时才发消息，安静看视频不产生新事件；`background/index.ts` 的心跳 alarm 之前只调 `ensureCurrentTab()`，从没重新跑过 `computeFeatureFrame`/`evaluateFrame`。这正是契约v4 §3.1"事件静默 >60s 补帧"要求的行为，A7 阶段规划过但没有真正实现。修法：`frame-pipeline.ts` 抽出 `evaluateAndPersist()` 共享逻辑，新增 `recomputeOnHeartbeat(ctx, now, isDemoMode)`——复用已有 `eventHistory`、只是把 `now` 换成心跳触发的当前时刻（`anchorDetachedMs`/`stillnessMs` 都是 `now - 上次活动时间戳`，会正确继续增长）；`background/index.ts` 心跳回调里接上，顺带把结果推给 `pushPanelState()`。
 
-✅（08-27/Jay）A8：`classifyDomainRelevance` 真实 LLM 实现。跟 Jay 确认：Anthropic Claude、API key 走手动控制台 `chrome.storage.local.set({anchor_llm_api_key:'...'})`（跟 `anchor_demo_mode` 同一个模式，不做专门 options 页面）。
-- 新增 `src/platform/background/classifier.ts`：`buildPrompt()` 直接复用 `docs/分类prompt-v0.md` §1 那份 prompt；`fetch` 调 Anthropic Messages API（`claude-haiku-4-5-20251001`），带 `anthropic-dangerous-direct-browser-access` 头（Anthropic 官方给纯前端直连开的口子，否则被 CORS 拦）；10s 超时（`AbortController`）；解析响应 JSON，`confidence < 0.7` 强制降级 UNKNOWN（`docs/分类prompt-v0.md` §2）；没配 key/网络失败/超时/解析失败——每一种情况都安全落回 `UNKNOWN`，从不 throw（红线1/2）。
-- `frame-pipeline.ts` 新增 `triggerLazyClassification()`：只在 `computeFeatureFrame` 已经把当前页判成 `UNKNOWN` 时才触发（意味着 `DEMO_PRESET_CACHE`/`sessionWhitelist`/`short_feed`/黑名单/分类缓存全部没命中——不用在平台层重复一遍这条优先级判断），fire-and-forget，结果写回 `classificationCache` 供下一次重新计算帧（下一条事件或下一次心跳补帧）使用；`inFlightClassification` 这个 Set 防止同一个 `cacheKey` 在结果回来之前被重复请求。
-- 顺带发现 A9（本地黑白名单降级路径）其实已经随之满足：`resolveContextRelevance`（A2）本来的短路优先级就是黑名单/白名单/预置缓存排在 LLM 前面，`classifyDomainRelevance` 的任何失败都不影响这几层——断网/API 挂了，引擎表现和"还没接 LLM 之前"完全一样，不会连带炸。
-- 验证：`npm run typecheck` 两边干净，`npm test` 128/128（没碰任何已有测试文件，`classifier.ts` 依赖真实 `fetch`/`chrome.storage`，跟 `signals.ts` 同类，属于已记录过的"没有 chrome API mock 测试基建"遗留缺口，不是这次新增的），`npm run build` 正常出包（34 模块）。还没做真实 API key 的端到端验证（需要 Jay 自己配 key 测）。
 
+✅（08-27/Jay）A8 LLM：使用Groq:
+- **分类（高频、短文本、每页一次）**： Groq `openai/gpt-oss-20b` → 不行落回 `UNKNOWN`（原有 `DEMO_PRESET_CACHE`/黑名单短路不受影响）。
+- **起步教练 + check-in 措辞（低频、需要措辞质量）**：Groq `openai/gpt-oss-120b`。check-in 措辞（B7 `wording.ts`）是 Joy 已经测试过的确定性模板函数，这次不碰，只把 Groq 120b 接进起步教练（B6）已有的 `StarterCoachLLMCall` 注入口——起步教练的 UI 本身还没建，这次只把"接上真实 LLM"这一步准备好，不接线。
+- 新增 `src/platform/background/groq.ts`：Groq（OpenAI 兼容）chat completions 的共用 fetch 封装，key 走 `chrome.storage.local`（`anchor_groq_api_key`，跟 `anchor_llm_api_key`/`anchor_demo_mode` 同一套手动控制台配置模式），任何失败都返回 `null` 不 throw。
+- 重写 `src/platform/background/classifier.ts`：`tryGroq()` 走 `gpt-oss-20b`.
+- 新增 `src/platform/background/starter-coach.ts`：`groqStarterCoachCall`，实现 `coach.ts` 的 `StarterCoachLLMCall` 接口——只产出"第一步物理动作"，不重新推导 `taskDeclaration`/`archetype`（跟 `coach.ts` 自己的设计边界一致）；调用失败直接 `throw`，交给 `runStarterCoach()` 已有的 `FIRST_ACTION_FALLBACK` 兜底接住，不重复兜底一次。
+- `anchor_llm_api_key`（Anthropic）不再被任何代码读取，是废弃配置，Jay 手动配过的话可以不用管（不影响任何东西，只是没人用）。
+- 验证：`npm run typecheck` 两边干净，`npm test` 128/128，`npm run build` 正常出包（35 模块）。同样还没做真实 key 端到端验证——`groqStarterCoachCall` 目前也还没有任何调用方（起步教练 UI 未建），typecheck 干净只说明类型对得上，不代表跑过。
+
+✅（08-27/Jay）Jay 端到端手测暴露出更多层问题（不是 bug，是设计边界一层层浮出来）：先是 YouTube 视频反复出现 `contextRelevance: UNKNOWN`，一路排查到根因——`taskDeclaration` 现在还是"无起步教练默认策略"给的占位文案（"No task declared..."），LLM 被问"这页面跟'没有任务'相关吗"本来就答不出来，`UNKNOWN` 反而是模型的正确保守回答，不是分类链路的锅。`defaultSessionContext()`（B1）没有问题，缺的是起步教练 UI 从没建过，没人真的把一个具体任务喂给 `SessionContext.taskDeclaration`。
+
+跑了一轮 `/code-review`，4 条发现全部核实为真并修完：
+- **check-in 答完 side panel 不刷新** → `panel.ts` 新增 `pushCompanionState()`，`index.ts` 的 `CHECK_IN_ANSWER` 处理完 `applyCheckInAnswer()` 后立刻调用，不再等下一次心跳/事件才把 `state:'checkin'` 摘掉——之前这段窗口期按钮还留在 DOM 里能点，手快会把 `applyCheckInFeedback` 触发两次。
+- **持久化了 `BState` 里明确标注"不持久化"的持续器字段** → `frame-pipeline.ts` 新增 `toPersistable()`，落盘/`ensureBStateLoaded()` 水合时都只处理 `BStatePersistable` 那一半，`driftSustainer`/`stuckSustainer`/`passiveSince` 每次水合都给全新初值；顺带把本来重复造轮子的本地 storage key 逻辑换成 `state.ts` 已有的 `getBState`/`setBState`（之前是没人调用的死代码，见 08-27 早些时候记录），两处收敛成一处。
+- **心跳里两次 `Date.now()`** → 改成只取一次 `now`，`recomputeOnHeartbeat` 和 `pushPanelState` 用同一个值。
+- **`classifier.ts`/`starter-coach.ts` 各写一份 JSON 提取逻辑** → 提到 `groq.ts` 的 `extractJsonObject()`，两边共用，各自再做自己的字段校验。
+- 验证：`npm run typecheck` 两边干净，`npm test` 128/128，`npm run build` 正常出包（35 模块）。
+
+⚠️（08-27/Jay，记录待办，未动代码）**A8 和 B6 目前完全没接上**——查过 `session.ts`/`coach.ts`/`starter-coach.ts` 的调用关系，确认这是个真实缺口：
+- `session.ts` 的 `getOrInitSessionContext()`（`taskDeclaration` 唯一的写入点）只调 `defaultSessionContext()`，从不知道 `runStarterCoach()` 的存在。
+- `runStarterCoach()`（B6）只有 `coach.test.ts` 在调用它；`groqStarterCoachCall`（今天新增，Groq 版 LLM 调用）目前没有任何调用方。
+- 后果：没有任何 UI/消息通道能让用户真正声明一个任务，`ctx.taskDeclaration` 永远停在占位文案"No task declared (default companion mode)"——这正是这几天测试时 A8 分类经常判成 `UNKNOWN` 的根因（模型被问"这页面跟'没有任务'相关吗"，答不出来是它的正确保守回答，不是分类链路本身的锅）。
+- 这个缺口比现有的 B8/B9（桌宠接线/状态机）更窄、更具体——是"起步教练完全没有 UI 入口，也没人把它的产出写回 `SessionContext`"，卡在 B6 和 A13 之间，两边现有的任务描述都没直接点出来。先记录，等 B6 的真实 UI 动工时一起做。
+
+✅（08-27/Jay）跟进上面同一次真机测试还发现的另一层问题：`texture: 'idle'`（120s 窗口内连 `PASSIVE_SCROLL` 都没有）在 IRRELEVANT 页面上既不触发 DRIFT 也不触发 STUCK（STUCK 本来就明确排除 IRRELEVANT）。核对过契约v4 §3.4/§3.5 参考伪代码，复核后确认这其实是设计漏洞（"完全不动 + 内容无关"没道理比"还在被动滚动 + 内容无关"更不算走神），改代码修复：
+- `src/engine/detector.ts` 的 `isContinuouslyPassive()` 改名 `isContinuouslyDisengaged()`：原来 `f.texture !== 'passive'` 就重置证据计时器（等于把 `'idle'` 当"没证据"处理），改成只有 `f.texture === 'purposeful'`（用户还在主动操作）才重置——`'passive'`/`'idle'` 现在共用同一套 60s 连续纹理证据窗口。`isDrifting()` 调用处同步改名；`isStuck()` 没有改动，STUCK 依然明确排除 IRRELEVANT。
+- `src/mock/frames.json` 新增场景25（回归测试）：照抄场景3（`passive` 纹理三步触发 DRIFT 的完整时间轴），只把 `texture` 换成 `'idle'`，其余完全一致——验证两种纹理现在走同一套判定。手动验证过测试真的能抓住这个 bug：临时 `git stash` 掉 `detector.ts` 的改动单独跑场景25，精确失败在预期那一步（`Expected "CHECK_IN_DRIFT", Received "DO_NOTHING"`）。
+- 验证：`npm run typecheck` 两边干净，`npm test` **129/129 全绿**（`frames.test.ts` 22→23），`npm run build` 正常出包。这处改动碰的是 `detector.ts`（B1/B3 的内容）。
 ---
 
 ## 一、联合任务（A + B 共同，跨人的缝都在这里）
@@ -121,7 +144,7 @@
 | J1 | Day 1–2 | 共定三契约：`SignalEvent` / `FeatureFrame` / `SessionContext` | ✅ | 契约 v4 已定稿（`docs/契约v4.md`），含 22 条审计修订 |
 | J2 | Day 1–2 | 准备两套 mock：`events.json`（A 用）+ `frames.json`（B 用） | ✅ | 代码核查：`events.json` 25 场景齐全；`frames.json` 覆盖场景 1-21/24 + metaScenarios 22/23，均已就绪 |
 | J3 | Day 5 | 两半合流：感知半（A）+ 决策半（B）纯函数拼接，25 场景端到端全绿 | ✅ | `src/engine/integration.test.ts`：23/23 可测场景全绿（22/23 是独立函数验收，不适用），★关键检查点一达成 |
-| J4 | Day 6–8 | 真实信号接入 + 桌宠组件进 MV3 side panel 联调 | 🔄 | 代码链路已打通：真实信号→`FeatureFrame`→`DetectionResult`→`PanelState`→side panel 渲染桌宠→用户回答→`applyCheckInFeedback` 回写，`companion`/`observing` 区分暂用占位（真正的状态机是 B9，还没开工）；还没做浏览器手动验证（这台机器 Chrome 需要手动开一次开发者模式），验证过才能过 J4 |
+| J4 | Day 6–8 | 真实信号接入 + 桌宠组件进 MV3 side panel 联调 | 🔄 | A11 已完成并真机验证通过：真实信号→`FeatureFrame`→`DetectionResult`→`PanelState`→side panel 渲染桌宠→用户回答→`applyCheckInFeedback` 回写，全链路跑通。仍卡在 B8/B9（桌宠真正接线到状态机，`companion`/`observing` 目前是占位没有真状态机）——J4 要标 ✅ 还差这块 |
 | J5 | Day 8 | 真实浏览器复现两个反差瞬间（疯狂切 tab 不打扰 + 飘走触发 check-in） | ⬜ | ★关键检查点二；依赖 J4 |
 | J6 | Day 9–10 | 确认 `SessionContext` 正确喂给 A 感知半（B→A 反向缝） | ⬜ | 依赖 J5、B6 |
 | J7 | Day 10 | 端到端闭环验证：起步 → 陪伴 → 拉回 → 收尾反思 | ⬜ | 依赖 J6；过此项即阶段一验收通过 |
@@ -144,12 +167,12 @@
 | A5 | Day 5 | 感知半四信号计算实现 → `FeatureFrame` | ✅ | `src/engine/perceiver.ts`：四信号 + entryIntent/contentFormat/lastAnchorSnapshot 齐全，可插拔分类缓存留 A8 接真 LLM |
 | A6 | Day 5 | 单元测试：`events.json` → 断言 `FeatureFrame` 各字段正确 | ✅ | `src/engine/perceiver.test.ts`（20 项字段级单测）+ `integration.test.ts`（23 场景端到端）全绿；场景21 盲区修复已验证 |
 | A7 | Day 6 | 真实 `SignalEvent` 流替换 mock，接入感知半 | ✅ | `src/platform/background/frame-pipeline.ts`：事件历史持久化（`chrome.storage.local`，应对 SW 回收）+ 调用 `computeFeatureFrame` 产出真实 `FeatureFrame`，`signals.ts` 每次事件都会算并打日志；B 侧 `detector.ts` 未改动，LLM 分类缓存暂空（留给 A8）。57/57 测试绿，两份 typecheck 干净，`npm run build` 16 模块正常出包 |
-| A8 | Day 6 | `classifyDomainRelevance` 真实 LLM 实现（异步 + 惰性 + 缓存） | ✅ | `src/platform/background/classifier.ts`：真调 Anthropic Messages API（`docs/分类prompt-v0.md` §1 同一份 prompt，低置信度<0.7 强制 UNKNOWN）；`frame-pipeline.ts` 的 `triggerLazyClassification()` 只在感知半已判 UNKNOWN 时才异步触发，fire-and-forget 写回 `classificationCache`，不阻塞当前帧。key 走 `chrome.storage.local`（`anchor_llm_api_key`，手动控制台配置，不进代码仓库） |
+| A8 | Day 6 | `classifyDomainRelevance` 真实 LLM 实现（异步 + 惰性 + 缓存） | ✅ | `src/platform/background/classifier.ts`：Groq `gpt-oss-20b` → `UNKNOWN`（`docs/分类prompt-v0.md` §1 同一份 prompt，低置信度<0.7 强制 UNKNOWN；最初做过 Gemini Nano on-device 一级，08-27 按 Jay 要求为一致性移除，只留 Groq）；`frame-pipeline.ts` 的 `triggerLazyClassification()` 只在感知半已判 UNKNOWN 时才异步触发，fire-and-forget 写回 `classificationCache`，不阻塞当前帧。Groq key 走 `chrome.storage.local`（`anchor_groq_api_key`，手动控制台配置）；顺带把 Groq `gpt-oss-120b` 接进 B6 起步教练已有的 `StarterCoachLLMCall` 注入口（`src/platform/background/starter-coach.ts`），还没接线（B6 UI 未建）。08-27 `/code-review` 的 5 条发现已全部修复（详见日志） |
 | A9 | Day 6 | 本地黑白名单兜底接入（断网/API 失败时的降级路径） | ✅ | 随 A8 一并做完：`classifyDomainRelevance` 任何失败（无 key/网络/超时/解析）都安全落回 `UNKNOWN`，从不 throw；`resolveContextRelevance`（A2）的短路优先级本来就是 DEMO_PRESET_CACHE/sessionWhitelist/黑名单排在 LLM 之前，LLM 不可用时这几层完全不受影响地继续工作 |
 | A10 | Day 7 | demo 要用到的域名预热进缓存 | ⬜ | 依赖 A8，演示前必做 |
-| A11 | Day 7 | 协助桌宠组件接入 side panel（感知半→UI 消息链路：`chrome.runtime`/`chrome.storage`） | ⬜ | 对应 J4，A 侧负责部分 |
+| A11 | Day 7 | 协助桌宠组件接入 side panel（感知半→UI 消息链路：`chrome.runtime`/`chrome.storage`） | ✅ | 对应 J4，A 侧负责部分。`vite.config.ts` 接入 React 插件；`src/platform/panel-state.ts`（共享 `PanelState` 形状）+ `src/platform/background/panel.ts`（`DetectionResult`→`PanelState` 翻译，`pushPanelState`/`pushCompanionState`）+ `src/sidepanel/main.tsx`（真实 React 入口，`chrome.storage.onChanged` 订阅）+ `messages.ts` 新增 `CheckInAnswerMessage` + `index.ts`/`frame-pipeline.ts` 的回传处理（`applyCheckInAnswer`）。Jay 08-27 真机验证过：装上后侧边栏能渲染桌宠，真实浏览（YouTube/Gemini Notebook）触发的 `SignalEvent`→`FeatureFrame`→`DetectionResult` 全链路日志正常。`companion`/`observing` 的区分目前是占位（真正状态机是 B9，还没开工），不影响这条消息链路本身的完成度 |
 | A12 | Day 7 | 真实数据噪音处理：idle 抖动/tab 快切去抖节流 | ⬜ | 依赖 A7、J4 |
-| A13 | Day 9–10 | 消费 `SessionContext`：`anchor` 驱动锚点判定（matchMode）、`sessionWhitelist` 短路分类、跨 profile 验证准确性 | ⬜ | 依赖 J6 |
+| A13 | Day 9–10 | 消费 `SessionContext`：`anchor` 驱动锚点判定（matchMode）、`sessionWhitelist` 短路分类、跨 profile 验证准确性 | ⬜ | 依赖 J6；08-27 发现前置缺口：目前没有任何地方真正调用 B6 的 `runStarterCoach()` 并把结果写回 `session.ts` 的 `anchor_default_session`，`taskDeclaration` 永远是占位文案——A13 要消费的"真实 SessionContext"目前不存在，这个缺口需要先补上 |
 | A14 | Day 11–14 | 【阶段二】内容级分类落地（youtube/reddit/slack 按 `domain+path+title` 判并缓存） | ⬜ | 依赖 J7，补最大漏洞 |
 | A15 | Day 15–18 | 【阶段二】交互纹理精细化（keystroke/feed_scroll/media_seek 区分） | ⬜ | 依赖 A14 |
 | A16 | Day 15–18 | 【阶段二】短视频流形态硬判 + 更多 `contentKind` | ⬜ | 依赖 A15 |
@@ -162,13 +185,13 @@
 
 | 编号 | 时间 | 任务 | 状态 | 说明/产出 |
 |---|---|---|---|---|
-| B1 | Day 3–5 | 决策半实现：置信度模型 + `applyProfileMuting` + `isDrifting` / `isStuck` 阈值 + 宽限期 → `DetectionResult` | ✅ | `isDrifting`/`isStuck`/`evaluateFrame` 齐全；`defaultSessionContext`/`restReminderDue`（Joy 08-26 产出）补上了 metaScenario 22/23，`src/engine/metascenario.test.ts` 18 条全绿；08-26 code review 顺带修了 `startRest`/`lastCheckInTs`/共享数组等几个真 bug，见上方日志 |
+| B1 | Day 3–5 | 决策半实现：置信度模型 + `applyProfileMuting` + `isDrifting` / `isStuck` 阈值 + 宽限期 → `DetectionResult` | ✅ | `isDrifting`/`isStuck`/`evaluateFrame` 齐全；`defaultSessionContext`/`restReminderDue`（Joy 08-26 产出）补上了 metaScenario 22/23，`src/engine/metascenario.test.ts` 18 条全绿；08-26 code review 顺带修了 `startRest`/`lastCheckInTs`/共享数组等几个真 bug；08-27 真机测试又修了一个：`isContinuouslyPassive()`→`isContinuouslyDisengaged()`，`texture: 'idle'` 现在跟 `'passive'` 一样算 DRIFT 纹理证据（原来只认 `'passive'`），见上方日志 |
 | B2 | Day 3–5 | 自适应退让启发式（单会话，据 `CheckInFeedback` 调阈值） | ✅ | `applyCheckInFeedback()`（Joy 08-26 产出，`detector.ts`）：STUCK 通道按回答推进/重置阶梯，DRIFT 通道清空持续计时器，`src/engine/b2.test.ts` 7 条全绿；08-26 code review 修了空阶梯（VIEWER 档）静默跳过重置的 bug |
-| B3 | Day 3–5 | 手写 `frames.json`：25 场景期望 `FeatureFrame` | ✅ | 代码核查：`src/mock/frames.json` 已就绪，含 `lastAnchorSnapshot`/`systemIdle` 相关场景 |
+| B3 | Day 3–5 | 手写 `frames.json`：25 场景期望 `FeatureFrame` | ✅ | 代码核查：`src/mock/frames.json` 已就绪，含 `lastAnchorSnapshot`/`systemIdle` 相关场景；08-27 新增场景25（`texture: 'idle'` 的 DRIFT 回归测试，照抄场景3 的 `passive` 版本） |
 | B4 | Day 3–5 | 独立 React 桌宠组件（陪伴/观察/check-in 三态），暂不进扩展 | ✅ | `src/pet/cat.tsx`+`.css`+`assets/cat.json`（Joy 08-26 产出）：Lottie 矢量猫，三态靠锚徽章+气泡颜色区分，不靠猫变色；`src/devpreview/` 本地预览工具（路径 bug 已修，实测能正常打开三态预览）；08-26 code review 修了 check-in 按钮隐藏态仍可被键盘触发的问题 |
-| B5 | Day 5 | 单元测试：`frames.json` → 断言 `DetectionResult` 动作正确 | ⬜ | 依赖 B1、B3 |
-| B6 | Day 9–10 | 起步教练最小版：单次 LLM 调用出第一步物理动作 + 产出 `SessionContext` | ⬜ | 依赖 J1；对应 J6 的产出方；★ v4：`taskDeclaration` ≥8 字符追问义务 |
-| B7 | Day 6–8 | check-in / 微重启措辞 v1（像朋友不像监工） | ⬜ | 依赖 B1，J5 前需备好；★ v4：措辞数据源 `lastAnchorSnapshot` |
+| B5 | Day 5 | 单元测试：`frames.json` → 断言 `DetectionResult` 动作正确 | ✅ | `src/engine/frames.test.ts`（Joy 08-26 产出）：25 场景里可测的 22 条直接喂 `evaluateFrame()`，用 `frames.json` 自带的 `initialState.*SinceOffset` 摆好持续器起始状态，不逐帧重放；过程中揪出场景14 一个真数据 bug（两步间少了"刚越过阈值"的中间帧）已修，22/22 全绿 |
+| B6 | Day 9–10 | 起步教练最小版：单次 LLM 调用出第一步物理动作 + 产出 `SessionContext` | ✅ | `src/engine/coach.ts`+`coach.test.ts`（Joy 08-26 产出）：`runStarterCoach()` 落实 `taskDeclaration` ≥8 字符追问义务（最多2轮，不占用"单次"LLM调用额度），LLM 调用通过参数注入（跟 `perceiver.ts` 的 `ClassificationCache` 同一思路），失败有兜底文案；`SessionContext` 复用已测过的 `defaultSessionContext()`。11/11 测试绿。08-27 Jay 把 Groq `gpt-oss-120b` 接进这个注入口（`src/platform/background/starter-coach.ts`），还没接线（起步教练 UI 本身还没建） |
+| B7 | Day 6–8 | check-in / 微重启措辞 v1（像朋友不像监工） | ✅ | `src/engine/wording.ts`+`wording.test.ts`（Joy 08-26 产出）：`buildCheckInMessage()` 区分 DRIFT（问离开前那件事，数据源 `lastAnchorSnapshot`，★v4 强调）和 STUCK（问当前停留这件事，数据源当前页标题）；`buildMicroRestartMessage()` 是用户回答后的一句短反馈；测试专门用正则挡掉"should/stop/again/why"这类说教味词汇。13/13 测试绿 |
 | B8 | Day 6–8 | 协助桌宠组件接入 MV3 side panel | ⬜ | 对应 J4，B 侧负责部分 |
 | B9 | Day 6–8 | 状态机建模（陪伴/观察/check-in，手写或 XState） | ⬜ | 依赖 B1，MVP 阶段手写足够 |
 | B10 | Day 11–14 | 【阶段二】自适应退让打磨 | ⬜ | 依赖 B2、J7 |

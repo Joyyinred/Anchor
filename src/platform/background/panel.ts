@@ -30,3 +30,12 @@ export async function pushPanelState(frame: FeatureFrame, result: DetectionResul
   const panelState = toPanelState(frame, result, now);
   await chrome.storage.local.set({ [PANEL_STATE_KEY]: panelState });
 }
+
+// 用户点了 check-in 气泡里的按钮之后立刻调用——check-in 已经处理完了，不能让 side panel
+// 继续停在 state='checkin' 干等下一次心跳/事件才刷新（那样按钮在 UI 上还留着能点，
+// 用户手快的话会把 applyCheckInFeedback 再触发一次）。真正的 companion/observing 区分
+// 交给下一次 evaluate 循环去算，这里只需要立刻把 check-in 态摘掉。
+export async function pushCompanionState(): Promise<void> {
+  const panelState: PanelState = { state: 'companion' };
+  await chrome.storage.local.set({ [PANEL_STATE_KEY]: panelState });
+}
