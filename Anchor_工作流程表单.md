@@ -85,6 +85,14 @@
 
 下一步：10 条 code-review 发现全部处理完。A8（真实 LLM 分类）、A9（黑白名单降级路径）仍待开工；B 侧 B5/B6/B8/B9（真正把桌宠接到 side panel 和状态机）是下一个大头。
 
+✅（08-27/Jay）J4 联调启动，A11 前两步：
+- 把 `J4` 合并回 `A7`（`A7` 分支之前落后，缺 B6/B7/桌宠组件/React 依赖等一整批 `J4` 已有的东西），验证 `npm run typecheck`/`npm test`（128/128）/`npm run build` 全绿后推到远端，`A7`/`J4` 重新对齐。
+- **任务1**：`vite.config.ts` 接入 `@vitejs/plugin-react`（devDependency 已经在 `package.json` 里，之前没注册插件）——`src/pet/cat.tsx`（JSX）现在能被 vite 构建进 side panel 产物，`npm run build` 验证过（16→17 模块）。
+- **任务2**：`src/platform/background/frame-pipeline.ts` 接上决策半——之前只算到 `FeatureFrame` 就停了，`evaluateFrame()`（B1）从没被平台层调用过。新增 `BState` 的按会话持久化（`chrome.storage.local`，跟 `eventHistory`/`currentTab` 同一套"SW 回收后重新水合"模式），`recordEventAndComputeFrame` 改名 `recordEventAndEvaluate`，现在返回 `{ frame, result: DetectionResult }`；`signals.ts` 同步更新调用处，日志里现在能看到真实算出来的 `DetectionResult.action`。
+- 验证：`npm run typecheck` 两边干净，`npm test` 128/128（本次改动没碰 `src/engine`），`npm run build` 正常出包。还没做浏览器手动验证（留给 side panel 真正渲染出来、能收到消息之后一起测，即 A11 剩下的部分）。
+
+下一步（A11 剩余）：给 side panel 一个真正的 React 入口渲染 `CuteAnchorPet`；`frame-pipeline.ts` 算出的 `DetectionResult` 通过 `chrome.storage.local` + `onChanged` 推给 side panel；side panel 的 `onAnswer` 回调要能把 `CheckInFeedback` 送回 SW 调 `applyCheckInFeedback`（B2）。B 侧 B9（状态机，`DetectionResult.action` → `PetState`）和 B8（协助接线）还没开工，这块需要跟 Joy 对一下由谁来写那层最小映射。
+
 ---
 
 ## 一、联合任务（A + B 共同，跨人的缝都在这里）
@@ -94,7 +102,7 @@
 | J1 | Day 1–2 | 共定三契约：`SignalEvent` / `FeatureFrame` / `SessionContext` | ✅ | 契约 v4 已定稿（`docs/契约v4.md`），含 22 条审计修订 |
 | J2 | Day 1–2 | 准备两套 mock：`events.json`（A 用）+ `frames.json`（B 用） | ✅ | 代码核查：`events.json` 25 场景齐全；`frames.json` 覆盖场景 1-21/24 + metaScenarios 22/23，均已就绪 |
 | J3 | Day 5 | 两半合流：感知半（A）+ 决策半（B）纯函数拼接，25 场景端到端全绿 | ✅ | `src/engine/integration.test.ts`：23/23 可测场景全绿（22/23 是独立函数验收，不适用），★关键检查点一达成 |
-| J4 | Day 6–8 | 真实信号接入 + 桌宠组件进 MV3 side panel 联调 | ⬜ | 依赖 J3✅、A7✅、B4✅——三个依赖已全部完成，J4 已解锁，可以开工；需要 B8/B9（桌宠接线、状态机）配合 |
+| J4 | Day 6–8 | 真实信号接入 + 桌宠组件进 MV3 side panel 联调 | 🔄 | 已开工：`vite.config.ts` 接上 React 插件、`frame-pipeline.ts` 接上决策半算出真实 `DetectionResult`；剩 side panel 真正渲染桌宠 + 消息链路 + 回传 check-in 答案，需要 B8/B9（桌宠接线、状态机）配合 |
 | J5 | Day 8 | 真实浏览器复现两个反差瞬间（疯狂切 tab 不打扰 + 飘走触发 check-in） | ⬜ | ★关键检查点二；依赖 J4 |
 | J6 | Day 9–10 | 确认 `SessionContext` 正确喂给 A 感知半（B→A 反向缝） | ⬜ | 依赖 J5、B6 |
 | J7 | Day 10 | 端到端闭环验证：起步 → 陪伴 → 拉回 → 收尾反思 | ⬜ | 依赖 J6；过此项即阶段一验收通过 |

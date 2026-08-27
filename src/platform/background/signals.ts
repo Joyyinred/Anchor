@@ -6,7 +6,7 @@ import { guessContentKind, mapEntryIntent } from './heuristics';
 import { getOrInitSessionContext } from './session';
 import { getDemoMode } from './state';
 import { domainOf } from './domain';
-import { recordEventAndComputeFrame } from './frame-pipeline';
+import { recordEventAndEvaluate } from './frame-pipeline';
 
 interface LiveTabInfo {
   tabId: number;
@@ -50,9 +50,10 @@ async function emitSignalEvent(reason: string): Promise<void> {
     systemIdle,
   };
   const isDemoMode = await getDemoMode();
-  const frame = await recordEventAndComputeFrame(event, ctx, isDemoMode);
+  const { frame, result } = await recordEventAndEvaluate(event, ctx, isDemoMode);
   console.log(`[Anchor SW] SignalEvent (${reason})`, event);
   console.log('[Anchor SW] FeatureFrame', frame);
+  console.log('[Anchor SW] DetectionResult', result);
 }
 
 export function isTrackedTab(tabId: number): boolean {

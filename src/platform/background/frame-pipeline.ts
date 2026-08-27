@@ -1,9 +1,18 @@
 // Anchor · A7：把 signals.ts 产出的真实 SignalEvent 接进感知半（computeFeatureFrame），
 // 替换 mock events.json 那条测试专用路径
-import type { SignalEvent, SessionContext, FeatureFrame } from '../../engine/types';
+// A11（J4 一部分）：感知半产出 FeatureFrame 之后，紧接着喂进 B 的决策半（evaluateFrame，
+// 已经是 B1/08-26 code review 修过的版本）算出 DetectionResult，side panel 要的就是这个，
+// 不是裸 FeatureFrame——B 的纯函数本身不碰 chrome.storage，BState 的持久化/水合仍然是
+// A（平台层）的职责，跟 eventHistory/currentTab 是同一套"SW 回收后重新水合"模式。
+import type { SignalEvent, SessionContext, FeatureFrame, DetectionResult, BState } from '../../engine/types';
+import { createInitialBState } from '../../engine/types';
 import { computeFeatureFrame, type ClassificationCache } from '../../engine/perceiver';
+import { evaluateFrame } from '../../engine/detector';
+
+type Archetype = 'CREATOR' | 'READER' | 'VIEWER';
 
 const HISTORY_KEY_PREFIX = 'anchor_event_history_';
+const BSTATE_KEY_PREFIX = 'anchor_bstate_';
 // computeFeatureFrame 的 anchorDetachedMs/jumpPattern 理论上要看完整历史，但实际不需要无限回看：
 // 一旦「距上次锚点交互」超过阈值就已经判定为脱离，再往前找没有额外信息量。留 4 小时窗口/500 条
 // 上限只是防止真实长会话下这个数组和它的持久化副本无限增长，不是契约要求的精确数字。
@@ -19,8 +28,17 @@ let previousTexture: FeatureFrame['texture'] = 'idle';
 // A8（真实 LLM 分类）还没接入，这里先给 computeFeatureFrame 一个空缓存，未命中一律保守 UNKNOWN（红线1）。
 const classificationCache: ClassificationCache = new Map();
 
+// evaluateFrame 需要的 BState（阶梯/冷却/持续器）跟 eventHistory 是同一个问题：只活在内存里，
+// SW 被回收就归零，得单独持久化 + 水合，不能指望调用方记得。
+let bState: BState | null = null;
+let bStateLoadedForSession: string | null = null;
+
 function historyKey(sessionId: string): string {
   return `${HISTORY_KEY_PREFIX}${sessionId}`;
+}
+
+function bStateKey(sessionId: string): string {
+  return `${BSTATE_KEY_PREFIX}${sessionId}`;
 }
 
 function trim(events: SignalEvent[], now: number): SignalEvent[] {
@@ -39,15 +57,28 @@ async function ensureHistoryLoaded(sessionId: string): Promise<void> {
   historyLoadedForSession = sessionId;
 }
 
+// 跟 ensureHistoryLoaded 同一个模式：换会话（或 SW 刚重启）时先从 storage 补一份，
+// storage 里也没有（全新会话）就用 createInitialBState 建一份新的——archetype 决定
+// stuckThresholdMs 的初始值（阶梯第 0 格），跟 evaluateFrame 后续要用的 policy 对应同一个档位。
+async function ensureBStateLoaded(sessionId: string, archetype: Archetype): Promise<BState> {
+  if (bStateLoadedForSession === sessionId && bState) return bState;
+  const key = bStateKey(sessionId);
+  const stored = await chrome.storage.local.get(key);
+  bState = (stored[key] as BState | undefined) ?? createInitialBState(archetype);
+  bStateLoadedForSession = sessionId;
+  return bState;
+}
+
 /**
  * 把一条真实信号事件计入历史（内存 + chrome.storage.local 持久化，应对 SW 回收），
- * 再用完整历史跑一次感知半，产出当前时刻的 FeatureFrame。
+ * 用完整历史跑一次感知半产出 FeatureFrame，再喂进决策半（evaluateFrame）算出
+ * DetectionResult——这就是 side panel 真正要消费的东西，不是裸 FeatureFrame。
  */
-export async function recordEventAndComputeFrame(
+export async function recordEventAndEvaluate(
   event: SignalEvent,
   ctx: SessionContext,
   isDemoMode: boolean
-): Promise<FeatureFrame> {
+): Promise<{ frame: FeatureFrame; result: DetectionResult }> {
   await ensureHistoryLoaded(ctx.sessionId);
   eventHistory = trim([...eventHistory, event], event.timestamp);
   void chrome.storage.local.set({ [historyKey(ctx.sessionId)]: eventHistory });
@@ -61,5 +92,20 @@ export async function recordEventAndComputeFrame(
     isDemoMode
   );
   previousTexture = frame.texture;
-  return frame;
+
+  // profile.archetype 的类型比 evaluateFrame 接受的宽（还含 COMMUNICATOR/CUSTOM，阶段二才会用到），
+  // 默认 SessionContext 目前永远是 CREATOR——跟 integration.test.ts 里同一处的处理方式一致。
+  const archetype = ctx.profile.archetype as Archetype;
+  const state = await ensureBStateLoaded(ctx.sessionId, archetype);
+  const action = evaluateFrame(frame, archetype, ctx.profile.policy, ctx, state, event.timestamp, isDemoMode);
+  // evaluateFrame 可能就地改了 state.lastCheckInTs（触发 check-in 的那一刻）——存盘，
+  // 不然下一次 SW 回收重启后冷却闸门会读回没生效前的旧值。
+  void chrome.storage.local.set({ [bStateKey(ctx.sessionId)]: state });
+
+  const result: DetectionResult = {
+    action,
+    lastAnchorSnapshot: frame.lastAnchorSnapshot,
+    currentTitle: frame.currentTitle,
+  };
+  return { frame, result };
 }
