@@ -5,7 +5,10 @@
 // 三态不再靠猫变色区分，而是靠猫耳朵旁边的小锚徽章（陪伴=描边／观察=描边+波纹脉冲／check-in=实心）
 // 和 check-in 气泡的颜色。素材来源见 assets/cat.json 顶部注释，接入前请确认授权条款。
 import { useEffect, useRef } from 'react';
-import lottie, { type AnimationItem } from 'lottie-web';
+// lottie-web 的默认打包（'lottie-web'）带 AE expressions 功能，内部用 eval() 实现——
+// MV3 扩展页面的 CSP 硬性禁止 unsafe-eval（跟普通网站不同，这条不能靠 manifest 放开），
+// 用不到 expressions 这个功能，改用不含 eval 的 "light" 构建（同一套 SVG 渲染器/类型）。
+import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_light';
 import './cat.css';
 import catAnimation from './assets/cat.json';
 import type { CuteAnchorPetProps } from './types';

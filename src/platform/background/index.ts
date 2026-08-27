@@ -4,7 +4,8 @@ import type { RuntimeMessage } from '../messages';
 import { getDemoMode, setDemoMode } from './state';
 import { getOrInitSessionContext } from './session';
 import { ensureCurrentTab, handleInteractionMessage, isTrackedTab, registerSignalListeners } from './signals';
-import { applyCheckInAnswer } from './frame-pipeline';
+import { applyCheckInAnswer, recomputeOnHeartbeat } from './frame-pipeline';
+import { pushPanelState } from './panel';
 
 const HEARTBEAT_ALARM_NAME = 'anchor-heartbeat';
 const HEARTBEAT_PERIOD_MINUTES = 1;
@@ -37,6 +38,18 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     // 心跳是 currentTab 的最后一道保险：如果 SW 被回收后一直没有 tab 切换/导航事件重新填充它，
     // 最多 1 分钟后心跳也会把它补回来，不会无限期哑火。
     void ensureCurrentTab();
+    // 契约v4 §3.1"事件静默 >60s 补帧"：安静看视频/停在锚点页面发呆这类场景不会产生新的
+    // SignalEvent，只靠事件触发那条路径，anchorDetachedMs/stillnessMs 会永远停在最后一个
+    // 事件的时间戳上——心跳周期性用当前时刻重新跑一次评估，不需要新事件也能让证据继续累积。
+    void (async () => {
+      const isDemoMode = await getDemoMode();
+      const ctx = await getOrInitSessionContext();
+      const outcome = await recomputeOnHeartbeat(ctx, Date.now(), isDemoMode);
+      if (!outcome) return;
+      await pushPanelState(outcome.frame, outcome.result, Date.now());
+      console.log('[Anchor SW] heartbeat FeatureFrame', outcome.frame);
+      console.log('[Anchor SW] heartbeat DetectionResult', outcome.result);
+    })();
   }
 });
 

@@ -102,6 +102,16 @@
 - 已知缺口（记录，不在这次范围内）：DRIFT 通道答 FALSE_POSITIVE 时，按 `detector.ts` 注释本该把当前域名写进 `SessionContext.sessionWhitelist`，这一步还没接，目前只会清空 `driftSustainer`。
 - 验证：`npm run typecheck` 两边干净，`npm test` 128/128，`npm run build` 正常出包（33 模块，含 React/lottie/panel-state）。尝试用 CDP 自动化打开 side panel 页面做浏览器级验证，卡在这台机器 Chrome Stable 的"unpacked 扩展需要手动开发者模式开关才能加载"这道策略关（配置文件层面的 patch 会被 Chrome 的防篡改校验静默还原，绕不过去），SW 注册这层能确认（`--load-extension` 后 CDP target 列表能看到 `service_worker.js` 目标），但 side panel 页面本身没能在浏览器里跑起来验证——留给手动开一次开发者模式确认（跟 A3 当时的交互式验证是同一个遗留缺口）。
 
+✅（08-27/Jay，Jay 手动浏览器验证 + 两处真实 bug 修复）真机测试 side panel：装上后能开面板，但 Lottie 猫渲不出来，Inspect 报错 `Content Security Policy...blocks the use of 'eval'`——`lottie-web` 默认打包（AE expressions 功能）内部用 `eval()`，MV3 扩展页面 CSP 硬性禁 `unsafe-eval`（不能像普通网站那样在 manifest 里放开）。改用 `lottie-web/build/player/lottie_light`（不含 expressions 的构建，同一套 SVG 渲染器/类型，`grep eval` 命中数 0），`cat.tsx` 一行 import 改掉即可，构建产物顺带小了 138KB（608→470KB）。
+
+之后又用真实 YouTube 播放 8 分钟测试 DRIFT/STUCK，`action` 一直是 `DO_NOTHING`。排查发现是比 A8 更底层的问题：**心跳没有真正驱动重新评估**——`content-script.ts` 只在离散 DOM 事件（keydown/scroll/pause/seek/play）时才发消息，安静看视频不产生新事件；`background/index.ts` 的心跳 alarm 之前只调 `ensureCurrentTab()`，从没重新跑过 `computeFeatureFrame`/`evaluateFrame`。这正是契约v4 §3.1"事件静默 >60s 补帧"要求的行为，A7 阶段规划过但没有真正实现。修法：`frame-pipeline.ts` 抽出 `evaluateAndPersist()` 共享逻辑，新增 `recomputeOnHeartbeat(ctx, now, isDemoMode)`——复用已有 `eventHistory`、只是把 `now` 换成心跳触发的当前时刻（`anchorDetachedMs`/`stillnessMs` 都是 `now - 上次活动时间戳`，会正确继续增长）；`background/index.ts` 心跳回调里接上，顺带把结果推给 `pushPanelState()`。
+
+✅（08-27/Jay）A8：`classifyDomainRelevance` 真实 LLM 实现。跟 Jay 确认：Anthropic Claude、API key 走手动控制台 `chrome.storage.local.set({anchor_llm_api_key:'...'})`（跟 `anchor_demo_mode` 同一个模式，不做专门 options 页面）。
+- 新增 `src/platform/background/classifier.ts`：`buildPrompt()` 直接复用 `docs/分类prompt-v0.md` §1 那份 prompt；`fetch` 调 Anthropic Messages API（`claude-haiku-4-5-20251001`），带 `anthropic-dangerous-direct-browser-access` 头（Anthropic 官方给纯前端直连开的口子，否则被 CORS 拦）；10s 超时（`AbortController`）；解析响应 JSON，`confidence < 0.7` 强制降级 UNKNOWN（`docs/分类prompt-v0.md` §2）；没配 key/网络失败/超时/解析失败——每一种情况都安全落回 `UNKNOWN`，从不 throw（红线1/2）。
+- `frame-pipeline.ts` 新增 `triggerLazyClassification()`：只在 `computeFeatureFrame` 已经把当前页判成 `UNKNOWN` 时才触发（意味着 `DEMO_PRESET_CACHE`/`sessionWhitelist`/`short_feed`/黑名单/分类缓存全部没命中——不用在平台层重复一遍这条优先级判断），fire-and-forget，结果写回 `classificationCache` 供下一次重新计算帧（下一条事件或下一次心跳补帧）使用；`inFlightClassification` 这个 Set 防止同一个 `cacheKey` 在结果回来之前被重复请求。
+- 顺带发现 A9（本地黑白名单降级路径）其实已经随之满足：`resolveContextRelevance`（A2）本来的短路优先级就是黑名单/白名单/预置缓存排在 LLM 前面，`classifyDomainRelevance` 的任何失败都不影响这几层——断网/API 挂了，引擎表现和"还没接 LLM 之前"完全一样，不会连带炸。
+- 验证：`npm run typecheck` 两边干净，`npm test` 128/128（没碰任何已有测试文件，`classifier.ts` 依赖真实 `fetch`/`chrome.storage`，跟 `signals.ts` 同类，属于已记录过的"没有 chrome API mock 测试基建"遗留缺口，不是这次新增的），`npm run build` 正常出包（34 模块）。还没做真实 API key 的端到端验证（需要 Jay 自己配 key 测）。
+
 ---
 
 ## 一、联合任务（A + B 共同，跨人的缝都在这里）
@@ -134,8 +144,8 @@
 | A5 | Day 5 | 感知半四信号计算实现 → `FeatureFrame` | ✅ | `src/engine/perceiver.ts`：四信号 + entryIntent/contentFormat/lastAnchorSnapshot 齐全，可插拔分类缓存留 A8 接真 LLM |
 | A6 | Day 5 | 单元测试：`events.json` → 断言 `FeatureFrame` 各字段正确 | ✅ | `src/engine/perceiver.test.ts`（20 项字段级单测）+ `integration.test.ts`（23 场景端到端）全绿；场景21 盲区修复已验证 |
 | A7 | Day 6 | 真实 `SignalEvent` 流替换 mock，接入感知半 | ✅ | `src/platform/background/frame-pipeline.ts`：事件历史持久化（`chrome.storage.local`，应对 SW 回收）+ 调用 `computeFeatureFrame` 产出真实 `FeatureFrame`，`signals.ts` 每次事件都会算并打日志；B 侧 `detector.ts` 未改动，LLM 分类缓存暂空（留给 A8）。57/57 测试绿，两份 typecheck 干净，`npm run build` 16 模块正常出包 |
-| A8 | Day 6 | `classifyDomainRelevance` 真实 LLM 实现（异步 + 惰性 + 缓存） | ⬜ | 依赖 A2、A7；未判出前保持 `UNKNOWN`，绝不阻塞引擎（红线1） |
-| A9 | Day 6 | 本地黑白名单兜底接入（断网/API 失败时的降级路径） | ⬜ | 依赖 A2、A8（红线2）；★ v4：演示域预置缓存表优先级高于 LLM |
+| A8 | Day 6 | `classifyDomainRelevance` 真实 LLM 实现（异步 + 惰性 + 缓存） | ✅ | `src/platform/background/classifier.ts`：真调 Anthropic Messages API（`docs/分类prompt-v0.md` §1 同一份 prompt，低置信度<0.7 强制 UNKNOWN）；`frame-pipeline.ts` 的 `triggerLazyClassification()` 只在感知半已判 UNKNOWN 时才异步触发，fire-and-forget 写回 `classificationCache`，不阻塞当前帧。key 走 `chrome.storage.local`（`anchor_llm_api_key`，手动控制台配置，不进代码仓库） |
+| A9 | Day 6 | 本地黑白名单兜底接入（断网/API 失败时的降级路径） | ✅ | 随 A8 一并做完：`classifyDomainRelevance` 任何失败（无 key/网络/超时/解析）都安全落回 `UNKNOWN`，从不 throw；`resolveContextRelevance`（A2）的短路优先级本来就是 DEMO_PRESET_CACHE/sessionWhitelist/黑名单排在 LLM 之前，LLM 不可用时这几层完全不受影响地继续工作 |
 | A10 | Day 7 | demo 要用到的域名预热进缓存 | ⬜ | 依赖 A8，演示前必做 |
 | A11 | Day 7 | 协助桌宠组件接入 side panel（感知半→UI 消息链路：`chrome.runtime`/`chrome.storage`） | ⬜ | 对应 J4，A 侧负责部分 |
 | A12 | Day 7 | 真实数据噪音处理：idle 抖动/tab 快切去抖节流 | ⬜ | 依赖 A7、J4 |
