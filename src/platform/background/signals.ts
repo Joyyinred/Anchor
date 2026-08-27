@@ -7,6 +7,7 @@ import { getOrInitSessionContext } from './session';
 import { getDemoMode } from './state';
 import { domainOf } from './domain';
 import { recordEventAndEvaluate } from './frame-pipeline';
+import { pushPanelState } from './panel';
 
 interface LiveTabInfo {
   tabId: number;
@@ -51,6 +52,7 @@ async function emitSignalEvent(reason: string): Promise<void> {
   };
   const isDemoMode = await getDemoMode();
   const { frame, result } = await recordEventAndEvaluate(event, ctx, isDemoMode);
+  await pushPanelState(frame, result, event.timestamp);
   console.log(`[Anchor SW] SignalEvent (${reason})`, event);
   console.log('[Anchor SW] FeatureFrame', frame);
   console.log('[Anchor SW] DetectionResult', result);

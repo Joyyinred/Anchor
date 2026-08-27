@@ -4,6 +4,7 @@ import type { RuntimeMessage } from '../messages';
 import { getDemoMode, setDemoMode } from './state';
 import { getOrInitSessionContext } from './session';
 import { ensureCurrentTab, handleInteractionMessage, isTrackedTab, registerSignalListeners } from './signals';
+import { applyCheckInAnswer } from './frame-pipeline';
 
 const HEARTBEAT_ALARM_NAME = 'anchor-heartbeat';
 const HEARTBEAT_PERIOD_MINUTES = 1;
@@ -52,6 +53,16 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
         handleInteractionMessage(message.interactionType);
       }
     });
+    return;
+  }
+  if (message.type === 'CHECK_IN_ANSWER') {
+    // 来自 side panel，不是某个特定 tab 发的（sender.tab 通常是 undefined），
+    // 不需要走 isTrackedTab 那道锚点 tab 校验。
+    void (async () => {
+      const ctx = await getOrInitSessionContext();
+      await applyCheckInAnswer(ctx, { channel: message.channel, answer: message.answer }, Date.now());
+      console.log('[Anchor SW] applied check-in feedback', message.answer, message.channel);
+    })();
     return;
   }
   console.log('[Anchor SW] received message', message.type, 'from', sender.tab?.url);

@@ -93,6 +93,15 @@
 
 下一步（A11 剩余）：给 side panel 一个真正的 React 入口渲染 `CuteAnchorPet`；`frame-pipeline.ts` 算出的 `DetectionResult` 通过 `chrome.storage.local` + `onChanged` 推给 side panel；side panel 的 `onAnswer` 回调要能把 `CheckInFeedback` 送回 SW 调 `applyCheckInFeedback`（B2）。B 侧 B9（状态机，`DetectionResult.action` → `PetState`）和 B8（协助接线）还没开工，这块需要跟 Joy 对一下由谁来写那层最小映射。
 
+✅（08-27/Jay）A11 剩余部分做完，J4 端到端链路打通（B9/B8 那层最小映射先由 A 侧占位实现，不等 Joy）：
+- 新增 `src/platform/panel-state.ts`：background↔side panel 共享的 `PanelState` 形状（`state`/`message`/`channel`），`PetState`/`CheckInChannel` 直接复用 `src/pet/types.ts` 已经声明的那份，不再写第三份字面量。
+- 新增 `src/platform/background/panel.ts`：把 `DetectionResult` 翻成 `PanelState`——`CHECK_IN_DRIFT`/`CHECK_IN_STUCK` 调 B7 的 `buildCheckInMessage()` 生成真实文案，`DO_NOTHING` 映射成 `'companion'`。**这里是个占位**：`companion`/`observing` 的区分是 B9 状态机的职责范围，`DetectionResult` 契约本身不带"证据接近阈值"这个信号，B9 真正建好之前先都算 `companion`，以后只换这一个函数，不用碰 side panel/`cat.tsx`。
+- `signals.ts` 每次算完 `DetectionResult` 就调 `pushPanelState()` 写进 `chrome.storage.local`。
+- `src/sidepanel/main.tsx`（新，替换占位 `main.ts`）：真正的 React 入口，渲染 `CuteAnchorPet`，用 `chrome.storage.onChanged` 订阅 `PanelState`（不用一次性 `sendMessage`——panel 没打开时消息会丢，storage 里的值不会）。`onAnswer` 回调把 `{answer, channel}` 通过 `chrome.runtime.sendMessage` 发回 SW。
+- `src/platform/messages.ts` 新增 `CheckInAnswerMessage`（`CHECK_IN_ANSWER` 类型，answer/channel 复用 pet 的类型）；`background/index.ts` 收到后调 `frame-pipeline.ts` 新增的 `applyCheckInAnswer()`（内部调 B2 的 `applyCheckInFeedback()`，存回同一份持久化 `BState`）。
+- 已知缺口（记录，不在这次范围内）：DRIFT 通道答 FALSE_POSITIVE 时，按 `detector.ts` 注释本该把当前域名写进 `SessionContext.sessionWhitelist`，这一步还没接，目前只会清空 `driftSustainer`。
+- 验证：`npm run typecheck` 两边干净，`npm test` 128/128，`npm run build` 正常出包（33 模块，含 React/lottie/panel-state）。尝试用 CDP 自动化打开 side panel 页面做浏览器级验证，卡在这台机器 Chrome Stable 的"unpacked 扩展需要手动开发者模式开关才能加载"这道策略关（配置文件层面的 patch 会被 Chrome 的防篡改校验静默还原，绕不过去），SW 注册这层能确认（`--load-extension` 后 CDP target 列表能看到 `service_worker.js` 目标），但 side panel 页面本身没能在浏览器里跑起来验证——留给手动开一次开发者模式确认（跟 A3 当时的交互式验证是同一个遗留缺口）。
+
 ---
 
 ## 一、联合任务（A + B 共同，跨人的缝都在这里）
@@ -102,7 +111,7 @@
 | J1 | Day 1–2 | 共定三契约：`SignalEvent` / `FeatureFrame` / `SessionContext` | ✅ | 契约 v4 已定稿（`docs/契约v4.md`），含 22 条审计修订 |
 | J2 | Day 1–2 | 准备两套 mock：`events.json`（A 用）+ `frames.json`（B 用） | ✅ | 代码核查：`events.json` 25 场景齐全；`frames.json` 覆盖场景 1-21/24 + metaScenarios 22/23，均已就绪 |
 | J3 | Day 5 | 两半合流：感知半（A）+ 决策半（B）纯函数拼接，25 场景端到端全绿 | ✅ | `src/engine/integration.test.ts`：23/23 可测场景全绿（22/23 是独立函数验收，不适用），★关键检查点一达成 |
-| J4 | Day 6–8 | 真实信号接入 + 桌宠组件进 MV3 side panel 联调 | 🔄 | 已开工：`vite.config.ts` 接上 React 插件、`frame-pipeline.ts` 接上决策半算出真实 `DetectionResult`；剩 side panel 真正渲染桌宠 + 消息链路 + 回传 check-in 答案，需要 B8/B9（桌宠接线、状态机）配合 |
+| J4 | Day 6–8 | 真实信号接入 + 桌宠组件进 MV3 side panel 联调 | 🔄 | 代码链路已打通：真实信号→`FeatureFrame`→`DetectionResult`→`PanelState`→side panel 渲染桌宠→用户回答→`applyCheckInFeedback` 回写，`companion`/`observing` 区分暂用占位（真正的状态机是 B9，还没开工）；还没做浏览器手动验证（这台机器 Chrome 需要手动开一次开发者模式），验证过才能过 J4 |
 | J5 | Day 8 | 真实浏览器复现两个反差瞬间（疯狂切 tab 不打扰 + 飘走触发 check-in） | ⬜ | ★关键检查点二；依赖 J4 |
 | J6 | Day 9–10 | 确认 `SessionContext` 正确喂给 A 感知半（B→A 反向缝） | ⬜ | 依赖 J5、B6 |
 | J7 | Day 10 | 端到端闭环验证：起步 → 陪伴 → 拉回 → 收尾反思 | ⬜ | 依赖 J6；过此项即阶段一验收通过 |

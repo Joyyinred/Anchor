@@ -4,10 +4,10 @@
 // 已经是 B1/08-26 code review 修过的版本）算出 DetectionResult，side panel 要的就是这个，
 // 不是裸 FeatureFrame——B 的纯函数本身不碰 chrome.storage，BState 的持久化/水合仍然是
 // A（平台层）的职责，跟 eventHistory/currentTab 是同一套"SW 回收后重新水合"模式。
-import type { SignalEvent, SessionContext, FeatureFrame, DetectionResult, BState } from '../../engine/types';
+import type { SignalEvent, SessionContext, FeatureFrame, DetectionResult, BState, CheckInFeedback } from '../../engine/types';
 import { createInitialBState } from '../../engine/types';
 import { computeFeatureFrame, type ClassificationCache } from '../../engine/perceiver';
-import { evaluateFrame } from '../../engine/detector';
+import { evaluateFrame, applyCheckInFeedback } from '../../engine/detector';
 
 type Archetype = 'CREATOR' | 'READER' | 'VIEWER';
 
@@ -108,4 +108,25 @@ export async function recordEventAndEvaluate(
     currentTitle: frame.currentTitle,
   };
   return { frame, result };
+}
+
+/**
+ * side panel 用户点了 check-in 气泡里的按钮之后，SW 收到消息调这个函数——用同一份
+ * 持久化 BState 跑 applyCheckInFeedback（B2），再存盘，跟 evaluateFrame 那次持久化
+ * 走的是同一把 storage key，两条路径不会互相踩。
+ *
+ * 已知缺口（不在这次 A11 联调范围内，先记录）：DRIFT 通道答 FALSE_POSITIVE 时，
+ * detector.ts 的注释里写明"调用方自己用 FeatureFrame.currentDomain 去改
+ * SessionContext.sessionWhitelist"——这里还没做，答"查资料呢"目前只会清空
+ * driftSustainer，不会真正把当前域名加入白名单免打扰。
+ */
+export async function applyCheckInAnswer(
+  ctx: SessionContext,
+  feedback: CheckInFeedback,
+  now: number
+): Promise<void> {
+  const archetype = ctx.profile.archetype as Archetype;
+  const state = await ensureBStateLoaded(ctx.sessionId, archetype);
+  applyCheckInFeedback(state, ctx.profile.policy, feedback, now);
+  void chrome.storage.local.set({ [bStateKey(ctx.sessionId)]: state });
 }
