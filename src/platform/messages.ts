@@ -26,4 +26,20 @@ export interface CheckInAnswerMessage {
   timestamp: number;
 }
 
-export type RuntimeMessage = ContentScriptReadyMessage | InteractionMessage | CheckInAnswerMessage;
+// 起步教练（B6）：side panel 挂载时问一次"现在该显示起步输入框还是直接显示桌宠"——
+// 不能只信任面板自己缓存的旧值，SW 可能在这次打开之间已经完成过一次 onboarding。
+export interface OnboardingStatusRequestMessage {
+  type: 'ONBOARDING_STATUS_REQUEST';
+  timestamp: number;
+}
+
+// 起步教练：用户在输入框里提交了这一轮内容（第一轮是任务声明本身，追问后的后续轮次
+// 是对追问的回答）。roundsUsed 由 side panel 原样带回上一次响应里的 roundsUsed。
+export interface OnboardingSubmitMessage {
+  type: 'ONBOARDING_SUBMIT';
+  text: string;
+  roundsUsed: number;
+  timestamp: number;
+}
+
+export type RuntimeMessage = ContentScriptReadyMessage | InteractionMessage | CheckInAnswerMessage | OnboardingStatusRequestMessage | OnboardingSubmitMessage;
