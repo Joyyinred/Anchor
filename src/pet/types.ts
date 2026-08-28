@@ -40,6 +40,27 @@ export interface CuteAnchorPetProps {
    * applyCheckInFeedback——channel 就是原样透传回去的 props.channel。
    */
   onAnswer?: (answer: CheckInAnswer, channel?: CheckInChannel) => void;
+  /**
+   * 休息模式（契约v4 §3.8）开着。★ 这不是第四个 PetState——休息期间 state 仍然是
+   * 'companion'，这只是一个正交的"此刻安静着"标记，只影响锚徽章样式和下方说明文案。
+   * 组件本身不判断休息该不该结束，那是引擎（startRest/restReminderDue）和调用方的事。
+   */
+  isResting?: boolean;
+  /**
+   * 此刻该弹一次"休息够了吗"的提醒（restReminderDue() 判定为 true）。为 true 时气泡里
+   * 显示的是休息模式那两个按钮，而不是 check-in 的三个——两套按钮永远不会同时出现。
+   * 提醒文案本身走 message 字段（跟 check-in 共用），由 B7 的 buildRestReminderMessage() 生成。
+   */
+  isRestReminder?: boolean;
+  /** 用户点了"休息"入口。调用方负责发 REST_START 消息给 SW（那边调 startRest()）。 */
+  onRestStart?: () => void;
+  /** 用户在提醒里点了"继续专注"。调用方负责发 REST_END 消息（那边清空 restUntil）。 */
+  onRestEnd?: () => void;
+  /**
+   * 用户在提醒里点了"结束专注"——契约v4 §3.8 里跟"继续专注"并列的第二个选项。
+   * 语义是"今天这场专注到此为止"，不是"再休息一会儿"。
+   */
+  onSessionEnd?: () => void;
   /** 透传到最外层容器，方便调用方做定位/尺寸调整。 */
   className?: string;
 }

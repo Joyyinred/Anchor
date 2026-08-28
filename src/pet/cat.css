@@ -175,6 +175,55 @@
   animation: ap-badge-pop 0.4s cubic-bezier(.34,1.56,.64,1);   /* plays once each time it enters checkin */
 }
 
+/* ── 休息模式（契约v4 §3.8）──────────────────────────────────────────────
+   休息不是第四态：data-state 仍然是 companion，这里只是把徽章调暗、并给一个休息入口。
+   徽章不换颜色而是降饱和度+去掉脉冲，语义上正好——"我还在，只是不看着你了"。 */
+.anchor-pet-stage[data-resting="true"] .anchor-pet-badge {
+  border-color: var(--ap-ink-faint);
+  opacity: 0.55;
+}
+.anchor-pet-stage[data-resting="true"] .anchor-pet-badge svg {
+  stroke: var(--ap-ink-faint);
+}
+/* 休息期间即使 observing 的波纹规则被别处命中，也不该继续脉冲——休息的承诺就是"不看着你"。 */
+.anchor-pet-stage[data-resting="true"] .anchor-pet-badge::before {
+  animation: none;
+  opacity: 0;
+}
+/* 休息中猫本体也淡一点，一眼能看出"它睡着了"，不用读文案 */
+.anchor-pet-stage[data-resting="true"] .anchor-pet-lottie {
+  opacity: 0.7;
+  transition: opacity 0.4s ease;
+}
+
+.anchor-pet-rest-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+/* 刻意做得比 check-in 那几个 chip 更弱（无边框、faint 色）——休息是随时可用的次要入口，
+   不该在视觉上跟"猫正在问你话"抢注意力。 */
+.anchor-pet-rest-button {
+  font-family: 'Nunito', sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  color: var(--ap-ink-faint);
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.anchor-pet-rest-button:hover {
+  color: var(--ap-ink-soft);
+  background: var(--ap-paper);
+}
+.anchor-pet-rest-button:focus-visible {
+  outline: 2px solid var(--ap-companion);
+  outline-offset: 2px;
+}
+
 /* 角落专注时长标签：常态不显示，鼠标悬停在锚徽章上才弹出（配角数据，别喧宾夺主，见 types.ts 注释） */
 .anchor-pet-focus-tag {
   position: absolute;

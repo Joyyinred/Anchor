@@ -1,6 +1,12 @@
 // B7 单测：check-in / 微重启措辞 v1
 import { describe, it, expect } from 'vitest';
-import { buildCheckInMessage, buildMicroRestartMessage } from './wording';
+import {
+  buildCheckInMessage,
+  buildMicroRestartMessage,
+  buildRestStartMessage,
+  buildRestReminderMessage,
+  buildRestEndMessage,
+} from './wording';
 
 const now = 1_000_000;
 
@@ -159,5 +165,43 @@ describe('B7: buildMicroRestartMessage（契约v4 §3.6/场景17：答"飘了"�
     const all = ['FOCUSED', 'FALSE_POSITIVE', 'DRIFTED'] as const;
     const messages = all.map(buildMicroRestartMessage);
     expect(new Set(messages).size).toBe(3);
+  });
+});
+
+describe('B: 休息模式措辞（契约v4 §3.8 / 场景23）', () => {
+  it('刚点休息：说的是"我不会打扰你"，不是功能性的计时描述', () => {
+    const msg = buildRestStartMessage();
+    expect(msg.length).toBeGreaterThan(0);
+    expect(msg).not.toMatch(/timer|20 minutes|countdown/i);
+  });
+
+  it('提醒带上已休息时长，且单复数正确', () => {
+    expect(buildRestReminderMessage(15)).toContain('15 minutes');
+    expect(buildRestReminderMessage(1)).toContain('1 minute');
+    expect(buildRestReminderMessage(1)).not.toContain('1 minutes');
+  });
+
+  it('提醒文案随时长变化——每 5 分钟重复时不会是一模一样的一句话', () => {
+    expect(buildRestReminderMessage(15)).not.toBe(buildRestReminderMessage(20));
+  });
+
+  it('时长为 0 / 负数（时钟异常）也不会说出 "0 minutes" 或负数', () => {
+    for (const v of [0, -3]) {
+      const msg = buildRestReminderMessage(v);
+      expect(msg).not.toMatch(/-d/);
+      expect(msg).not.toContain('0 minute');
+    }
+  });
+
+  it('提醒是疑问句，不是催促（"像朋友不像监工"）', () => {
+    const msg = buildRestReminderMessage(15);
+    expect(msg.endsWith('?')).toBe(true);
+    expect(msg).not.toMatch(/should|get back|stop resting|enough/i);
+  });
+
+  it('结束休息：一句话确认就翻篇，不说教', () => {
+    const msg = buildRestEndMessage();
+    expect(msg.length).toBeGreaterThan(0);
+    expect(msg).not.toMatch(/finally|too long|wasted/i);
   });
 });

@@ -47,6 +47,11 @@ export function CuteAnchorPet({
   focusedMinutes,
   channel,
   onAnswer,
+  isResting,
+  isRestReminder,
+  onRestStart,
+  onRestEnd,
+  onSessionEnd,
   className,
 }: CuteAnchorPetProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -82,6 +87,9 @@ export function CuteAnchorPet({
   }, []);
 
   const wrapperClass = className ? `anchor-pet ${className}` : 'anchor-pet';
+  // 休息期间说明文案不走 CAPTION 那三态——那三句讲的是"我在怎么观察你"，休息时
+  // 一句都不成立（此刻双通道全静默，什么都没在看）。
+  const caption = isResting ? 'Resting — I’ll stay out of the way.' : CAPTION[state];
   // checkin 态：气泡必现（没传 message 时用默认占位文案）。非 checkin 态：只有明确传了
   // message 才短暂露一下（比如 B7 的微重启一句话反馈），没传就是空——这不是第四态，只是
   // "这一刻要不要说句话"的开关，data-bubble-visible 由这个值驱动，不再是 data-state 本身。
@@ -89,7 +97,12 @@ export function CuteAnchorPet({
 
   return (
     <div className={wrapperClass}>
-      <div className="anchor-pet-stage" data-state={state} data-bubble-visible={Boolean(bubbleText)}>
+      <div
+        className="anchor-pet-stage"
+        data-state={state}
+        data-bubble-visible={Boolean(bubbleText)}
+        data-resting={Boolean(isResting)}
+      >
         <div className="anchor-pet-wrap">
           <div className="anchor-pet-bubble" role="status" aria-live="polite">
             <span>{bubbleText}</span>
@@ -109,6 +122,25 @@ export function CuteAnchorPet({
                 <button type="button" onClick={() => onAnswer('DRIFTED', channel)}>
                   Drifted - pull me back
                 </button>
+              </div>
+            )}
+
+            {/* 休息提醒的两个选项（契约v4 §3.8）。跟上面 check-in 那组互斥——isRestReminder
+                只在休息模式里为 true，而休息期间双通道全静默、state 不可能是 'checkin'，
+                所以两套按钮永远不会同时出现。同样只在真的要提醒时才进 DOM，不靠 CSS 藏
+                （否则键盘用户能 tab 到看不见的按钮上，08-26 code review ④ 修过一次）。 */}
+            {isRestReminder && (
+              <div className="anchor-pet-chips">
+                {onRestEnd && (
+                  <button type="button" onClick={onRestEnd}>
+                    Back to it
+                  </button>
+                )}
+                {onSessionEnd && (
+                  <button type="button" onClick={onSessionEnd}>
+                    Done for today
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -138,8 +170,19 @@ export function CuteAnchorPet({
       </div>
 
       <p className="anchor-pet-caption" style={{ textAlign: 'center', fontSize: 13, marginTop: 10 }}>
-        {CAPTION[state]}
+        {caption}
       </p>
+
+      {/* 休息入口。checkin 态不显示——那一刻已经在问用户一个问题了，再叠一个"要不要休息"
+          是两个决定同时压过来，反而让人不知道先点哪个。休息中也不显示（这时候该显示的是
+          提醒气泡里的"继续专注"，不是再点一次休息）。 */}
+      {onRestStart && !isResting && state !== 'checkin' && (
+        <div className="anchor-pet-rest-row">
+          <button type="button" className="anchor-pet-rest-button" onClick={onRestStart}>
+            Take a break
+          </button>
+        </div>
+      )}
     </div>
   );
 }
