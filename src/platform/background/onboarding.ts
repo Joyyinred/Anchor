@@ -8,6 +8,7 @@ import { runStarterCoach } from '../../engine/coach';
 import { DEFAULT_TASK_DECLARATION, type SessionContext } from '../../engine/types';
 import { groqStarterCoachCall } from './starter-coach';
 import { saveSessionContext } from './session';
+import { domainOf } from './domain';
 import { ONBOARDING_STATE_KEY, type OnboardingState } from '../onboarding-state';
 
 async function pushOnboardingState(state: OnboardingState): Promise<void> {
@@ -30,7 +31,24 @@ export async function pushOnboardingStatus(ctx: SessionContext): Promise<void> {
  * roundsUsed 由 side panel 原样带回上一次响应里的值（第一次提交传 0）。
  */
 export async function handleOnboardingSubmit(text: string, roundsUsed: number, now: number): Promise<void> {
-  const result = await runStarterCoach(text, roundsUsed, groqStarterCoachCall, now);
+  // 锚点：用户声明任务这一刻正看着的那个 tab，就是这次会话的锚点——跟 session.ts 的默认
+  // 兜底路径取的是同一个东西（当前活动 tab），只是那边没有任务声明、这边有。
+  // 之前这里漏传了 inferredAnchor/sessionId，导致 anchor 被覆盖成 { domain: '', url: '' }：
+  // 空锚点匹配不上任何页面 → 没有任何事件会被判成"在锚点上" → lastAnchorTs 恒为 0 →
+  // anchorDetachedMs 直接等于当前 epoch 时间戳（而不是"脱离了多久"），lastAnchorSnapshot
+  // 也拿不到真实标题，B7 的 check-in 文案只能退回"what you were working on"那句兜底。
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const url = activeTab?.url ?? '';
+  const result = await runStarterCoach(
+    text,
+    roundsUsed,
+    groqStarterCoachCall,
+    now,
+    // sessionId 沿用 session.ts 那份的 'default'：BState/事件历史都按 sessionId 分 storage key，
+    // 每次起步都生成一个新 id 的话，旧 key 会永远留在 chrome.storage.local 里没人清。
+    'default',
+    { domain: domainOf(url), url }
+  );
 
   if (result.status === 'NEEDS_FOLLOWUP') {
     await pushOnboardingState({ status: 'NEEDS_FOLLOWUP', prompt: result.prompt, roundsUsed: result.roundsUsed });
