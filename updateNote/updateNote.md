@@ -322,3 +322,65 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
     - `signals.ts` 新增 `emitSignalEventDebounced()`（300ms 尾部去抖），套用在 `onActivated`/`onFocusChanged`/`onUpdated` 三个"tab 快切"触发源——`currentTab` 的赋值仍然同步，只延迟"要不要真的产出一条 SignalEvent"这个决定，debounce 期间用户再切一次会看到最新的 currentTab，只有停留超过 300ms 才真正记一条事件。300ms 选得足够短：人不可能在这么短时间内真正"看"一眼某个标签页再决定继续切，`jumpPattern` 关心的是秒级的往返跳转模式，不会因为吞掉亚秒级抖动丢失有意义的证据。`onCommitted`/`onHistoryStateUpdated`（真实导航提交）和 content-script 交互（已在内容脚本层 2s 节流）不受影响，仍然逐条记录。
     - `idle.onStateChanged` 加防御性去重：新状态跟当前追踪的 `systemIdle` 一样就直接跳过，不重复跑一遍完整评估链路。
     - 验证：`npm run typecheck` 两边干净，`npm test` 152/152，`npm run build` 正常出包。同样是真实 chrome API 代码，没有自动化测试覆盖。
+
+### Joy
+
+接着 Jay 上午给的建议做了休息模式 B 侧，然后做完 B11（措辞打磨），最后顺手把「最小版收尾反思」补掉——那块不在任何编号里，但它同时堵了三个洞：给 `SESSION_END` 一个归宿（我交付休息模式时明确标了"下游行为还没定"）、解开 J7 ↔ B15 互相依赖转不动的死结、补齐 J7「起步 → 陪伴 → 拉回 → 收尾反思」的最后一环。`npm test` **175/175** 全绿，`npm run typecheck` 两边干净，`npm run build` 正常出包。
+
+1. **休息模式 B 侧**（契约v4 §3.8，对应 Jay 第 6 条的建议）
+    - 新增 `src/platform/rest-state.ts`：`RestState` 形状 + 独立 storage key。**不塞进 `PanelState`**——休息跟三态是正交的两件事，而且分开一个 key 之后，用户点"休息"那一刻不会被下一次心跳的 `pushPanelState` 冲掉。
+    - 新增 `src/platform/background/rest.ts`：`beginRest`/`endRest`/`refreshRestReminder` 三个函数，只负责读写 `BState` + 推面板状态，判定全部复用 B1 早就测过的 `startRest()`/`restReminderDue()`。**这是给 Jay 的参考接线**，要重写或挪进 `frame-pipeline.ts` 都行。
+    - `wording.ts` 补三句休息措辞；`pet/types.ts` 加 5 个 props；`cat.tsx`/`cat.css` 加休息入口按钮、提醒气泡的两个选项、`data-resting` 视觉；`messages.ts` 加 `REST_START`/`REST_END`/`SESSION_END`；`main.tsx` 订阅 `REST_STATE_KEY`。
+    - **★ 关键设计决定：休息不是第四个 PetState。** `cat.tsx` 顶部明确写了"三态之外没有第四态"，所以休息做成正交标记——休息期间 `state` 仍是 `companion`，只是徽章降饱和度+去脉冲、猫本体淡到 0.7、说明文案换掉。语义上正好："我还在，只是不看着你了"。
+    - **踩过的坑写在注释里了**：结束休息必须**同时**清 `restUntil` 和 `restStartTs`。只清前者的话 `restReminderDue()` 会继续按老的休息起点判定，提醒停不下来（它只读 `restStartTs`）。
+    - UI 微调：`Take a break` 一开始做成了无边框纯灰文字，预览里看着像说明文案不像控件（affordance 不足，**一个点不出来的入口等于没有这个功能**）。改回描边 pill，靠"背景透明 + 更浅文字色"跟 check-in chip 拉开层级，而不是靠去掉按钮特征本身。
+
+2. **B11：check-in / 微重启措辞打磨**（`wording.ts` + `wording.test.ts` + `panel.ts`）
+    - **要解决的是重复。** 每种情况只有一句固定文案，而冷却是 5 分钟——一次 demo 很容易触发两三次 check-in，评委会看到一模一样的句子重复出现，那一瞬间"像朋友"的错觉就破了，变成很明显的模板机器人。
+    - 做法：DRIFT 3 个变体、STUCK 3 个、无快照兜底 2 个、微重启每种回答 3 个，用 `pickVariant()` 按 `Math.floor(now / 60_000) % 池长度` 轮换。
+    - **★ 刻意不用 `Math.random()`**，三个理由：①测试可断言不 flaky；②**demo 可预演**——走查时看到的就是现场会出的那句，不会临场抽到没排练过的文案；③两次 check-in 至少隔 5 分钟冷却，分钟数必然不同，实际观感就是"每次都不一样"。
+    - `panel.ts` 的 `pushMicroRestartToast()` 补传 `Date.now()`——不传的话永远只出每个池的第一句，变体等于白做。`buildMicroRestartMessage(answer, now = 0)` 第二参数可选，所以是向后兼容的改动。
+    - **测试才是这次的重点**（23→32 条）：不是只测选中的那一句，而是**对每一个变体逐条断言语气规则**——必须引用标题、必须带时间线索、必须问号收尾、不能出现 `should/stop/again/why`；微重启的 `FALSE_POSITIVE` 不能出现 `sorry/wrong/mistake`、`DRIFTED` 不能出现 `again/why`。B11 标着"demo 成败点"，值得用测试把标准焊死，而不是靠每次 review 凭感觉。
+
+3. **最小版收尾反思**（J7 最后一环 / B15 的最小版）
+    - 新增 `src/platform/session-summary-state.ts`（`SessionStats`/`SessionSummary` + 两个 key）、`src/platform/background/session-summary.ts`（累计统计/结算/重启会话）、`src/sidepanel/SummaryPanel.tsx` + `summary.css`；`wording.ts` 补 4 个函数；`messages.ts` 加 `SESSION_RESTART`。
+    - **★ 统计不进 `BStatePersistable`**：那是契约v4 §3.1 定义的"判定状态"（阈值/冷却/休息），塞 UI 统计会污染语义；而且 `frame-pipeline` 的 `toPersistable()` 用的是解构剩余，往 `BState` 加字段会被自动当判定状态一起持久化。改用独立 storage key，跟 `panel-state`/`rest-state`/`onboarding-state` 一个模式。
+    - **★ 只统计"用户真正回答过的" check-in**：没回答就被下一帧顶掉的不算——那不是一次有效对话，算进去会虚高。这个口径正好等于契约v4 §5.4 误报率的分母。
+    - **★ 零次的统计行整块不渲染**（`buildCheckInTally()` 返回 `null`）：说"我一次都没打扰你"像邀功，说"未检测到走神"像系统状态报告——这一行的定位是"顺带一提"，零次就该沉默。
+    - 语气用正则焊死了**不打分**：`great|well done|proud|could have|should have|only` 一律禁，感叹号也禁。**表扬和批评是同一类问题，都是在评价用户，而不是陈述发生了什么。** 用户刚结束一场专注，此刻最不想看到的是一张成绩单。
+    - 结算流程：`SESSION_END` → 存 summary（`taskDeclaration` 要**先**快照再清 context，顺序不能反）→ 把 `taskDeclaration` 打回默认值（复用 onboarding 的同一个判据，两处不会不同步）→ 面板显示收尾视图 → 点"Start something new" → `SESSION_RESTART` → 清 summary → 回到起步教练。
+
+4. **修的 bug：结算时没清空 `sessionWhitelist`**（`session-summary.ts`，我自己刚写的代码里的）
+    - `endSession()` 原本只把 `taskDeclaration` 打回默认值，`sessionWhitelist` 原样留着。但它名字里就写着 session——白名单是"针对**这个任务**，这个域名算相关"的判断，换了任务就不成立：为了"准备数据结构考试"把 YouTube 标成查资料，不代表下一场"写周报"时 YouTube 也该免打扰。
+    - 不清的话它会一直躺在 storage 里，**用户做几场之后常去的域名全进白名单，检测等于被自己悄悄关掉了。**
+
+5. **一个产品设计结论：不对"用户谎称在查资料"做 double check**
+    - 起因：用户在看无关 YouTube 时也可以点"Just researching"把域名洗白。这个洞是真的，但**解法不在当场质疑**。
+    - **不做的四个理由**：①桌宠弹一句"你确定吗？"，那一秒它就从朋友变成监工，直接摧毁 demo 的核心差异点；②用户不是对手——扩展是他自己装的，谎报只坑自己，不存在被欺骗的第三方，跟公司监控软件有本质区别；③为撒谎的用户做设计会**惩罚诚实的用户**（真在查资料的人每次都要多被怀疑一次），为堵一个自愿的漏洞让主路径变差不划算；④跟自欺辩论没用，弹窗反驳不会改变行为，只会让人卸载。
+    - **改在别处**：①白名单作用域收紧（上面第 4 条，换任务就清空，限制滥用累积）；②**放到收尾反思里说，不在当下说**——统计里已经有 `answers.FALSE_POSITIVE`，收尾时平铺直叙"这一场你标了 N 次'在查资料'"，不评判不追问。这才是朋友的做法：当下不争，事后提一嘴，然后翻篇。用户自己看到那个数字比任何弹窗都有效。
+    - 契约 §5.4 的误报率本来就是这个信号，但**正确的反应是调检测器（B10），不是质问用户**。
+
+6. **预览工具扩充**（`src/devpreview/`，纯本地工具不进扩展构建）
+    - 从 3 格扩到：5 个桌宠状态（含 resting / rest reminder）+ 收尾反思 2 格（有统计 / 全程零打扰）+ **B11 措辞变体一览**（7 组）。
+    - 变体一览**调的是真函数不是写死的假文案**，看到的就是真机上会出的那几句。改 `wording.ts` 任何一句 Vite 热更新即时刷新——这正是"措辞反复调"需要的循环。
+    - 跑法：`npx vite --config Devpreview.vite.config.ts`
+    - UI有需要调整的地方可以告诉我
+
+7. **等 Jay 接线的两批**（`background/index.ts`，跟休息模式一起给）
+    - `CHECK_IN_ANSWER` 分支 → `recordCheckInAnswer(feedback, now)`
+    - `REST_START` 分支 → `beginRest(state, now)` + `recordRestStart(now)`
+    - `REST_END` 分支 → `endRest(state)`
+    - `SESSION_END` 分支（新）→ `endSession(ctx, now)`
+    - `SESSION_RESTART` 分支（新）→ `restartSession()`
+    - 心跳里 → `refreshRestReminder(state, now)`
+
+8. **B12 范围新增：LLM 预生成 check-in 变体**（想到了先记下，不现在做）
+    - 现在的措辞是模板，只能说页面标题（`"login.tsx"`）；LLM 版能说**"你本来在准备数据结构考试"**——这个差别在 demo 上评委能感受到。
+    - **但绝不能在 check-in 触发那一刻现调 LLM**：①延迟正好卡在最要命的位置，"及时性"恰恰是这个产品说服力的来源，慢一秒就从"它注意到了"变成"它反应了一下"；②违反红线1（LLM 不阻塞引擎）——文案没有"看不见的兜底"，要么先显示模板再替换（跳变难看）要么就是在等；③违反红线2/3 的精神，断网/限流时坏掉的**恰好是全场 demo 最关键的那一瞬间**；④没法排练，走查看到的和现场出的不是同一句。
+    - **正确做法**：起步教练那次 LLM 调用**顺带**生成 3-4 句任务相关的 check-in 变体缓存起来 → check-in 时同步取用零延迟 → 缓存为空（断网/失败）自动落回现有模板。零延迟、可降级、可排练、真正任务感知。
+
+9. **0829 todo**
+    - 等 Jay 接完上面第 7 条，一起走 J7 端到端（起步 → 陪伴 → 拉回 → 收尾反思）。
+    - **B10 要等的不只是 J7，是真实数据**：要调的是"15→20 该不该改成 15→25"、"冷却 5 分钟合不合适"这类参数，得有人真用几天攒出误报率才调得动，否则是拍脑袋。今天做的收尾统计正好是 B10 需要的分子分母。
+    - 不卡人可以先做的：B13（桌宠三态动画，依赖 B4✅）、B14（check-in 交互 UI，依赖 B7✅）、B12（起步拆解 prompt 打磨，含上面第 8 条）。
+    - 桌宠 Lottie 猫的授权条款确认（0826 就记过，一直没顾上）。
