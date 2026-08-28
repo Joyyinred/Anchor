@@ -388,8 +388,65 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
     - **但绝不能在 check-in 触发那一刻现调 LLM**：①延迟正好卡在最要命的位置，"及时性"恰恰是这个产品说服力的来源，慢一秒就从"它注意到了"变成"它反应了一下"；②违反红线1（LLM 不阻塞引擎）——文案没有"看不见的兜底"，要么先显示模板再替换（跳变难看）要么就是在等；③违反红线2/3 的精神，断网/限流时坏掉的**恰好是全场 demo 最关键的那一瞬间**；④没法排练，走查看到的和现场出的不是同一句。
     - **正确做法**：起步教练那次 LLM 调用**顺带**生成 3-4 句任务相关的 check-in 变体缓存起来 → check-in 时同步取用零延迟 → 缓存为空（断网/失败）自动落回现有模板。零延迟、可降级、可排练、真正任务感知。
 
-10. **0829 todo**
-    - 等 Jay 接完第 8 条那 7 处，一起走 J7 端到端（起步 → 陪伴 → 拉回 → 收尾反思）。**「拉回」这一环现在才第一次真的能验**——之前那个动作压根不存在。
-    - **B10 要等的不只是 J7，是真实数据**：要调的是"15→20 该不该改成 15→25"、"冷却 5 分钟合不合适"这类参数，得有人真用几天攒出误报率才调得动，否则是拍脑袋。今天做的收尾统计正好是 B10 需要的分子分母。
-    - 不卡人可以先做的：B13（桌宠三态动画，依赖 B4✅）、B14（check-in 交互 UI，依赖 B7✅）、B12（起步拆解 prompt 打磨，含上面第 9 条）。
-    - 桌宠 Lottie 猫的授权条款确认（0826 就记过，一直没顾上）。
+10. **★ 待跟 Jay 讨论：真机测出 STUCK 对娱乐视频误报 + DRIFT 完全不触发（契约层 + 分类质量，今天先不改）**
+
+    真机复现：起步教练把 GitHub 设为锚点 → 切到 YouTube 看娱乐视频（`Crossing China One Cigarette at a Time`）→ 期望 `CHECK_IN_DRIFT`，**实际反复出 `CHECK_IN_STUCK`**。桌宠问的是 "You've been sitting still on 'Crossing China One Cigarette at a Time' — stuck on something, or just deep in thought?"——**对着一个娱乐视频问"你是不是卡住了"**，这句话本身就会让用户觉得这东西根本不懂他在干嘛。我切到购物网站则能正常触发drift，你也可以在你那边跑一遍看是不是同样的情况。
+
+    **★ 这其实是三个独立问题，别当成一个修**（这一点很重要，不然明天改完一个发现还是不触发，会白 debug 一轮）：
+
+    | # | 问题 | 性质 | 归属 |
+    |---|---|---|---|
+    | 1 | STUCK 对 `UNKNOWN` 放行，误判成"卡住" | 契约自相矛盾 | 契约 §3.5 / `detector.ts` |
+    | 2 | **YouTube 娱乐视频被判 `UNKNOWN` 而非 `IRRELEVANT`** | **分类质量——这才是 DRIFT 不触发的真原因** | A2/A8 |
+    | 3 | 安静看视频 = `texture: 'idle'` | 信号盲区 | `perceiver.ts` |
+
+    ---
+
+    **先排除两个不是原因的**：①锚点认对了（`lastAnchorSnapshot` 是 GitHub 那个 md 文件，切回去时 `anchorDetachedMs: 0`）；②`detector.ts` 的实现跟契约 §3.5 **逐行一致，我们的代码没写错**。
+
+    ### 问题 1：两条通道对 `UNKNOWN` 的处理不一致
+
+    根因日志：
+    ```
+    [Anchor SW] Groq classify: below confidence threshold {verdict: 'UNKNOWN', confidence: 0.6}
+    [Anchor SW] classified www.youtube.com/watch?v=y_pqNyA9RLo -> UNKNOWN
+    ```
+
+    | 通道 | 契约 §3.4/§3.5 的闸口 | `UNKNOWN` 时 |
+    |---|---|---|
+    | DRIFT | `if (contextRelevance !== 'IRRELEVANT') → false` | **挡住** ✅ 保守 |
+    | STUCK | `if (contextRelevance === 'IRRELEVANT') → false` | **放行** ❌ |
+
+    DRIFT 要求"必须是 IRRELEVANT"，STUCK 只排除"是 IRRELEVANT"——**`UNKNOWN` 从 STUCK 的缝里漏过去了**。这是契约自相矛盾：红线1 白纸黑字写着"判出前一律保守（不触发 check-in）"，**DRIFT 遵守了，STUCK 没有**。
+
+    候选方案（等一起定，我没动代码）：
+    - **方案 A（改一行，我倾向这个）**：`if (f.contextRelevance === 'IRRELEVANT') return false;` → `if (f.contextRelevance !== 'RELEVANT') return false;`。语义变成"**只有确认在做正事、却停住不动了，才问是不是卡住了**"——这才是 STUCK 的本意，也让两条通道对 `UNKNOWN` 的态度一致。
+    - **方案 B（可叠加）**：`contentKind === 'video'` 时排除 STUCK——看视频本来就不该被问"卡住了吗"。
+
+    **⚠️ 但必须清楚：方案 A 只让 STUCK 闭嘴，不会让它变成 DRIFT。** DRIFT 的闸口要求 `=== 'IRRELEVANT'`，`UNKNOWN` 照样被挡 → **改完之后两条通道都不响，桌宠一句话都不说**。比误报好，但这是**漏报**——恰恰是产品最该抓的场景（契约场景3：飘到 youtube 娱乐 → `CHECK_IN_DRIFT`）。**方案 A 是"不说错话"，不是"能说对话"。**
+
+    ### 问题 2：分类质量（DRIFT 不触发的真原因，我也觉得这是根本原因，groq的问题把youtube识别为unknown）
+
+    当前配置：分类 `openai/gpt-oss-20b`，置信度阈值 `0.7`，prompt 只喂 `taskDeclaration + url + title`。四个可能原因：
+
+    - **① 模型太小**：分类用 20b，起步教练用 **120b**——分类是判断题、更吃语义理解，反而用了小六倍的模型。当初选小模型的理由是"高频、追求速度"，但实际有缓存（每页每会话最多一次），频率没那么高。**换 120b 可能是最省事的一刀。**
+    - **② 阈值 0.7 偏高**：`confidence 0.6` 被强制降级。但这是红线1 定的保守值，降它会让所有分类都变激进。**我倾向不动**——0.6 的把握本来就该保守，问题是模型对这个页面不该只有 0.6。
+    - **③ prompt 上下文太薄**：`Crossing China One Cigarette at a Time` + 一句任务声明，模型犹豫情有可原（旅行纪录片理论上可能是 research）。可以补判断准则，比如"娱乐向 vlog/纪录片除非任务明确涉及该主题否则判 IRRELEVANT"。属 A2 prompt 打磨范围。
+    - **④ 任务声明太模糊**：任务越具体分类越准——这正是契约 §5.5 要求 ≥8 字符追问的原因。
+
+    **验证方法（5 分钟出答案，别猜）**：同样的 prompt 分别用 20b 和 120b 手动跑一次那个 YouTube 页面，看置信度差多少。120b 明显更准 → 换模型；都不准 → 改 prompt。
+
+    ### 问题 3：看视频 = `texture: 'idle'`
+
+    日志里心跳帧 `texture: 'idle'` 但视频正在播放。content script 只在键盘/滚动/播放暂停时发事件，**安静看视频不产生任何事件** → 120s 纹理窗口空了 → 判 `idle`。结果"专注看视频"和"盯着静止页面发呆"信号上完全一样，正好喂给 STUCK 的 `texture !== 'idle'` 闸口，让问题 1 雪上加霜。
+
+    ### demo 的现成后门（无论上面怎么改都该做）
+
+    契约 §5.2 明确写了：*"若需断网仍演场景 3，可在 DEMO_MODE 下额外注入 `youtube.com/watch?v=fun*` → IRRELEVANT"*。**A10（demo 域名预热进缓存）本来就是干这个的，现在还是 ⬜。** 录 demo 不能赌 LLM 当场判得准——这本来就是红线2/3 的既定策略。
+
+    ### 为什么今天不改
+
+    问题 1 动的是契约 §3.5 + `detector.ts` + 可能影响 `frames.json` 既有断言，属于跨人的主缝；问题 2 是 A 侧范围。**都该两个人一起拍**。建议明天先做影响面评估（把方案 A 改上去看 180 条测试挂几条），拿数据讨论而不是空谈。
+
+11. ![alt text](image-2.png)
+    - 对长标题网页需要做缩略，否则ui呈现不好，明天修改
