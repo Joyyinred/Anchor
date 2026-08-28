@@ -79,11 +79,14 @@ export function CuteAnchorPet({
   }, []);
 
   const wrapperClass = className ? `anchor-pet ${className}` : 'anchor-pet';
-  const bubbleText = state === 'checkin' ? message ?? DEFAULT_MESSAGE : '';
+  // checkin 态：气泡必现（没传 message 时用默认占位文案）。非 checkin 态：只有明确传了
+  // message 才短暂露一下（比如 B7 的微重启一句话反馈），没传就是空——这不是第四态，只是
+  // "这一刻要不要说句话"的开关，data-bubble-visible 由这个值驱动，不再是 data-state 本身。
+  const bubbleText = state === 'checkin' ? message ?? DEFAULT_MESSAGE : message ?? '';
 
   return (
     <div className={wrapperClass}>
-      <div className="anchor-pet-stage" data-state={state}>
+      <div className="anchor-pet-stage" data-state={state} data-bubble-visible={Boolean(bubbleText)}>
         <div className="anchor-pet-wrap">
           <div className="anchor-pet-bubble" role="status" aria-live="polite">
             <span>{bubbleText}</span>

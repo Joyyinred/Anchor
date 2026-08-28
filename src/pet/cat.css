@@ -60,7 +60,9 @@
   justify-content: center;
 }
 
-/* ── check-in 气泡 ── */
+/* ── 气泡：check-in 时必现，其它状态下只在传了 message 时短暂露一下（B7 微重启反馈）──
+   边框色跟着 --ap-state 走（companion 态是绿色、checkin 态是橙色），不再写死 checkin 的橙色，
+   免得一句陪伴态的反馈看起来像是在质问用户。 */
 .anchor-pet-bubble {
   position: absolute;
   top: -30px;
@@ -69,7 +71,7 @@
   transform-origin: 188px 100%;                 /* pinned to the badge's x, bottom edge — bubble grows out of the badge, not its own center */
   width: 220px;
   background: var(--ap-card);
-  border: 1.5px solid var(--ap-checkin);
+  border: 1.5px solid var(--ap-state, var(--ap-checkin));
   border-radius: 18px;
   padding: 12px 14px;
   font-size: 13px;
@@ -90,10 +92,10 @@
   width: 14px;
   height: 14px;
   background: var(--ap-card);
-  border-right: 1.5px solid var(--ap-checkin);
-  border-bottom: 1.5px solid var(--ap-checkin);
+  border-right: 1.5px solid var(--ap-state, var(--ap-checkin));
+  border-bottom: 1.5px solid var(--ap-state, var(--ap-checkin));
 }
-.anchor-pet-stage[data-state="checkin"] .anchor-pet-bubble {
+.anchor-pet-stage[data-bubble-visible="true"] .anchor-pet-bubble {
   opacity: 1;
   transform: translate(-50%, -100%) scale(1);
   pointer-events: auto;

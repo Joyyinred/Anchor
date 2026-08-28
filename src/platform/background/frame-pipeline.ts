@@ -8,8 +8,11 @@ import type { SignalEvent, SessionContext, FeatureFrame, DetectionResult, BState
 import { createInitialBState } from '../../engine/types';
 import { computeFeatureFrame, cacheKey, type ClassificationCache } from '../../engine/perceiver';
 import { evaluateFrame, applyCheckInFeedback } from '../../engine/detector';
+import { createPetStateMachine, advancePetState } from '../../engine/pet-state';
+import type { PetState } from '../../pet/types';
 import { classifyDomainRelevance } from './classifier';
 import { getBState, setBState } from './state';
+
 
 type Archetype = 'CREATOR' | 'READER' | 'VIEWER';
 
@@ -26,6 +29,9 @@ let historyLoadedForSession: string | null = null;
 // SW 被回收重启后会掉回默认值 'idle'——可接受的降级：事件历史本身是持久化的，
 // 重启后第一帧只要窗口内有真实证据就会算出正确值，不依赖这个内存变量。
 let previousTexture: FeatureFrame['texture'] = 'idle';
+// B9 状态机实例。跟上面的 previousTexture 一样是模块级内存状态：纯 UI 表现，SW 被回收后
+// 从 'companion' 重新开始完全无害（最多少演一次"观察"），不进 chrome.storage.local。
+let petStateMachine = createPetStateMachine();
 // A8：真实 LLM 分类结果写在这份缓存里；未命中前 computeFeatureFrame 保守判 UNKNOWN（红线1），
 // 命中前的这段时间差正是 triggerLazyClassification() 异步分类需要的窗口。
 const classificationCache: ClassificationCache = new Map();
@@ -92,7 +98,7 @@ async function evaluateAndPersist(
   ctx: SessionContext,
   now: number,
   isDemoMode: boolean
-): Promise<DetectionResult> {
+): Promise<{ result: DetectionResult; petState: PetState }> {
   // profile.archetype 的类型比 evaluateFrame 接受的宽（还含 COMMUNICATOR/CUSTOM，阶段二才会用到），
   // 默认 SessionContext 目前永远是 CREATOR——跟 integration.test.ts 里同一处的处理方式一致。
   const archetype = ctx.profile.archetype as Archetype;
@@ -103,10 +109,28 @@ async function evaluateAndPersist(
   // （toPersistable 剥掉持续器），不是完整 BState。
   void setBState(ctx.sessionId, toPersistable(state));
 
-  return {
+  // B9：DetectionResult 只说"要不要开口"，说不了"有没有在多看两眼"——后者的信号是 BState
+  // 的两个证据持续器（见 pet-state.ts 顶部注释）。这里是全项目唯一同时拿得到 action 和
+  // BState 的地方，所以状态机在这里推进，算出的 PetState 跟 DetectionResult 一起交给调用方。
+  const petState = advancePetState(
+    petStateMachine,
     action,
-    lastAnchorSnapshot: frame.lastAnchorSnapshot,
-    currentTitle: frame.currentTitle,
+    {
+      driftSustainerSince: state.driftSustainer.since,
+      stuckSustainerSince: state.stuckSustainer.since,
+      restUntil: state.restUntil,
+    },
+    now,
+    isDemoMode
+  );
+
+  return {
+    result: {
+      action,
+      lastAnchorSnapshot: frame.lastAnchorSnapshot,
+      currentTitle: frame.currentTitle,
+    },
+    petState,
   };
 }
 
@@ -140,7 +164,7 @@ export async function recordEventAndEvaluate(
   event: SignalEvent,
   ctx: SessionContext,
   isDemoMode: boolean
-): Promise<{ frame: FeatureFrame; result: DetectionResult }> {
+): Promise<{ frame: FeatureFrame; result: DetectionResult; petState: PetState }> {
   await ensureHistoryLoaded(ctx.sessionId);
   eventHistory = trim([...eventHistory, event], event.timestamp);
   void chrome.storage.local.set({ [historyKey(ctx.sessionId)]: eventHistory });
@@ -156,8 +180,8 @@ export async function recordEventAndEvaluate(
   previousTexture = frame.texture;
   triggerLazyClassification(event, ctx, frame);
 
-  const result = await evaluateAndPersist(frame, ctx, event.timestamp, isDemoMode);
-  return { frame, result };
+  const { result, petState } = await evaluateAndPersist(frame, ctx, event.timestamp, isDemoMode);
+  return { frame, result, petState };
 }
 
 /**
@@ -173,15 +197,15 @@ export async function recomputeOnHeartbeat(
   ctx: SessionContext,
   now: number,
   isDemoMode: boolean
-): Promise<{ frame: FeatureFrame; result: DetectionResult } | null> {
+): Promise<{ frame: FeatureFrame; result: DetectionResult; petState: PetState } | null> {
   await ensureHistoryLoaded(ctx.sessionId);
   if (eventHistory.length === 0) return null; // 还没有任何事件，没有证据可以重新评估
 
   const frame = computeFeatureFrame(eventHistory, ctx, now, classificationCache, previousTexture, isDemoMode);
   previousTexture = frame.texture;
 
-  const result = await evaluateAndPersist(frame, ctx, now, isDemoMode);
-  return { frame, result };
+  const { result, petState } = await evaluateAndPersist(frame, ctx, now, isDemoMode);
+  return { frame, result, petState };
 }
 
 /**

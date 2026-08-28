@@ -5,7 +5,8 @@ import { getDemoMode, setDemoMode } from './state';
 import { getOrInitSessionContext } from './session';
 import { ensureCurrentTab, handleInteractionMessage, isTrackedTab, registerSignalListeners } from './signals';
 import { applyCheckInAnswer, recomputeOnHeartbeat } from './frame-pipeline';
-import { pushPanelState, pushCompanionState } from './panel';
+import { pushPanelState, pushMicroRestartToast } from './panel';
+import { pushOnboardingStatus, handleOnboardingSubmit } from './onboarding';
 
 const HEARTBEAT_ALARM_NAME = 'anchor-heartbeat';
 const HEARTBEAT_PERIOD_MINUTES = 1;
@@ -17,6 +18,10 @@ async function rehydrate(): Promise<void> {
   // SW 每次重新启动，currentTab 这个内存变量都会归零——立刻补查一次当前活动 tab，
   // 不要干等下一个 tabs 事件（用户可能正安静待在同一个 tab 里，永远不会触发）。
   await ensureCurrentTab();
+  // 起步教练该显示输入框还是直接显示桌宠，每次 SW 重新启动时先算一遍推给 side panel
+  // 兜底；面板挂载时还会再发一次 ONBOARDING_STATUS_REQUEST 主动问一遍（见下方消息处理），
+  // 两条路径都指向同一个 pushOnboardingStatus()，互为保险，不会互相矛盾。
+  await pushOnboardingStatus(ctx);
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -48,7 +53,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       const ctx = await getOrInitSessionContext();
       const outcome = await recomputeOnHeartbeat(ctx, now, isDemoMode);
       if (!outcome) return;
-      await pushPanelState(outcome.frame, outcome.result, now);
+      await pushPanelState(outcome.frame, outcome.result, outcome.petState, now);
       console.log('[Anchor SW] heartbeat FeatureFrame', outcome.frame);
       console.log('[Anchor SW] heartbeat DetectionResult', outcome.result);
     })();
@@ -75,12 +80,27 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
     // 不需要走 isTrackedTab 那道锚点 tab 校验。
     void (async () => {
       const ctx = await getOrInitSessionContext();
-      await applyCheckInAnswer(ctx, { channel: message.channel, answer: message.answer }, Date.now());
+      const feedback = { channel: message.channel, answer: message.answer };
+      await applyCheckInAnswer(ctx, feedback, Date.now());
       // check-in 已经处理完了——立刻把 panel 摘出 checkin 态，不能干等下一次心跳/事件
       // 才刷新（那样按钮还留在 UI 上能点，手快的话 applyCheckInFeedback 会被再触发一次）。
-      await pushCompanionState();
+      // pushMicroRestartToast 会先短暂显示 B7 的一句反馈，过会儿再自己摘回空白 companion。
+      await pushMicroRestartToast(feedback);
       console.log('[Anchor SW] applied check-in feedback', message.answer, message.channel);
     })();
+    return;
+  }
+  if (message.type === 'ONBOARDING_STATUS_REQUEST') {
+    // side panel 挂载时问一次——不能只信任面板自己缓存的旧值，SW 可能在这次打开之间
+    // 已经完成过一次 onboarding。
+    void (async () => {
+      const ctx = await getOrInitSessionContext();
+      await pushOnboardingStatus(ctx);
+    })();
+    return;
+  }
+  if (message.type === 'ONBOARDING_SUBMIT') {
+    void handleOnboardingSubmit(message.text, message.roundsUsed, Date.now());
     return;
   }
   console.log('[Anchor SW] received message', message.type, 'from', sender.tab?.url);

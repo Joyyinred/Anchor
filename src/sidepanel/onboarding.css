@@ -1,0 +1,108 @@
+/* Anchor · 起步教练 UI 样式。跟 cat.css 用同一套配色语言（浅色纸感卡片 + 深色模式），
+   但故意不共享 .anchor-pet 那份变量作用域——起步教练出现的时候桌宠本体还没渲染出来，
+   没必要为了几个颜色值牵一层依赖关系，各自独立、颜色数值保持一致即可。 */
+.anchor-onboarding {
+  --ao-paper: #eef3f1;
+  --ao-card: #ffffff;
+  --ao-ink: #1f2b29;
+  --ao-ink-soft: #4c5b57;
+  --ao-line: #d9e3df;
+  --ao-accent: #3f9b80;
+  --ao-shadow: 220 30% 20%;
+
+  box-sizing: border-box;
+  max-width: 280px;
+  margin: 40px auto 0;
+  padding: 20px;
+  background: var(--ao-card);
+  border: 1px solid var(--ao-line);
+  border-radius: 18px;
+  box-shadow: 0 8px 24px -12px hsl(var(--ao-shadow) / 0.35);
+  font-family: 'Nunito', ui-sans-serif, system-ui, sans-serif;
+  color: var(--ao-ink);
+  text-align: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  .anchor-onboarding {
+    --ao-paper: #141b1a;
+    --ao-card: #1c2523;
+    --ao-ink: #eef3f1;
+    --ao-ink-soft: #b7c4c0;
+    --ao-line: #2a3533;
+    --ao-shadow: 220 40% 2%;
+  }
+}
+
+.anchor-onboarding * {
+  box-sizing: border-box;
+}
+
+.anchor-onboarding-prompt {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.anchor-onboarding-input {
+  width: 100%;
+  resize: none;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ao-ink);
+  background: var(--ao-paper);
+  border: 1px solid var(--ao-line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  transition: border-color 0.15s ease;
+}
+.anchor-onboarding-input:focus {
+  outline: none;
+  border-color: var(--ao-accent);
+}
+.anchor-onboarding-input:disabled {
+  opacity: 0.6;
+}
+
+.anchor-onboarding button {
+  font-family: 'Nunito', sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+  background: var(--ao-accent);
+  border: none;
+  border-radius: 999px;
+  padding: 8px 20px;
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+.anchor-onboarding button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.anchor-onboarding button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.anchor-onboarding-ready .anchor-onboarding-label {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ao-ink-soft);
+}
+.anchor-onboarding-ready .anchor-onboarding-first-action {
+  margin: 0 0 16px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anchor-onboarding, .anchor-onboarding * {
+    transition-duration: 0.001ms !important;
+  }
+}

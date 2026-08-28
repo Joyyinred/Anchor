@@ -51,8 +51,8 @@ async function emitSignalEvent(reason: string): Promise<void> {
     systemIdle,
   };
   const isDemoMode = await getDemoMode();
-  const { frame, result } = await recordEventAndEvaluate(event, ctx, isDemoMode);
-  await pushPanelState(frame, result, event.timestamp);
+  const { frame, result, petState } = await recordEventAndEvaluate(event, ctx, isDemoMode);
+  await pushPanelState(frame, result, petState, event.timestamp);
   console.log(`[Anchor SW] SignalEvent (${reason})`, event);
   console.log('[Anchor SW] FeatureFrame', frame);
   console.log('[Anchor SW] DetectionResult', result);

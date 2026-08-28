@@ -45,9 +45,20 @@ export function buildCheckInMessage(
   }
 
   // DRIFT
-  const label = frame.lastAnchorSnapshot.title.trim() || UNTITLED_TASK_FALLBACK;
-  const elapsed = describeElapsed(minutesAgo(frame.lastAnchorSnapshot.ts, now));
-  return `You drifted from "${label}" ${elapsed} — still around it somewhere, or did your mind wander?`;
+  const snapshot = frame.lastAnchorSnapshot;
+  const title = snapshot.title.trim();
+
+  // 退化情况：这次会话里还没有过"锚点页面上的有意义交互"（perceiver.ts 的 computeAnchorSignal
+  // 要求 isAnchor + ACTIVE_INPUT/PASSIVE_SCROLL/MEDIA_PAUSE/MEDIA_SEEK 才写快照），
+  // 快照仍是初始值 { title: '', url: '', ts: 0 }。这时 ts=0 会让"多久以前"算成 now-0，
+  // 也就是从 1970 年算起的分钟数（真机上见过 29798077 minutes ≈ 56 年）——宁可不说时间，
+  // 也不能说一个一眼假的数字，那比没有信息更伤可信度。
+  if (!title || snapshot.ts <= 0) {
+    return `You drifted from ${UNTITLED_TASK_FALLBACK} — still around it somewhere, or did your mind wander?`;
+  }
+
+  const elapsed = describeElapsed(minutesAgo(snapshot.ts, now));
+  return `You drifted from "${title}" ${elapsed} — still around it somewhere, or did your mind wander?`;
 }
 
 /**
