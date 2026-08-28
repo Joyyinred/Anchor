@@ -1,0 +1,91 @@
+/* Anchor · 收尾反思视图样式。跟 onboarding.css 用同一套配色语言和卡片形状——
+   这两屏是同一条流程的头和尾（起步 → ... → 收尾），视觉上应该认得出是一家。
+   同样不共享 .anchor-pet 的变量作用域：这一屏渲染时桌宠本体已经不在页面上了。 */
+.anchor-summary {
+  --as-card: #ffffff;
+  --as-ink: #1f2b29;
+  --as-ink-soft: #4c5b57;
+  --as-ink-faint: #8b9995;
+  --as-line: #d9e3df;
+  --as-accent: #3f9b80;
+  --as-shadow: 220 30% 20%;
+
+  box-sizing: border-box;
+  max-width: 280px;
+  margin: 40px auto 0;
+  padding: 22px 20px;
+  background: var(--as-card);
+  border: 1px solid var(--as-line);
+  border-radius: 18px;
+  box-shadow: 0 8px 24px -12px hsl(var(--as-shadow) / 0.35);
+  font-family: 'Nunito', ui-sans-serif, system-ui, sans-serif;
+  color: var(--as-ink);
+  text-align: center;
+}
+
+@media (prefers-color-scheme: dark) {
+  .anchor-summary {
+    --as-card: #1c2523;
+    --as-ink: #eef3f1;
+    --as-ink-soft: #b7c4c0;
+    --as-ink-faint: #6f7d79;
+    --as-line: #2a3533;
+    --as-shadow: 220 40% 2%;
+  }
+}
+
+.anchor-summary * { box-sizing: border-box; }
+
+.anchor-summary-headline {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+/* 用户自己写的任务声明——斜体+柔和色，读起来像"引用他自己的话"而不是系统字段回显 */
+.anchor-summary-task {
+  margin: 0 0 16px;
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--as-ink-soft);
+}
+
+.anchor-summary-tallies {
+  margin: 0 0 16px;
+  padding: 12px 0;
+  list-style: none;
+  border-top: 1px solid var(--as-line);
+  border-bottom: 1px solid var(--as-line);
+}
+.anchor-summary-tallies li {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--as-ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.anchor-summary-footer {
+  margin: 0 0 14px;
+  font-size: 12px;
+  color: var(--as-ink-faint);
+}
+
+.anchor-summary button {
+  font-family: 'Nunito', sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  color: #fff;
+  background: var(--as-accent);
+  border: none;
+  border-radius: 999px;
+  padding: 8px 20px;
+  cursor: pointer;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+.anchor-summary button:hover { transform: translateY(-1px); }
+
+@media (prefers-reduced-motion: reduce) {
+  .anchor-summary, .anchor-summary * { transition-duration: 0.001ms !important; }
+}

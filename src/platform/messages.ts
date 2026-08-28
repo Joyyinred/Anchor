@@ -73,6 +73,13 @@ export interface SessionEndMessage {
   timestamp: number;
 }
 
+// 用户在收尾反思视图上点了"Start something new"：清掉 summary，面板随即回到起步教练
+// （SessionContext.taskDeclaration 在 SESSION_END 结算时已经打回默认值了）。
+export interface SessionRestartMessage {
+  type: 'SESSION_RESTART';
+  timestamp: number;
+}
+
 export type RuntimeMessage =
   | ContentScriptReadyMessage
   | InteractionMessage
@@ -81,4 +88,5 @@ export type RuntimeMessage =
   | OnboardingSubmitMessage
   | RestStartMessage
   | RestEndMessage
-  | SessionEndMessage;
+  | SessionEndMessage
+  | SessionRestartMessage;

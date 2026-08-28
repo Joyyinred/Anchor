@@ -181,3 +181,45 @@ export function buildRestReminderMessage(restedMinutes: number): string {
 export function buildRestEndMessage(): string {
   return 'Welcome back.';
 }
+
+// ── 收尾反思措辞（J7 最后一环 / B15 最小版）─────────────────────────────────
+// 这一屏的语气比 check-in 更要小心：用户刚结束一场专注，此刻最不想看到的是一张成绩单。
+// 原则：只陈述发生了什么，不打分、不评判、不鼓励式说教（"你真棒！"跟"你本可以更好"
+// 一样都是在评价用户）。数字自己会说话，我们只负责把它摆得体面。
+
+function describeDuration(ms: number): string {
+  const totalMinutes = Math.max(0, Math.round(ms / 60_000));
+  if (totalMinutes < 1) return 'less than a minute';
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  const hPart = h > 0 ? `${h} ${h === 1 ? 'hour' : 'hours'}` : '';
+  const mPart = m > 0 ? `${m} ${m === 1 ? 'minute' : 'minutes'}` : '';
+  return [hPart, mPart].filter(Boolean).join(' ');
+}
+
+/** 收尾视图顶部的一句话。刻意不带感叹号——这是收工，不是庆功。 */
+export function buildSessionSummaryHeadline(durationMs: number): string {
+  return `That was ${describeDuration(durationMs)} of work.`;
+}
+
+/**
+ * check-in 次数那一行。★ 零次是最常见也最容易写砸的情况：说"我一次都没打扰你"听起来
+ * 像在邀功，说"没有检测到走神"又是在报告系统状态——这一行的正确定位是"顺带一提"，
+ * 所以零次时干脆什么都不说（返回 null，调用方不渲染这一行）。
+ */
+export function buildCheckInTally(answeredCheckIns: number): string | null {
+  if (answeredCheckIns <= 0) return null;
+  const times = answeredCheckIns === 1 ? 'once' : `${answeredCheckIns} times`;
+  return `We checked in ${times}.`;
+}
+
+/** 休息次数那一行。同样零次不说。 */
+export function buildRestTally(rests: number): string | null {
+  if (rests <= 0) return null;
+  return rests === 1 ? 'You took one break.' : `You took ${rests} breaks.`;
+}
+
+/** 收尾视图底部那句收束。不问"下次要不要做得更好"，只是把门留开着。 */
+export function buildSessionSummaryFooter(): string {
+  return 'Whenever you’re ready for the next one.';
+}

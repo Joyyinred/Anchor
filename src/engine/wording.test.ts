@@ -6,6 +6,10 @@ import {
   buildRestStartMessage,
   buildRestReminderMessage,
   buildRestEndMessage,
+  buildSessionSummaryHeadline,
+  buildCheckInTally,
+  buildRestTally,
+  buildSessionSummaryFooter,
 } from './wording';
 
 const now = 1_000_000;
@@ -276,5 +280,60 @@ describe('B11: 变体轮换（阶段二措辞打磨）', () => {
 
   it('buildMicroRestartMessage 不传 now 时行为跟 B7 那版一致（老调用方不用改）', () => {
     expect(buildMicroRestartMessage('FOCUSED')).toBe('Good, carry on.');
+  });
+});
+
+describe('收尾反思措辞（J7 最后一环 / B15 最小版）', () => {
+  it('时长格式化：分钟 / 小时+分钟 / 单复数', () => {
+    expect(buildSessionSummaryHeadline(25 * 60_000)).toContain('25 minutes');
+    expect(buildSessionSummaryHeadline(60 * 60_000)).toContain('1 hour');
+    expect(buildSessionSummaryHeadline(95 * 60_000)).toContain('1 hour 35 minutes');
+    expect(buildSessionSummaryHeadline(60_000)).toContain('1 minute');
+    expect(buildSessionSummaryHeadline(60_000)).not.toContain('1 minutes');
+  });
+
+  it('不满一分钟不会说成 "0 minutes"', () => {
+    const msg = buildSessionSummaryHeadline(5_000);
+    expect(msg).not.toContain('0 minute');
+    expect(msg).toContain('less than a minute');
+  });
+
+  it('负数时长（时钟异常）不会出现负号', () => {
+    expect(buildSessionSummaryHeadline(-60_000)).not.toMatch(/-d/);
+  });
+
+  it('★ 零次统计返回 null——调用方不渲染这一行，而不是说"我一次都没打扰你"（那是邀功）', () => {
+    expect(buildCheckInTally(0)).toBeNull();
+    expect(buildRestTally(0)).toBeNull();
+  });
+
+  it('check-in 次数单复数正确', () => {
+    expect(buildCheckInTally(1)).toContain('once');
+    expect(buildCheckInTally(3)).toContain('3 times');
+  });
+
+  it('休息次数单复数正确', () => {
+    expect(buildRestTally(1)).toContain('one break');
+    expect(buildRestTally(2)).toContain('2 breaks');
+  });
+
+  it('★ 全程不打分、不评判、不鼓励式说教——收工不是成绩单', () => {
+    const lines = [
+      buildSessionSummaryHeadline(45 * 60_000),
+      buildCheckInTally(3),
+      buildRestTally(2),
+      buildSessionSummaryFooter(),
+    ].filter((l): l is string => l !== null);
+    for (const line of lines) {
+      // 表扬和批评是同一类问题：都是在评价用户，而不是陈述发生了什么
+      expect(line).not.toMatch(/great|well done|nice job|proud|could have|should have|only|just d/i);
+      expect(line).not.toContain('!');
+    }
+  });
+
+  it('结尾把门留开着，不追问下一步计划', () => {
+    const msg = buildSessionSummaryFooter();
+    expect(msg.length).toBeGreaterThan(0);
+    expect(msg).not.toMatch(/what.*next|plan|tomorrow?/i);
   });
 });

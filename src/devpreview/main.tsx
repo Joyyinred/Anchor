@@ -2,6 +2,7 @@
 // 跑法：npx vite --config Devpreview.vite.config.ts   然后打开终端里打印的地址
 import { createRoot } from 'react-dom/client';
 import { CuteAnchorPet } from '../pet/cat';
+import { SummaryPanel } from '../sidepanel/SummaryPanel';
 import {
   buildCheckInMessage,
   buildMicroRestartMessage,
@@ -105,4 +106,32 @@ createRoot(document.getElementById('wording')!).render(
     ))}
     <VariantGroup title="休息提醒（随时长变化）" lines={[15, 20, 25, 30].map((m) => buildRestReminderMessage(m))} />
   </>
+);
+
+// ── 收尾反思（J7 最后一环）。两种：有统计 / 全程零打扰（统计行整个不渲染）──
+createRoot(document.getElementById("summary1")!).render(
+  <SummaryPanel
+    summary={{
+      taskDeclaration: "Study for tomorrow's data structures exam",
+      startedTs: BASE,
+      endedTs: BASE + 95 * 60_000,
+      answeredCheckIns: 3,
+      answers: { FOCUSED: 1, FALSE_POSITIVE: 1, DRIFTED: 1 },
+      rests: 2,
+    }}
+    onRestart={() => log("SESSION_RESTART")}
+  />
+);
+createRoot(document.getElementById("summary2")!).render(
+  <SummaryPanel
+    summary={{
+      taskDeclaration: "Write the intro section of the report",
+      startedTs: BASE,
+      endedTs: BASE + 42 * 60_000,
+      answeredCheckIns: 0,
+      answers: { FOCUSED: 0, FALSE_POSITIVE: 0, DRIFTED: 0 },
+      rests: 0,
+    }}
+    onRestart={() => log("SESSION_RESTART")}
+  />
 );
