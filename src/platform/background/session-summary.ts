@@ -67,7 +67,15 @@ export async function endSession(ctx: SessionContext, now: number): Promise<void
   };
   await chrome.storage.local.set({ [SESSION_SUMMARY_KEY]: summary });
 
-  await saveSessionContext({ ...ctx, taskDeclaration: DEFAULT_TASK_DECLARATION });
+  // ★ sessionWhitelist 必须一起清空。它的名字就写着 session——白名单是"针对这个任务，
+  // 这个域名算相关"的判断，换了任务就不成立了：为了"准备数据结构考试"把 YouTube 标成
+  // 查资料，不代表下一场"写周报"时 YouTube 也该免打扰。不清的话它会一直躺在 storage 里，
+  // 用户攒几场之后所有常去的域名都进了白名单，检测等于被自己关掉了。
+  await saveSessionContext({
+    ...ctx,
+    taskDeclaration: DEFAULT_TASK_DECLARATION,
+    sessionWhitelist: [],
+  });
   await chrome.storage.local.remove(SESSION_STATS_KEY);
 }
 
