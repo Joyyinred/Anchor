@@ -24,6 +24,10 @@ async function rehydrate(): Promise<void> {
   await pushOnboardingStatus(ctx);
 }
 
+// 点工具栏图标直接弹出 side panel，不用再从 Chrome 自带的侧边栏下拉菜单里翻——manifest 加了
+// `action` 字段后必须显式声明这个行为，否则点图标默认什么都不会发生。
+void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('[Anchor SW] onInstalled');
   chrome.alarms.create(HEARTBEAT_ALARM_NAME, { periodInMinutes: HEARTBEAT_PERIOD_MINUTES });

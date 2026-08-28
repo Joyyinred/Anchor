@@ -136,12 +136,22 @@
 - `src/mock/frames.json` 新增场景25（回归测试）：照抄场景3（`passive` 纹理三步触发 DRIFT 的完整时间轴），只把 `texture` 换成 `'idle'`，其余完全一致——验证两种纹理现在走同一套判定。手动验证过测试真的能抓住这个 bug：临时 `git stash` 掉 `detector.ts` 的改动单独跑场景25，精确失败在预期那一步（`Expected "CHECK_IN_DRIFT", Received "DO_NOTHING"`）。
 - 验证：`npm run typecheck` 两边干净，`npm test` **129/129 全绿**（`frames.test.ts` 22→23），`npm run build` 正常出包。这处改动碰的是 `detector.ts`（B1/B3 的内容）。
 
-✅（08-28/Jay）核对了 Joy 的 B4 分支（B6/B7/B8/B9 全部做完，`updateNote.md` 0827/Joy 记录了 6 个真机测试 bug，2 个她自己修了，4 个留给我确认）——记录准确、跟代码逐一核对无误。已把 B4 合并进 J4（`715032e`），并按顺序修完她留的④条：
+✅（08-28/Jay）核对了 Joy 的 B4 分支，把 B4 合并进 J4（`715032e`），并按顺序修完她留的bugs：
 - **③`signals.ts`：新标签页会让 `currentTab` 永久卡死** → `onActivated` 里 `if (!tab.url) return` 会在 `chrome://newtab/` 这类内部页面早退且不更新 `currentTab.tabId`，导致后续 `onUpdated`/`onCommitted`/`onHistoryStateUpdated` 全被 tabId 门禁挡掉。改成：`tabId` 无论如何先切过去（`url`/`domain` 留空），`tab.url` 非空才真正 `emitSignalEvent`，等 `onUpdated` 补上真实 url 后自然会发信号。
 - **④`signals.ts`：没监听 `chrome.windows.onFocusChanged`** → `tabs.onActivated` 只在同一窗口内切标签才触发，跨窗口切换（双屏工作常见）完全静默。新增该监听器，`windowId === WINDOW_ID_NONE`（焦点离开 Chrome 本身）时忽略，否则查一次新窗口里激活的 tab，复用跟 `onActivated` 同一个 `activationSeq` 过期保护。
 - **⑤`perceiver.ts`：`computeTexture` 冷启动会无限期冻结** → 这是 Joy 认为"挡住 DRIFT"的根因：`windowEvents.length<1` 时原来无条件 `return previousTexture`，安静看视频不产生新事件（content script 只在键盘/滚动/播放暂停时才发）会让纹理永远卡在最早一次判定。改成区分两种情况：`current` 不存在（真正的会话起点）才沿用 `previousTexture`；只要曾经有过事件、但已经超过一整个纹理窗口（120s）没有新事件，判 `'idle'`——这本身就是最有力的"idle"证据。补了 2 条 `perceiver.test.ts` 回归测试（真沉默判 idle / 真起点仍沿用 previousTexture），`git stash` 验证过新测试在修复前确实失败。这个修复暴露了场景15（READER 精读课件，滚动间隔 5-15 分钟）会误报 STUCK——之前它能过纯粹是靠这个 bug 意外挡住的；跟用户确认后把场景15的 mock 滚动间隔从 5/15/30 分钟改成 100s 一次（更贴近真实"持续阅读"的密度，场景意图不变，只是密度不真实的问题）。
 - **⑥`types.ts`：`graceUntil` 没做 DEMO_MODE 压缩** → `defaultSessionContext()` 原来是 `now + DEFAULT_GRACE_MS` 绝对值，没有 `isDemoMode` 参数，起步教练一做完宽限期就会是 2 个真实分钟，demo 模式压缩不到它。顺手发现 `detector.ts`/`perceiver.ts` 各自维护了一份几乎一样的 `scaled()`/`DEMO_TIME_SCALE`——这正是"没有一个大家都能安全 import 的公共位置"导致的，是同一类根因。把规范实现搬到 `types.ts`（engine 内唯一的叶子模块，不会有循环依赖），`detector.ts` 改成从这里 import 再重新导出（`pet-state.ts` 现有的 `import { scaled } from './detector'` 不用改），`perceiver.ts` 删掉自己那份改成 import。`defaultSessionContext()` 新增 `isDemoMode` 参数，`graceUntil` 用 `scaled()` 算；两个调用方（`session.ts` 的兜底路径、`coach.ts` 的 `runStarterCoach()`）都改成读 `getDemoMode()` 或透传 `isDemoMode` 后再传进去，`onboarding.ts`/`index.ts` 跟着接线。补了 `metascenario.test.ts` 的 DEMO_MODE 回归测试。
 - 验证：`npm run typecheck` 两边干净，`npm test` **150/150 全绿**（147→150：`perceiver.test.ts` +2、`metascenario.test.ts` +1），`npm run build` 正常出包。这批改动碰了 `signals.ts`（A4/A7 的内容）、`perceiver.ts`/`types.ts`（A 的引擎半）、`detector.ts`（B1 的内容，仅搬迁 `scaled()` 实现位置，判定逻辑未变）、`coach.ts`/`session.ts`/`onboarding.ts`/`index.ts`（B6 接线路径的透传）。
+
+🔄（08-28/Jay）补上 manifest 缺 `action` 字段的观感问题（`docs/updateNote.md` 08-27/Joy 第6条记录），`manifest.json` 加 `"action": { "default_title": "Anchor" }`，`background/index.ts` 加 `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })`，点工具栏图标直接弹侧边栏，不用再从 Chrome 下拉菜单翻。
+
+真机检查后做出的修改：
+- **check-in 气泡一闪而过（真 bug）** → 根因：`evaluateFrame()` 触发 check-in 那一刻会把 `state.lastCheckInTs` 设成 `now`（它自己 5 分钟冷却闸门要用），于是紧接着**任意一次**新事件（键盘/滚动/切 tab，不需要是在回答）触发的下一次 `evaluateFrame()` 都会被冷却闸门拦成 `DO_NOTHING`，而 `panel.ts` 原来每帧无条件覆盖 storage，气泡因此在用户读完/回答之前就被顶掉。修法：`panel.ts` 的 `pushPanelState()` 现在会先看当前是不是已经在显示未回答的 check-in——是的话跳过覆盖，只有用户真正点按钮（`pushCompanionState`/`pushMicroRestartToast`）才会让它消失。
+- **`cat.tsx` 的 CAPTION 文案优化**（"Enough signs now — asking like a friend, not a supervisor."）→ 改成第一人称口语化："Might be drifting a little — I'm keeping half an eye on things."（observing）/ "Just checking in for a sec."（checkin），跟 `wording.ts` 气泡里的朋友口吻一致，不再把"像朋友不像监工"这条设计原则本身说给用户听。
+- **气泡顶部被 Chrome 原生 side panel 标题栏遮挡** → 两处修：①真实页面标题（YouTube 标题常见 60-80 字符）会把气泡撑得比预留高度还高，`wording.ts` 新增 `truncateTitle()`（60 字符截断+省略号），DRIFT/STUCK 两条措辞里嵌入的页面标题都过一遍，气泡高度有了上限，补了 2 条 `wording.test.ts` 回归测试；②即便如此气泡顶部仍紧贴标题栏，`cat.css` 的 `.anchor-pet-stage` 顶部内边距从 236px 再加到 320px，猫和气泡整体往下挪。
+- 验证：`npm run typecheck` 两边干净，`npm test` **152/152 全绿**（150→152：`wording.test.ts` +2），`npm run build` 正常出包。
+
+✅（08-28/Jay）J5 完成，★关键检查点二达成：Groq key 重新配好后完整复测两个反差瞬间，疯狂切相关 tab 全程不打扰、飘到无关内容正确触发 DRIFT check-in，均确认通过。
 ---
 
 ## 一、联合任务（A + B 共同，跨人的缝都在这里）
@@ -151,8 +161,8 @@
 | J1 | Day 1–2 | 共定三契约：`SignalEvent` / `FeatureFrame` / `SessionContext` | ✅ | 契约 v4 已定稿（`docs/契约v4.md`），含 22 条审计修订 |
 | J2 | Day 1–2 | 准备两套 mock：`events.json`（A 用）+ `frames.json`（B 用） | ✅ | 代码核查：`events.json` 25 场景齐全；`frames.json` 覆盖场景 1-21/24 + metaScenarios 22/23，均已就绪 |
 | J3 | Day 5 | 两半合流：感知半（A）+ 决策半（B）纯函数拼接，25 场景端到端全绿 | ✅ | `src/engine/integration.test.ts`：23/23 可测场景全绿（22/23 是独立函数验收，不适用），★关键检查点一达成 |
-| J4 | Day 6–8 | 真实信号接入 + 桌宠组件进 MV3 side panel 联调 | 🔄 | A11 已完成并真机验证通过：真实信号→`FeatureFrame`→`DetectionResult`→`PanelState`→side panel 渲染桌宠→用户回答→`applyCheckInFeedback` 回写，全链路跑通。仍卡在 B8/B9（桌宠真正接线到状态机，`companion`/`observing` 目前是占位没有真状态机）——J4 要标 ✅ 还差这块 |
-| J5 | Day 8 | 真实浏览器复现两个反差瞬间（疯狂切 tab 不打扰 + 飘走触发 check-in） | ⬜ | ★关键检查点二；依赖 J4 |
+| J4 | Day 6–8 | 真实信号接入 + 桌宠组件进 MV3 side panel 联调 | ✅ | A11（真实信号→`FeatureFrame`→`DetectionResult`→`PanelState`→side panel 渲染桌宠→用户回答→`applyCheckInFeedback` 回写）+ B8/B9（`pet-state.ts` 真状态机接进 `frame-pipeline.ts`，`observing` 态不再是占位）+ B6/B7 UI（起步教练输入框 + check-in 微重启文案）全部合并进 J4（`715032e`），08-28 Jay 又修完 Joy 真机测试暴露的 4 个 bug（`715032e`→`59ee3f9`）。150/150 测试绿，`npm run build` 正常出包。下一步是 J5（真实浏览器走查两个反差瞬间） |
+| J5 | Day 8 | 真实浏览器复现两个反差瞬间（疯狂切 tab 不打扰 + 飘走触发 check-in） | ✅ | ★关键检查点二达成。08-28 Jay 真机走查后，重新配好 Groq key 完整复测两个反差瞬间——确认通过：疯狂切相关 tab 全程不打扰，飘到无关内容正确触发 DRIFT check-in |
 | J6 | Day 9–10 | 确认 `SessionContext` 正确喂给 A 感知半（B→A 反向缝） | ⬜ | 依赖 J5、B6 |
 | J7 | Day 10 | 端到端闭环验证：起步 → 陪伴 → 拉回 → 收尾反思 | ⬜ | 依赖 J6；过此项即阶段一验收通过 |
 | J8 | 全程 | 每日/每周对齐小会（持续性任务，不是一次性完成） | 🔄 | 贯穿全程，防止各自封闭到最后接口不匹配 |

@@ -42,7 +42,7 @@
   width: 100%;
   max-width: 280px;
   margin: 0 auto;
-  padding: 236px 20px 6px;   /* was 60px 20px 6px — bubble is ~158px tall, 60px clipped it */
+  padding: 320px 20px 6px;   /* was 236px — check-in 气泡带按钮行时比预期更高，顶部仍被 Chrome 原生标题栏盖住 */
   display: flex;
   flex-direction: column;
   align-items: center;

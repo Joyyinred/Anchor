@@ -15,10 +15,13 @@ import type { CuteAnchorPetProps } from './types';
 
 const DEFAULT_MESSAGE = "Looks like you drifted off for a bit — still on this, or did your mind wander?";
 
+// 08-28 真机测试反馈：这两句原来写得像"判定条件说明"（"signs"/"enough signs now"这种阈值
+// 措辞），读起来像是在跟另一个开发者解释触发逻辑，不是在跟用户说话。改成第一人称、口语化，
+// 跟气泡里 wording.ts 那种朋友口吻保持一致。
 const CAPTION: Record<CuteAnchorPetProps['state'], string> = {
   companion: 'Quietly keeping you company.',
-  observing: 'Signs of drifting — keeping a closer eye, quietly.',
-  checkin: 'Enough signs now — asking like a friend, not a supervisor.',
+  observing: "Might be drifting a little — I'm keeping half an eye on things.",
+  checkin: 'Just checking in for a sec.',
 };
 
 // 原始画布是 2000×2000，猫只占中间一小块（还带一大截红线甩到画面外）。

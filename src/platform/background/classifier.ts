@@ -58,11 +58,15 @@ function isValidVerdict(v: unknown): v is ContextRelevance {
  */
 export async function classifyDomainRelevance(input: ClassifyInput): Promise<ContextRelevance> {
   const text = await callGroq(GROQ_CLASSIFY_MODEL, buildPrompt(input));
-  if (!text) return 'UNKNOWN';
+  if (!text) return 'UNKNOWN'; // callGroq 已经打过日志说明具体是没配 key / 请求失败 / 超时中的哪一种
 
   const parsed = extractJsonObject(text) as { verdict?: unknown; confidence?: unknown } | null;
-  if (!parsed || !isValidVerdict(parsed.verdict)) return 'UNKNOWN';
+  if (!parsed || !isValidVerdict(parsed.verdict)) {
+    console.warn('[Anchor SW] Groq classify: response did not parse as expected JSON', text);
+    return 'UNKNOWN';
+  }
   if (typeof parsed.confidence !== 'number' || parsed.confidence < CONFIDENCE_THRESHOLD) {
+    console.log('[Anchor SW] Groq classify: below confidence threshold', parsed);
     return 'UNKNOWN';
   }
   return parsed.verdict;

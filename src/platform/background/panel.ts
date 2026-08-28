@@ -29,6 +29,13 @@ function toPanelState(
   return { state: petState };
 }
 
+// 08-28 真机测试暴露的 bug：check-in 触发的那一刻 evaluateFrame() 会把 state.lastCheckInTs
+// 设成 now（这是它自己的冷却闸门需要的），于是紧接着的下一次 evaluate（任何后续事件都会
+// 触发一次——键盘/滚动/切 tab，不需要是用户在回答）里，冷却闸门让 action 变回 DO_NOTHING，
+// 而这里原来是每一帧都无条件用最新算出的 PanelState 覆盖 storage——check-in 气泡因此会在
+// 用户还没来得及读完/回答之前就被下一个事件顶掉，表现为"气泡一闪而过"。
+// 修法：已经在显示未回答的 check-in 时，只有下一帧仍然是 check-in（同一次判定的延续）才刷新；
+// 真正让它消失的只能是用户点按钮触发的 pushCompanionState()/pushMicroRestartToast()。
 export async function pushPanelState(
   frame: FeatureFrame,
   result: DetectionResult,
@@ -36,6 +43,11 @@ export async function pushPanelState(
   now: number
 ): Promise<void> {
   const panelState = toPanelState(frame, result, petState, now);
+  if (panelState.state !== 'checkin') {
+    const stored = await chrome.storage.local.get(PANEL_STATE_KEY);
+    const current = stored[PANEL_STATE_KEY] as PanelState | undefined;
+    if (current?.state === 'checkin') return;
+  }
   await chrome.storage.local.set({ [PANEL_STATE_KEY]: panelState });
 }
 

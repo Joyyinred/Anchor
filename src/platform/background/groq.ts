@@ -19,7 +19,13 @@ export async function getGroqApiKey(): Promise<string | undefined> {
  */
 export async function callGroq(model: string, userPrompt: string): Promise<string | null> {
   const apiKey = await getGroqApiKey();
-  if (!apiKey) return null;
+  // 08-28 真机测试：contextRelevance 长期卡 UNKNOWN，排查了很久才发现是 storage.local.clear()
+  // 顺手把 Groq key 也清掉了——这条路径原来完全没有日志，没配 key/请求失败/低置信度这三种
+  // 情况在 UI 上看起来一模一样，都是"分类不出来"。补上诊断日志，下次一眼就能看出是哪一种。
+  if (!apiKey) {
+    console.warn('[Anchor SW] Groq API key not configured — set anchor_groq_api_key in chrome.storage.local');
+    return null;
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -37,11 +43,15 @@ export async function callGroq(model: string, userPrompt: string): Promise<strin
       }),
       signal: controller.signal,
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.warn('[Anchor SW] Groq request failed', response.status, await response.text().catch(() => ''));
+      return null;
+    }
 
     const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
     return data.choices?.[0]?.message?.content ?? null;
-  } catch {
+  } catch (err) {
+    console.warn('[Anchor SW] Groq request errored (network/timeout)', err);
     return null;
   } finally {
     clearTimeout(timeout);

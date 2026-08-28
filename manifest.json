@@ -5,6 +5,9 @@
   "description": "A focus companion that notices when you drift and gently pulls you back.",
   "permissions": ["tabs", "idle", "storage", "alarms", "webNavigation", "sidePanel"],
   "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Anchor"
+  },
   "background": {
     "service_worker": "src/platform/background/index.ts",
     "type": "module"

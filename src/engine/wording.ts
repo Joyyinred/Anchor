@@ -26,6 +26,15 @@ function describeElapsed(minutes: number): string {
 const UNTITLED_TASK_FALLBACK = 'what you were working on';
 const UNTITLED_PAGE_FALLBACK = 'this';
 
+// 08-28 真机测试：真实页面标题（YouTube 标题动辄 60-80 字符）会把气泡撑得比设计时预留的高度
+// 还高，长到能顶穿 side panel 顶部、盖到 Chrome 原生的扩展标题栏下面。裁掉过长标题，气泡高度
+// 才有个上限，顺带也是更好读的措辞——一整条没截断的视频标题堆在对话气泡里本身就不像朋友说话。
+const MAX_TITLE_LENGTH = 60;
+function truncateTitle(title: string): string {
+  if (title.length <= MAX_TITLE_LENGTH) return title;
+  return `${title.slice(0, MAX_TITLE_LENGTH - 1).trimEnd()}…`;
+}
+
 /**
  * check-in 气泡文案。DRIFT 和 STUCK 用的上下文不一样：
  *   DRIFT  → 用户已经离开锚点，问的是"你离开的那件事"，数据源是 lastAnchorSnapshot（最后一次
@@ -40,7 +49,7 @@ export function buildCheckInMessage(
   now: number
 ): string {
   if (channel === 'STUCK') {
-    const label = frame.currentTitle.trim() || UNTITLED_PAGE_FALLBACK;
+    const label = truncateTitle(frame.currentTitle.trim()) || UNTITLED_PAGE_FALLBACK;
     return `You've been sitting still on "${label}" for a while — stuck on something, or just deep in thought?`;
   }
 
@@ -58,7 +67,7 @@ export function buildCheckInMessage(
   }
 
   const elapsed = describeElapsed(minutesAgo(snapshot.ts, now));
-  return `You drifted from "${title}" ${elapsed} — still around it somewhere, or did your mind wander?`;
+  return `You drifted from "${truncateTitle(title)}" ${elapsed} — still around it somewhere, or did your mind wander?`;
 }
 
 /**

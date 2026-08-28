@@ -15,6 +15,19 @@ describe('B7: buildCheckInMessage — DRIFT（数据源 lastAnchorSnapshot，契
     expect(msg).not.toContain('Top 10 Funny Cats');
   });
 
+  // 08-28 真机测试：真实页面标题（YouTube 标题常见 60-80 字符）会把气泡撑高到顶穿 side panel
+  // 顶部、盖到 Chrome 原生标题栏下面——裁掉超长标题给气泡高度一个上限。
+  it('超长标题会被裁短并加省略号，不会原样整条塞进措辞里', () => {
+    const longTitle = 'Hailey Bieber Opens Up About Motherhood, Fame and Her $1 Billion Brand - YouTube';
+    const msg = buildCheckInMessage(
+      'DRIFT',
+      { lastAnchorSnapshot: { title: longTitle, url: '', ts: now - 60_000 }, currentTitle: '' },
+      now
+    );
+    expect(msg).not.toContain(longTitle);
+    expect(msg).toContain('…');
+  });
+
   it('elapsed 时间正确换算并格式化（10分钟前）', () => {
     const msg = buildCheckInMessage(
       'DRIFT',
@@ -94,6 +107,17 @@ describe('B7: buildCheckInMessage — STUCK（数据源 currentTitle，不是 la
     );
     expect(msg).toContain('thesis-chapter-3.pdf');
     expect(msg).not.toContain('old anchor moment');
+  });
+
+  it('超长 currentTitle 同样会被裁短', () => {
+    const longTitle = 'Hailey Bieber Opens Up About Motherhood, Fame and Her $1 Billion Brand - YouTube';
+    const msg = buildCheckInMessage(
+      'STUCK',
+      { lastAnchorSnapshot: { title: '', url: '', ts: now }, currentTitle: longTitle },
+      now
+    );
+    expect(msg).not.toContain(longTitle);
+    expect(msg).toContain('…');
   });
 
   it('currentTitle 为空字符串时用兜底文案', () => {
