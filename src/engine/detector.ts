@@ -15,7 +15,9 @@ export interface BState {
 
 // 演示模式时间缩放因子 (Demo 模式按 120x 压缩)
 const getTimeScale = (isDemoMode?: boolean) => (isDemoMode ? 1 / 120 : 1);
-const scaled = (ms: number, isDemoMode?: boolean) => ms * getTimeScale(isDemoMode);
+// 导出给 pet-state.ts（B9 状态机）复用——分工v2.md §5 红线5：DEMO_MODE 时间压缩常量
+// 只在一个地方改（TIME_SCALE），别的模块要压缩时间必须走这个函数，不许自己再写一份。
+export const scaled = (ms: number, isDemoMode?: boolean) => ms * getTimeScale(isDemoMode);
 
 // 持续器工具函数
 function sustainedWithWindow(
