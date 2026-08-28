@@ -43,6 +43,27 @@ describe('B7: buildCheckInMessage — DRIFT（数据源 lastAnchorSnapshot，契
     expect(msg).toContain('just now');
   });
 
+  it('还没有过锚点交互（快照 ts=0）：不显示"多久以前"，不能算出 1970 年起的天文数字', () => {
+    const msg = buildCheckInMessage(
+      'DRIFT',
+      { lastAnchorSnapshot: { title: '', url: '', ts: 0 }, currentTitle: '' },
+      now
+    );
+    // 真机上出现过 "29798077 minutes ago"（≈56 年）——比没有信息更伤可信度
+    expect(msg).not.toMatch(/minutes? ago/);
+    expect(msg).not.toMatch(/d{4,}/);
+    expect(msg).toContain('what you were working on');
+  });
+
+  it('快照有标题但 ts=0（理论上不该发生）也走同一条兜底，不算时间差', () => {
+    const msg = buildCheckInMessage(
+      'DRIFT',
+      { lastAnchorSnapshot: { title: 'some title', url: '', ts: 0 }, currentTitle: '' },
+      now
+    );
+    expect(msg).not.toMatch(/minutes? ago/);
+  });
+
   it('title 为空字符串时用兜底文案，不拼出裸引号 ""', () => {
     const msg = buildCheckInMessage(
       'DRIFT',
