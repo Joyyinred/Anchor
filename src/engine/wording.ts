@@ -85,3 +85,34 @@ export function buildMicroRestartMessage(answer: CheckInAnswer): string {
       return "No worries, let's head back.";
   }
 }
+
+// ── 休息模式措辞（契约v4 §3.8，场景23）──────────────────────────────────────
+// 引擎侧 startRest()/restReminderDue() B1 早就写好也测过，但一直没有任何 UI 调用它们；
+// 这几句是补上这条链路时缺的"话"。语气跟 check-in 一致：像朋友问一句，不是监工催你回去。
+
+/**
+ * 用户刚点下"休息"时的一句确认。不说"计时开始"这种功能性描述——
+ * 用户要的是"知道它不会再打扰我了"这个安心感。
+ */
+export function buildRestStartMessage(): string {
+  return "Taking a break — I'll stay quiet.";
+}
+
+/**
+ * 休息满 15 分钟起的轻声提醒，之后每 5 分钟重复一次（节拍由 restReminderDue() 判定，
+ * 这里只负责说什么）。带上"已经休息了多久"有两个作用：给用户一个真实的判断依据，
+ * 以及让每 5 分钟重复一次的提醒不会是一模一样的一句话（连着看十遍同样的文案很烦人）。
+ */
+export function buildRestReminderMessage(restedMinutes: number): string {
+  const rounded = Math.max(1, Math.round(restedMinutes));
+  const unit = rounded === 1 ? 'minute' : 'minutes';
+  return `You’ve been resting ${rounded} ${unit} — ready to pick things back up?`;
+}
+
+/**
+ * 用户在提醒里点了"继续专注"之后的一句短反馈——跟 buildMicroRestartMessage() 同一个定位：
+ * 一句话确认就翻篇，不追问第二句。
+ */
+export function buildRestEndMessage(): string {
+  return 'Welcome back.';
+}
