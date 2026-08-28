@@ -30,7 +30,12 @@ export async function pushOnboardingStatus(ctx: SessionContext): Promise<void> {
  * 用户在起步输入框里提交了这一轮内容（第一轮是任务声明本身，追问后的后续轮次是回答）。
  * roundsUsed 由 side panel 原样带回上一次响应里的值（第一次提交传 0）。
  */
-export async function handleOnboardingSubmit(text: string, roundsUsed: number, now: number): Promise<void> {
+export async function handleOnboardingSubmit(
+  text: string,
+  roundsUsed: number,
+  now: number,
+  isDemoMode: boolean
+): Promise<void> {
   // 锚点：用户声明任务这一刻正看着的那个 tab，就是这次会话的锚点——跟 session.ts 的默认
   // 兜底路径取的是同一个东西（当前活动 tab），只是那边没有任务声明、这边有。
   // 之前这里漏传了 inferredAnchor/sessionId，导致 anchor 被覆盖成 { domain: '', url: '' }：
@@ -47,7 +52,8 @@ export async function handleOnboardingSubmit(text: string, roundsUsed: number, n
     // sessionId 沿用 session.ts 那份的 'default'：BState/事件历史都按 sessionId 分 storage key，
     // 每次起步都生成一个新 id 的话，旧 key 会永远留在 chrome.storage.local 里没人清。
     'default',
-    { domain: domainOf(url), url }
+    { domain: domainOf(url), url },
+    isDemoMode
   );
 
   if (result.status === 'NEEDS_FOLLOWUP') {

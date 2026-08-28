@@ -7,6 +7,7 @@
 import type { SessionContext } from '../../engine/types';
 import { defaultSessionContext } from '../../engine/types';
 import { domainOf } from './domain';
+import { getDemoMode } from './state';
 
 const SESSION_KEY = 'anchor_default_session';
 
@@ -17,8 +18,9 @@ export async function getOrInitSessionContext(): Promise<SessionContext> {
 
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const url = activeTab?.url ?? '';
+  const isDemoMode = await getDemoMode();
 
-  const ctx = defaultSessionContext(Date.now(), { domain: domainOf(url), url }, 'default');
+  const ctx = defaultSessionContext(Date.now(), { domain: domainOf(url), url }, 'default', isDemoMode);
   await chrome.storage.local.set({ [SESSION_KEY]: ctx });
   return ctx;
 }

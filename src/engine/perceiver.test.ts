@@ -250,6 +250,25 @@ describe('computeFeatureFrame: texture（场景21 打字型走神盲区修复）
     const frame = computeFeatureFrame([anchorEvent], ctx, 0, new Map(), 'purposeful');
     expect(frame.texture).toBe('purposeful');
   });
+
+  // 08-28 回归测试：真机测试暴露的 bug——安静看视频完全不产生新事件（content script 只在
+  // 键盘/滚动/播放暂停时才发），心跳 alarm 仍在推进 now，但 events 数组里最后一条事件已经比
+  // 一整个纹理窗口（120s）还旧。修复前 computeTexture 会无限期回显 previousTexture，DRIFT
+  // 判定要求的 passive/idle 纹理证据永远等不到；修复后一整个窗口的彻底沉默本身就该被判 idle。
+  it('真沉默（最后一条事件已超过一整个窗口）应判 idle，不该无限期回显 previousTexture', () => {
+    const ctx = mkCtx();
+    // 唯一一条事件发生在 t=0（MEDIA_PLAY，安静看视频），此后再没有任何新事件——
+    // now 推进到 200000（超过 120000 的纹理窗口），previousTexture 仍是上一帧算出的 'passive'。
+    const quietVideoEvent: SignalEvent = { ...anchorEvent, interactionType: 'MEDIA_PLAY' };
+    const frame = computeFeatureFrame([quietVideoEvent], ctx, 200_000, new Map(), 'passive');
+    expect(frame.texture).toBe('idle');
+  });
+
+  it('真正的会话起点（一条事件都没有）仍然沿用 previousTexture——没有信息，不该编造判定', () => {
+    const ctx = mkCtx();
+    const frame = computeFeatureFrame([], ctx, 200_000, new Map(), 'purposeful');
+    expect(frame.texture).toBe('purposeful');
+  });
 });
 
 describe('computeFeatureFrame: jumpPattern', () => {

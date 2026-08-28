@@ -1,4 +1,8 @@
-import { FeatureFrame, SignalPolicy, SessionContext, CheckInFeedback, DEFAULT_STUCK_LADDER } from './types';
+import { FeatureFrame, SignalPolicy, SessionContext, CheckInFeedback, DEFAULT_STUCK_LADDER, scaled } from './types';
+// 08-28：scaled() 的规范实现搬到 types.ts（唯一不会产生循环依赖的叶子模块，
+// defaultSessionContext 的 graceUntil 压缩也要用它）。这里重新导出，pet-state.ts（B9）
+// 现有的 `import { scaled } from './detector'` 不用跟着改。
+export { scaled };
 
 // B 侧内部状态接口
 export interface BState {
@@ -12,12 +16,6 @@ export interface BState {
   stuckSustainer: { since: number | null };
   passiveSince: number | null;
 }
-
-// 演示模式时间缩放因子 (Demo 模式按 120x 压缩)
-const getTimeScale = (isDemoMode?: boolean) => (isDemoMode ? 1 / 120 : 1);
-// 导出给 pet-state.ts（B9 状态机）复用——分工v2.md §5 红线5：DEMO_MODE 时间压缩常量
-// 只在一个地方改（TIME_SCALE），别的模块要压缩时间必须走这个函数，不许自己再写一份。
-export const scaled = (ms: number, isDemoMode?: boolean) => ms * getTimeScale(isDemoMode);
 
 // 持续器工具函数
 function sustainedWithWindow(

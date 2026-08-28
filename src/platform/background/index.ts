@@ -100,7 +100,10 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
     return;
   }
   if (message.type === 'ONBOARDING_SUBMIT') {
-    void handleOnboardingSubmit(message.text, message.roundsUsed, Date.now());
+    void (async () => {
+      const isDemoMode = await getDemoMode();
+      await handleOnboardingSubmit(message.text, message.roundsUsed, Date.now(), isDemoMode);
+    })();
     return;
   }
   console.log('[Anchor SW] received message', message.type, 'from', sender.tab?.url);

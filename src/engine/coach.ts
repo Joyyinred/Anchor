@@ -72,6 +72,7 @@ export type StarterCoachResult =
  * @param now                Date.now()，用于 defaultSessionContext 的 graceUntil 计算
  * @param sessionId           会话 id，不传则按 now 生成
  * @param inferredAnchor      A 侧推断出的锚点（前两次 tab 切换后活跃最久的 tab），还没推断出时可不传
+ * @param isDemoMode         08-28 新增：透传给 defaultSessionContext 压缩 graceUntil，不传则按真实时间算
  */
 export async function runStarterCoach(
   rawTaskDeclaration: string,
@@ -79,7 +80,8 @@ export async function runStarterCoach(
   llmCall: StarterCoachLLMCall,
   now: number,
   sessionId?: string,
-  inferredAnchor?: InferredAnchor
+  inferredAnchor?: InferredAnchor,
+  isDemoMode?: boolean
 ): Promise<StarterCoachResult> {
   const taskDeclaration = rawTaskDeclaration.trim();
 
@@ -102,7 +104,7 @@ export async function runStarterCoach(
     firstAction = FIRST_ACTION_FALLBACK;
   }
 
-  const ctx = defaultSessionContext(now, inferredAnchor, sessionId);
+  const ctx = defaultSessionContext(now, inferredAnchor, sessionId, isDemoMode);
   // defaultSessionContext 兜底文案是"未声明任务（默认陪伴模式）"——只有真拿到非空声明时才覆盖，
   // 空声明（用户问满 2 轮还是没说清楚）保留那句默认文案，不要把空字符串硬塞进 taskDeclaration。
   if (taskDeclaration.length > 0) {

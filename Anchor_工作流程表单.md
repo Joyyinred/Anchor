@@ -135,6 +135,13 @@
 - `src/engine/detector.ts` 的 `isContinuouslyPassive()` 改名 `isContinuouslyDisengaged()`：原来 `f.texture !== 'passive'` 就重置证据计时器（等于把 `'idle'` 当"没证据"处理），改成只有 `f.texture === 'purposeful'`（用户还在主动操作）才重置——`'passive'`/`'idle'` 现在共用同一套 60s 连续纹理证据窗口。`isDrifting()` 调用处同步改名；`isStuck()` 没有改动，STUCK 依然明确排除 IRRELEVANT。
 - `src/mock/frames.json` 新增场景25（回归测试）：照抄场景3（`passive` 纹理三步触发 DRIFT 的完整时间轴），只把 `texture` 换成 `'idle'`，其余完全一致——验证两种纹理现在走同一套判定。手动验证过测试真的能抓住这个 bug：临时 `git stash` 掉 `detector.ts` 的改动单独跑场景25，精确失败在预期那一步（`Expected "CHECK_IN_DRIFT", Received "DO_NOTHING"`）。
 - 验证：`npm run typecheck` 两边干净，`npm test` **129/129 全绿**（`frames.test.ts` 22→23），`npm run build` 正常出包。这处改动碰的是 `detector.ts`（B1/B3 的内容）。
+
+✅（08-28/Jay）核对了 Joy 的 B4 分支（B6/B7/B8/B9 全部做完，`updateNote.md` 0827/Joy 记录了 6 个真机测试 bug，2 个她自己修了，4 个留给我确认）——记录准确、跟代码逐一核对无误。已把 B4 合并进 J4（`715032e`），并按顺序修完她留的④条：
+- **③`signals.ts`：新标签页会让 `currentTab` 永久卡死** → `onActivated` 里 `if (!tab.url) return` 会在 `chrome://newtab/` 这类内部页面早退且不更新 `currentTab.tabId`，导致后续 `onUpdated`/`onCommitted`/`onHistoryStateUpdated` 全被 tabId 门禁挡掉。改成：`tabId` 无论如何先切过去（`url`/`domain` 留空），`tab.url` 非空才真正 `emitSignalEvent`，等 `onUpdated` 补上真实 url 后自然会发信号。
+- **④`signals.ts`：没监听 `chrome.windows.onFocusChanged`** → `tabs.onActivated` 只在同一窗口内切标签才触发，跨窗口切换（双屏工作常见）完全静默。新增该监听器，`windowId === WINDOW_ID_NONE`（焦点离开 Chrome 本身）时忽略，否则查一次新窗口里激活的 tab，复用跟 `onActivated` 同一个 `activationSeq` 过期保护。
+- **⑤`perceiver.ts`：`computeTexture` 冷启动会无限期冻结** → 这是 Joy 认为"挡住 DRIFT"的根因：`windowEvents.length<1` 时原来无条件 `return previousTexture`，安静看视频不产生新事件（content script 只在键盘/滚动/播放暂停时才发）会让纹理永远卡在最早一次判定。改成区分两种情况：`current` 不存在（真正的会话起点）才沿用 `previousTexture`；只要曾经有过事件、但已经超过一整个纹理窗口（120s）没有新事件，判 `'idle'`——这本身就是最有力的"idle"证据。补了 2 条 `perceiver.test.ts` 回归测试（真沉默判 idle / 真起点仍沿用 previousTexture），`git stash` 验证过新测试在修复前确实失败。这个修复暴露了场景15（READER 精读课件，滚动间隔 5-15 分钟）会误报 STUCK——之前它能过纯粹是靠这个 bug 意外挡住的；跟用户确认后把场景15的 mock 滚动间隔从 5/15/30 分钟改成 100s 一次（更贴近真实"持续阅读"的密度，场景意图不变，只是密度不真实的问题）。
+- **⑥`types.ts`：`graceUntil` 没做 DEMO_MODE 压缩** → `defaultSessionContext()` 原来是 `now + DEFAULT_GRACE_MS` 绝对值，没有 `isDemoMode` 参数，起步教练一做完宽限期就会是 2 个真实分钟，demo 模式压缩不到它。顺手发现 `detector.ts`/`perceiver.ts` 各自维护了一份几乎一样的 `scaled()`/`DEMO_TIME_SCALE`——这正是"没有一个大家都能安全 import 的公共位置"导致的，是同一类根因。把规范实现搬到 `types.ts`（engine 内唯一的叶子模块，不会有循环依赖），`detector.ts` 改成从这里 import 再重新导出（`pet-state.ts` 现有的 `import { scaled } from './detector'` 不用改），`perceiver.ts` 删掉自己那份改成 import。`defaultSessionContext()` 新增 `isDemoMode` 参数，`graceUntil` 用 `scaled()` 算；两个调用方（`session.ts` 的兜底路径、`coach.ts` 的 `runStarterCoach()`）都改成读 `getDemoMode()` 或透传 `isDemoMode` 后再传进去，`onboarding.ts`/`index.ts` 跟着接线。补了 `metascenario.test.ts` 的 DEMO_MODE 回归测试。
+- 验证：`npm run typecheck` 两边干净，`npm test` **150/150 全绿**（147→150：`perceiver.test.ts` +2、`metascenario.test.ts` +1），`npm run build` 正常出包。这批改动碰了 `signals.ts`（A4/A7 的内容）、`perceiver.ts`/`types.ts`（A 的引擎半）、`detector.ts`（B1 的内容，仅搬迁 `scaled()` 实现位置，判定逻辑未变）、`coach.ts`/`session.ts`/`onboarding.ts`/`index.ts`（B6 接线路径的透传）。
 ---
 
 ## 一、联合任务（A + B 共同，跨人的缝都在这里）
@@ -172,7 +179,7 @@
 | A10 | Day 7 | demo 要用到的域名预热进缓存 | ⬜ | 依赖 A8，演示前必做 |
 | A11 | Day 7 | 协助桌宠组件接入 side panel（感知半→UI 消息链路：`chrome.runtime`/`chrome.storage`） | ✅ | 对应 J4，A 侧负责部分。`vite.config.ts` 接入 React 插件；`src/platform/panel-state.ts`（共享 `PanelState` 形状）+ `src/platform/background/panel.ts`（`DetectionResult`→`PanelState` 翻译，`pushPanelState`/`pushCompanionState`）+ `src/sidepanel/main.tsx`（真实 React 入口，`chrome.storage.onChanged` 订阅）+ `messages.ts` 新增 `CheckInAnswerMessage` + `index.ts`/`frame-pipeline.ts` 的回传处理（`applyCheckInAnswer`）。Jay 08-27 真机验证过：装上后侧边栏能渲染桌宠，真实浏览（YouTube/Gemini Notebook）触发的 `SignalEvent`→`FeatureFrame`→`DetectionResult` 全链路日志正常。`companion`/`observing` 的区分目前是占位（真正状态机是 B9，还没开工），不影响这条消息链路本身的完成度 |
 | A12 | Day 7 | 真实数据噪音处理：idle 抖动/tab 快切去抖节流 | ⬜ | 依赖 A7、J4 |
-| A13 | Day 9–10 | 消费 `SessionContext`：`anchor` 驱动锚点判定（matchMode）、`sessionWhitelist` 短路分类、跨 profile 验证准确性 | ⬜ | 依赖 J6；08-27 发现前置缺口：目前没有任何地方真正调用 B6 的 `runStarterCoach()` 并把结果写回 `session.ts` 的 `anchor_default_session`，`taskDeclaration` 永远是占位文案——A13 要消费的"真实 SessionContext"目前不存在，这个缺口需要先补上 |
+| A13 | Day 9–10 | 消费 `SessionContext`：`anchor` 驱动锚点判定（matchMode）、`sessionWhitelist` 短路分类、跨 profile 验证准确性 | ⬜ | 依赖 J6；08-27 发现的前置缺口（没有 UI 调 `runStarterCoach()`）已被 Joy 08-27 的 `onboarding.ts`/`OnboardingPanel.tsx` 补上（`ctx.taskDeclaration` 现在会是真实声明），A13 本身（真正消费 `anchor.matchMode`/`sessionWhitelist` 短路）还没开工 |
 | A14 | Day 11–14 | 【阶段二】内容级分类落地（youtube/reddit/slack 按 `domain+path+title` 判并缓存） | ⬜ | 依赖 J7，补最大漏洞 |
 | A15 | Day 15–18 | 【阶段二】交互纹理精细化（keystroke/feed_scroll/media_seek 区分） | ⬜ | 依赖 A14 |
 | A16 | Day 15–18 | 【阶段二】短视频流形态硬判 + 更多 `contentKind` | ⬜ | 依赖 A15 |
@@ -192,8 +199,8 @@
 | B5 | Day 5 | 单元测试：`frames.json` → 断言 `DetectionResult` 动作正确 | ✅ | `src/engine/frames.test.ts`（Joy 08-26 产出）：25 场景里可测的 22 条直接喂 `evaluateFrame()`，用 `frames.json` 自带的 `initialState.*SinceOffset` 摆好持续器起始状态，不逐帧重放；过程中揪出场景14 一个真数据 bug（两步间少了"刚越过阈值"的中间帧）已修，22/22 全绿 |
 | B6 | Day 9–10 | 起步教练最小版：单次 LLM 调用出第一步物理动作 + 产出 `SessionContext` | ✅ | `src/engine/coach.ts`+`coach.test.ts`（Joy 08-26 产出）：`runStarterCoach()` 落实 `taskDeclaration` ≥8 字符追问义务（最多2轮，不占用"单次"LLM调用额度），LLM 调用通过参数注入（跟 `perceiver.ts` 的 `ClassificationCache` 同一思路），失败有兜底文案；`SessionContext` 复用已测过的 `defaultSessionContext()`。11/11 测试绿。08-27 Jay 把 Groq `gpt-oss-120b` 接进这个注入口（`src/platform/background/starter-coach.ts`），还没接线（起步教练 UI 本身还没建） |
 | B7 | Day 6–8 | check-in / 微重启措辞 v1（像朋友不像监工） | ✅ | `src/engine/wording.ts`+`wording.test.ts`（Joy 08-26 产出）：`buildCheckInMessage()` 区分 DRIFT（问离开前那件事，数据源 `lastAnchorSnapshot`，★v4 强调）和 STUCK（问当前停留这件事，数据源当前页标题）；`buildMicroRestartMessage()` 是用户回答后的一句短反馈；测试专门用正则挡掉"should/stop/again/why"这类说教味词汇。13/13 测试绿 |
-| B8 | Day 6–8 | 协助桌宠组件接入 MV3 side panel | ⬜ | 对应 J4，B 侧负责部分 |
-| B9 | Day 6–8 | 状态机建模（陪伴/观察/check-in，手写或 XState） | ⬜ | 依赖 B1，MVP 阶段手写足够 |
+| B8 | Day 6–8 | 协助桌宠组件接入 MV3 side panel | ✅ | Joy 08-27 产出：`frame-pipeline.ts` 是唯一同时拿得到 `action`/`BState` 的地方，状态机实例放这里推进，算出的 `PetState` 跟 `DetectionResult` 一起返回；`panel.ts` 退化成纯翻译层，`signals.ts`/`index.ts` 各透传一行 |
+| B9 | Day 6–8 | 状态机建模（陪伴/观察/check-in，手写或 XState） | ✅ | `src/engine/pet-state.ts`+`pet-state.test.ts`（Joy 08-27 产出，16 条测试）：手写状态机，`observing` 态首次真正有代码产出——信号来源是 `BState.driftSustainer`/`stuckSustainer.since` 非 null（证据已开始累积但没满窗口），不用改 `detector.ts` 判定逻辑；`MIN_OBSERVING_MS=15s` 迟滞防抖 + 休息期强制 `companion`；`detector.ts` 的 `scaled()` 导出复用（08-28 又把它的规范实现搬到了 `types.ts`，见上方日志） |
 | B10 | Day 11–14 | 【阶段二】自适应退让打磨 | ⬜ | 依赖 B2、J7 |
 | B11 | Day 15–18 | 【阶段二】check-in / 微重启措辞反复调 | ⬜ | 依赖 B7，demo 成败点之一 |
 | B12 | Day 15–18 | 【阶段二】起步拆解 prompt 打磨 | ⬜ | 依赖 B6 |

@@ -3,17 +3,15 @@
 // 输入 SignalEvent[]（含历史）+ SessionContext + now，纯函数产出单帧 FeatureFrame
 // 真实 LLM 调用（Day6/A8）通过 ClassificationCache 注入，不改动本文件的判定逻辑
 
-import { SignalEvent, FeatureFrame, SessionContext } from './types';
+import { SignalEvent, FeatureFrame, SessionContext, scaled } from './types';
 
 export type ContextRelevance = FeatureFrame['contextRelevance'];
 
 // 契约v4 §3.2：DEMO_MODE 下所有时间常数压缩 120 倍——不只是 B 侧的判定阈值，
 // A 侧用来圈"最近多久"的窗口常量（纹理窗口、短停豁免）同样要压，否则 demo 的压缩时间轴上
-// 这些窗口相对变得无限大，等于没有窗口。
-const DEMO_TIME_SCALE = 1 / 120;
-function scaled(ms: number, isDemoMode?: boolean): number {
-  return isDemoMode ? ms * DEMO_TIME_SCALE : ms;
-}
+// 这些窗口相对变得无限大，等于没有窗口。08-28：scaled() 之前这里自己维护了一份，跟 detector.ts
+// 的实现几乎一样却是两份代码——统一改成从 types.ts 导入唯一的规范实现。
+
 
 // ── §5.2 演示域预置分类缓存表：优先级高于 LLM 和黑名单，低于 sessionWhitelist 和 Shorts 硬判 ──
 export const DEMO_PRESET_CACHE: Record<string, ContextRelevance> = {
@@ -177,11 +175,15 @@ export function computeTexture(
     ? events.filter((e) => e.timestamp > now - windowMs && e.timestamp <= now && e.domain === current.domain)
     : [];
 
-  // 冷启动：窗口内完全没有当前页事件，沿用最近一次判定。
-  // 契约原文本要求 "<2 条"，但那是针对真实浏览器里事件密集产生的场景；本仓库的 mock 事件流
-  // 是稀疏的关键时刻快照（如一次 MEDIA_PLAY 代表持续观看），单条事件本身已经是有效证据，
-  // 不应被当成"数据不足"而退回冷启动，故此处放宽为 0 条才算冷启动。
-  if (windowEvents.length < 1) return previousTexture;
+  // 冷启动 vs 真沉默：current 恒等于全部历史里时间戳最大的那条事件，它必然满足自己的
+  // domain 过滤条件，所以 windowEvents 为空当且仅当①压根没有任何事件（真正的会话起点，
+  // 沿用 previousTexture——没有信息，不该编造判定）或②最近一条事件已经比一整个窗口还旧
+  // （不管是不是同一域名，反正这一整个窗口时间片里什么信号都没发生）。真机测试暴露过：
+  // 安静看视频完全不产生事件（content script 只在键盘/滚动/播放暂停时才发），②这个分支会
+  // 被心跳持续命中，previousTexture 就此冻结、永不更新——DRIFT 判定要求的 passive/idle 纹理
+  // 证据因此永远等不到。一整个窗口的彻底沉默本身就是"idle"最有力的证据，不该无限期回显
+  // 上一次判定，两种情况必须分开处理。
+  if (windowEvents.length < 1) return current ? 'idle' : previousTexture;
 
   const hasEngagement = windowEvents.some((e) => IDLE_BLOCKING_TYPES.has(e.interactionType));
   if (!hasEngagement) return 'idle';

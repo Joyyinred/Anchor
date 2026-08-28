@@ -94,16 +94,44 @@ export function registerSignalListeners(): void {
     const seq = ++activationSeq;
     const tab = await chrome.tabs.get(tabId);
     if (seq !== activationSeq) return; // 已经被更新的一次 onActivated 超过，这次的结果作废
-    if (!tab.url) return;
+    // chrome://newtab/ 等内部页面刚打开时 tab.url 是空字符串（真实 URL 要等 onUpdated 才补上）。
+    // 之前这里直接 return，tabId 没跟着切过去——onUpdated/onCommitted/onHistoryStateUpdated
+    // 三个监听器全靠 currentTab.tabId 门禁，新标签页之后无论导航到哪都会被判成"不是当前 tab"
+    // 丢弃，表现为切到新标签页再打开网站后 SW 完全检测不到，得先切到别的已有 tab 再切回来才恢复。
+    // 修法：tabId 无论如何先切过去；url 为空时没有域名/标题可用，先不发信号，等 onUpdated 补上
+    // 真实 url 后自然会走 emitSignalEvent。
     currentTab = {
       tabId,
-      domain: domainOf(tab.url),
-      url: tab.url,
+      domain: domainOf(tab.url ?? ''),
+      url: tab.url ?? '',
       title: tab.title ?? '',
       entryIntent: 'unknown',
     };
     currentInteractionType = 'ACTIVE_INPUT';
+    if (!tab.url) return;
     void emitSignalEvent('tab-activated');
+  });
+
+  // tabs.onActivated 只在同一窗口内切标签时触发——跨窗口切换（真实用户双屏工作很常见）完全静默。
+  // 焦点换到别的 Chrome 窗口时，查一次那个窗口里当前激活的 tab，按同一套逻辑处理；
+  // 复用 activationSeq，跟 onActivated 共享同一个"只认最新一次"的过期保护。
+  chrome.windows.onFocusChanged.addListener(async (windowId) => {
+    if (windowId === chrome.windows.WINDOW_ID_NONE) return; // 焦点离开 Chrome 本身（切到别的应用），不是标签切换
+    const seq = ++activationSeq;
+    const [tab] = await chrome.tabs.query({ active: true, windowId });
+    if (seq !== activationSeq) return;
+    if (!tab?.id) return;
+    if (currentTab?.tabId === tab.id) return; // 同一个 tab 只是窗口重新拿到焦点，不是真的切换
+    currentTab = {
+      tabId: tab.id,
+      domain: domainOf(tab.url ?? ''),
+      url: tab.url ?? '',
+      title: tab.title ?? '',
+      entryIntent: 'unknown',
+    };
+    currentInteractionType = 'ACTIVE_INPUT';
+    if (!tab.url) return;
+    void emitSignalEvent('window-focus-changed');
   });
 
   chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {

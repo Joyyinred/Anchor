@@ -25,6 +25,13 @@ describe('场景22：无起步教练默认策略', () => {
     expect(defaultSessionContext(now).graceUntil).toBe(now + 120_000);
   });
 
+  // 08-28 回归测试：之前 graceUntil 完全没接 isDemoMode，起步教练做完（或跳过起步走这个兜底）
+  // 那一刻宽限期永远是 2 个真实分钟，demo 模式压不到它——紧接着切走会被 detector.ts 的公共闸口
+  // `now < ctx.graceUntil` 全部静默掉。
+  it('DEMO_MODE 下 graceUntil 同样按 120x 压缩', () => {
+    expect(defaultSessionContext(now, undefined, undefined, true).graceUntil).toBe(now + 1_000);
+  });
+
   it('锚点 matchMode 是 exact', () => {
     expect(defaultSessionContext(now).anchor.matchMode).toBe('exact');
   });
