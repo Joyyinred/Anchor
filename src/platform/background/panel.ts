@@ -11,10 +11,12 @@
 import type { FeatureFrame, DetectionResult, CheckInFeedback } from '../../engine/types';
 import { buildCheckInMessage, buildMicroRestartMessage } from '../../engine/wording';
 import { PANEL_STATE_KEY, type PanelState } from '../panel-state';
+import type { PetState } from '../../pet/types';
 
 function toPanelState(
   frame: Pick<FeatureFrame, 'lastAnchorSnapshot' | 'currentTitle'>,
   result: DetectionResult,
+  petState: PetState,
   now: number
 ): PanelState {
   if (result.action === 'CHECK_IN_DRIFT') {
@@ -23,11 +25,17 @@ function toPanelState(
   if (result.action === 'CHECK_IN_STUCK') {
     return { state: 'checkin', channel: 'STUCK', message: buildCheckInMessage('STUCK', frame, now) };
   }
-  return { state: 'companion' };
+  // DO_NOTHING：companion 还是 observing 交给状态机的结论，不在这里二次判断。
+  return { state: petState };
 }
 
-export async function pushPanelState(frame: FeatureFrame, result: DetectionResult, now: number): Promise<void> {
-  const panelState = toPanelState(frame, result, now);
+export async function pushPanelState(
+  frame: FeatureFrame,
+  result: DetectionResult,
+  petState: PetState,
+  now: number
+): Promise<void> {
+  const panelState = toPanelState(frame, result, petState, now);
   await chrome.storage.local.set({ [PANEL_STATE_KEY]: panelState });
 }
 

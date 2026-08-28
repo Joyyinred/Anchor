@@ -53,7 +53,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       const ctx = await getOrInitSessionContext();
       const outcome = await recomputeOnHeartbeat(ctx, now, isDemoMode);
       if (!outcome) return;
-      await pushPanelState(outcome.frame, outcome.result, now);
+      await pushPanelState(outcome.frame, outcome.result, outcome.petState, now);
       console.log('[Anchor SW] heartbeat FeatureFrame', outcome.frame);
       console.log('[Anchor SW] heartbeat DetectionResult', outcome.result);
     })();
