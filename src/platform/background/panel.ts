@@ -14,13 +14,21 @@ import { PANEL_STATE_KEY, type PanelState } from '../panel-state';
 import type { PetState } from '../../pet/types';
 
 function toPanelState(
-  frame: Pick<FeatureFrame, 'lastAnchorSnapshot' | 'currentTitle'>,
+  frame: Pick<FeatureFrame, 'lastAnchorSnapshot' | 'currentTitle' | 'currentDomain'>,
   result: DetectionResult,
   petState: PetState,
   now: number
 ): PanelState {
   if (result.action === 'CHECK_IN_DRIFT') {
-    return { state: 'checkin', channel: 'DRIFT', message: buildCheckInMessage('DRIFT', frame, now) };
+    // domain 记的是"就是这个域名把我判成走神了"（触发那一刻的 frame.currentDomain）——
+    // 答 FALSE_POSITIVE 时要用它写回 sessionWhitelist，不是用户点按钮那一刻恰好在哪个域名
+    // （sticky 面板允许气泡还没消失时用户已经切走，见 pushPanelState 上面的注释）。
+    return {
+      state: 'checkin',
+      channel: 'DRIFT',
+      message: buildCheckInMessage('DRIFT', frame, now),
+      domain: frame.currentDomain,
+    };
   }
   if (result.action === 'CHECK_IN_STUCK') {
     return { state: 'checkin', channel: 'STUCK', message: buildCheckInMessage('STUCK', frame, now) };

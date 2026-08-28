@@ -85,7 +85,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
     void (async () => {
       const ctx = await getOrInitSessionContext();
       const feedback = { channel: message.channel, answer: message.answer };
-      await applyCheckInAnswer(ctx, feedback, Date.now());
+      await applyCheckInAnswer(ctx, feedback, Date.now(), message.domain);
       // check-in 已经处理完了——立刻把 panel 摘出 checkin 态，不能干等下一次心跳/事件
       // 才刷新（那样按钮还留在 UI 上能点，手快的话 applyCheckInFeedback 会被再触发一次）。
       // pushMicroRestartToast 会先短暂显示 B7 的一句反馈，过会儿再自己摘回空白 companion。

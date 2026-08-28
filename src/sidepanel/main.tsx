@@ -56,7 +56,15 @@ function SidePanelApp() {
     // channel 理论上 state==='checkin' 时才会被点到，此时 panelState.channel 必然有值——
     // 防御性判断一下，避免拼出一条 channel 缺失的消息。
     if (!channel) return;
-    const message: RuntimeMessage = { type: 'CHECK_IN_ANSWER', answer, channel, timestamp: Date.now() };
+    // domain 原样带回触发那一刻的 panelState.domain（不是"用户点按钮这一刻在哪个域名"——
+    // sticky 面板允许气泡还没消失时用户已经切走，见 panel.ts 的注释）。
+    const message: RuntimeMessage = {
+      type: 'CHECK_IN_ANSWER',
+      answer,
+      channel,
+      domain: panelState.domain,
+      timestamp: Date.now(),
+    };
     void chrome.runtime.sendMessage(message);
   }
 

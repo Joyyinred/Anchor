@@ -152,6 +152,12 @@
 - 验证：`npm run typecheck` 两边干净，`npm test` **152/152 全绿**（150→152：`wording.test.ts` +2），`npm run build` 正常出包。
 
 ✅（08-28/Jay）J5 完成，★关键检查点二达成：Groq key 重新配好后完整复测两个反差瞬间，疯狂切相关 tab 全程不打扰、飘到无关内容正确触发 DRIFT check-in，均确认通过。
+
+✅（08-28/Jay）J6 + A12 完成：
+- **J6**：逐字段核对 `SessionContext` 每个字段是否真的被 A 感知半正确消费——`taskDeclaration`/`profile`/`anchor.matchMode`/`graceUntil` 都没问题，但发现 `sessionWhitelist` 是个真缺口：`perceiver.ts` 一直在读它做短路判断，但从来没有任何代码写过它（`detector.ts` 的注释早就写明"调用方自己用 currentDomain 去改 sessionWhitelist"，一直没人接）。补上：`PanelState` 新增 `domain` 字段（记录 DRIFT check-in 触发那一刻的 `frame.currentDomain`，不是用户点按钮那一刻在哪个域名——sticky 面板允许气泡还没消失时用户已经切走），经 `CHECK_IN_ANSWER` 消息带回 SW，`applyCheckInAnswer()` 在 DRIFT 通道答 FALSE_POSITIVE 时把这个域名写进 `ctx.sessionWhitelist` 并持久化。
+- **A12**：`signals.ts` 新增 `emitSignalEventDebounced()`（300ms 尾部去抖），套用在 `onActivated`/`onFocusChanged`/`onUpdated` 三个"tab 快切"触发源上——`currentTab` 赋值仍同步，只延迟"要不要真的产出一条 SignalEvent"，只吞掉亚秒级抖动，不影响 `jumpPattern` 关心的秒级往返跳转证据；`idle.onStateChanged` 加防御性去重（状态没真变化就不重新跑评估链路）。`onCommitted`/`onHistoryStateUpdated`/content-script 交互不受影响。
+- 验证：`npm run typecheck` 两边干净，`npm test` **152/152 全绿**（改动没碰 engine，数量不变），`npm run build` 正常出包。两处都是真实 chrome API 代码，没有自动化测试覆盖（沿用已知缺口），建议下次真机测试时顺手验证一下 sessionWhitelist 写入生效（同一个域名答两次 FALSE_POSITIVE 后第二次不应该再触发 DRIFT）。
+
 ---
 
 ## 一、联合任务（A + B 共同，跨人的缝都在这里）
@@ -163,7 +169,7 @@
 | J3 | Day 5 | 两半合流：感知半（A）+ 决策半（B）纯函数拼接，25 场景端到端全绿 | ✅ | `src/engine/integration.test.ts`：23/23 可测场景全绿（22/23 是独立函数验收，不适用），★关键检查点一达成 |
 | J4 | Day 6–8 | 真实信号接入 + 桌宠组件进 MV3 side panel 联调 | ✅ | A11（真实信号→`FeatureFrame`→`DetectionResult`→`PanelState`→side panel 渲染桌宠→用户回答→`applyCheckInFeedback` 回写）+ B8/B9（`pet-state.ts` 真状态机接进 `frame-pipeline.ts`，`observing` 态不再是占位）+ B6/B7 UI（起步教练输入框 + check-in 微重启文案）全部合并进 J4（`715032e`），08-28 Jay 又修完 Joy 真机测试暴露的 4 个 bug（`715032e`→`59ee3f9`）。150/150 测试绿，`npm run build` 正常出包。下一步是 J5（真实浏览器走查两个反差瞬间） |
 | J5 | Day 8 | 真实浏览器复现两个反差瞬间（疯狂切 tab 不打扰 + 飘走触发 check-in） | ✅ | ★关键检查点二达成。08-28 Jay 真机走查后，重新配好 Groq key 完整复测两个反差瞬间——确认通过：疯狂切相关 tab 全程不打扰，飘到无关内容正确触发 DRIFT check-in |
-| J6 | Day 9–10 | 确认 `SessionContext` 正确喂给 A 感知半（B→A 反向缝） | ⬜ | 依赖 J5、B6 |
+| J6 | Day 9–10 | 确认 `SessionContext` 正确喂给 A 感知半（B→A 反向缝） | ✅ | 逐字段核对：`taskDeclaration`（classifier.ts 消费）、`profile.archetype`/`policy`（evaluateFrame 消费）、`anchor.domain`/`url`/`matchMode`（signals.ts `isAnchorMatch` 消费，exact/prefix 都已实现）、`graceUntil`（detector.ts 公共闸门消费，已按 DEMO_MODE 压缩）均正确接入。核对中发现 `sessionWhitelist` 只有读没有写的真缺口，08-28 补上：`panel.ts` 的 `PanelState` 新增 `domain` 字段（DRIFT 触发那一刻的 `frame.currentDomain`），经 `CHECK_IN_ANSWER` 消息带回，`applyCheckInAnswer()` 在 DRIFT+FALSE_POSITIVE 时写回 `ctx.sessionWhitelist` 并持久化 |
 | J7 | Day 10 | 端到端闭环验证：起步 → 陪伴 → 拉回 → 收尾反思 | ⬜ | 依赖 J6；过此项即阶段一验收通过 |
 | J8 | 全程 | 每日/每周对齐小会（持续性任务，不是一次性完成） | 🔄 | 贯穿全程，防止各自封闭到最后接口不匹配 |
 | J9 | Day 11+ | deck 骨架搭建，滚动填充真实进展截图/数据 | ⬜ | 从 J7 之后可启动，占评审 ~30% 分之一部分 |
@@ -188,7 +194,7 @@
 | A9 | Day 6 | 本地黑白名单兜底接入（断网/API 失败时的降级路径） | ✅ | 随 A8 一并做完：`classifyDomainRelevance` 任何失败（无 key/网络/超时/解析）都安全落回 `UNKNOWN`，从不 throw；`resolveContextRelevance`（A2）的短路优先级本来就是 DEMO_PRESET_CACHE/sessionWhitelist/黑名单排在 LLM 之前，LLM 不可用时这几层完全不受影响地继续工作 |
 | A10 | Day 7 | demo 要用到的域名预热进缓存 | ⬜ | 依赖 A8，演示前必做 |
 | A11 | Day 7 | 协助桌宠组件接入 side panel（感知半→UI 消息链路：`chrome.runtime`/`chrome.storage`） | ✅ | 对应 J4，A 侧负责部分。`vite.config.ts` 接入 React 插件；`src/platform/panel-state.ts`（共享 `PanelState` 形状）+ `src/platform/background/panel.ts`（`DetectionResult`→`PanelState` 翻译，`pushPanelState`/`pushCompanionState`）+ `src/sidepanel/main.tsx`（真实 React 入口，`chrome.storage.onChanged` 订阅）+ `messages.ts` 新增 `CheckInAnswerMessage` + `index.ts`/`frame-pipeline.ts` 的回传处理（`applyCheckInAnswer`）。Jay 08-27 真机验证过：装上后侧边栏能渲染桌宠，真实浏览（YouTube/Gemini Notebook）触发的 `SignalEvent`→`FeatureFrame`→`DetectionResult` 全链路日志正常。`companion`/`observing` 的区分目前是占位（真正状态机是 B9，还没开工），不影响这条消息链路本身的完成度 |
-| A12 | Day 7 | 真实数据噪音处理：idle 抖动/tab 快切去抖节流 | ⬜ | 依赖 A7、J4 |
+| A12 | Day 7 | 真实数据噪音处理：idle 抖动/tab 快切去抖节流 | ✅ | `src/platform/background/signals.ts`：①`onActivated`/`onFocusChanged`/`onUpdated` 三个"tab 快切"触发源统一走新增的 `emitSignalEventDebounced()`（300ms 尾部去抖，`currentTab` 仍同步赋值，只是延迟"要不要真的发一条 SignalEvent"这个决定）——只吞掉亚秒级的连续抖动，不影响 `jumpPattern` 关心的秒级往返跳转证据；②`idle.onStateChanged` 加防御性去重，状态没有真的变化就不重新跑一遍评估链路。`onCommitted`/`onHistoryStateUpdated`/content-script 交互（已在 content-script.ts 层 2s 节流）不受影响，仍然逐条记录。未补自动化测试——这层是真实 chrome API 代码，仓库沿用已知的"没有 chrome API mock 测试基建"缺口 |
 | A13 | Day 9–10 | 消费 `SessionContext`：`anchor` 驱动锚点判定（matchMode）、`sessionWhitelist` 短路分类、跨 profile 验证准确性 | ⬜ | 依赖 J6；08-27 发现的前置缺口（没有 UI 调 `runStarterCoach()`）已被 Joy 08-27 的 `onboarding.ts`/`OnboardingPanel.tsx` 补上（`ctx.taskDeclaration` 现在会是真实声明），A13 本身（真正消费 `anchor.matchMode`/`sessionWhitelist` 短路）还没开工 |
 | A14 | Day 11–14 | 【阶段二】内容级分类落地（youtube/reddit/slack 按 `domain+path+title` 判并缓存） | ⬜ | 依赖 J7，补最大漏洞 |
 | A15 | Day 15–18 | 【阶段二】交互纹理精细化（keystroke/feed_scroll/media_seek 区分） | ⬜ | 依赖 A14 |

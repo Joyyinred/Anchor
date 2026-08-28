@@ -12,6 +12,7 @@ import { createPetStateMachine, advancePetState } from '../../engine/pet-state';
 import type { PetState } from '../../pet/types';
 import { classifyDomainRelevance } from './classifier';
 import { getBState, setBState } from './state';
+import { saveSessionContext } from './session';
 
 
 type Archetype = 'CREATOR' | 'READER' | 'VIEWER';
@@ -213,18 +214,27 @@ export async function recomputeOnHeartbeat(
  * 持久化 BState 跑 applyCheckInFeedback（B2），再存盘，跟 evaluateFrame 那次持久化
  * 走的是同一把 storage key，两条路径不会互相踩。
  *
- * 已知缺口（不在这次 A11 联调范围内，先记录）：DRIFT 通道答 FALSE_POSITIVE 时，
- * detector.ts 的注释里写明"调用方自己用 FeatureFrame.currentDomain 去改
- * SessionContext.sessionWhitelist"——这里还没做，答"查资料呢"目前只会清空
- * driftSustainer，不会真正把当前域名加入白名单免打扰。
+ * J6（08-28 补上的 B→A 反向缝）：DRIFT 通道答 FALSE_POSITIVE 时，detector.ts 的注释里写明
+ * "调用方自己用 FeatureFrame.currentDomain 去改 SessionContext.sessionWhitelist"——这里
+ * 之前一直没做，答"查资料呢"只会清空 driftSustainer，不会真正把当前域名加入白名单免打扰，
+ * 下一次同一个域名照样会被判 DRIFT 重新问一遍。domain 由调用方传入（来自触发那一刻的
+ * PanelState.domain，不是用户点按钮那一刻恰好在哪个域名，见 panel.ts 的注释）。
  */
 export async function applyCheckInAnswer(
   ctx: SessionContext,
   feedback: CheckInFeedback,
-  now: number
+  now: number,
+  domain?: string
 ): Promise<void> {
   const archetype = ctx.profile.archetype as Archetype;
   const state = await ensureBStateLoaded(ctx.sessionId, archetype);
   applyCheckInFeedback(state, ctx.profile.policy, feedback, now);
   void setBState(ctx.sessionId, toPersistable(state));
+
+  if (feedback.channel === 'DRIFT' && feedback.answer === 'FALSE_POSITIVE' && domain) {
+    if (!ctx.sessionWhitelist.includes(domain)) {
+      ctx.sessionWhitelist.push(domain);
+      await saveSessionContext(ctx);
+    }
+  }
 }

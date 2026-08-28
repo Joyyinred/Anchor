@@ -10,4 +10,8 @@ export interface PanelState {
   state: PetState;
   message?: string;
   channel?: CheckInChannel;
+  // DRIFT check-in 触发那一刻的 frame.currentDomain——只在这条通道有意义（"就是这个域名把我
+  // 判成走神了"），答 FALSE_POSITIVE 时要把这个域名写回 SessionContext.sessionWhitelist，
+  // 而不是用户点按钮那一刻恰好在哪个域名（sticky 面板允许用户在气泡还没消失时已经切走）。
+  domain?: string;
 }

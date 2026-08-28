@@ -23,6 +23,10 @@ export interface CheckInAnswerMessage {
   type: 'CHECK_IN_ANSWER';
   answer: CheckInAnswer;
   channel: CheckInChannel;
+  // DRIFT 通道触发时的 frame.currentDomain，side panel 从 PanelState.domain 原样带回来——
+  // 答 FALSE_POSITIVE 时 SW 用它写回 SessionContext.sessionWhitelist（J6：sessionWhitelist
+  // 一直只有读没有写的那个缺口）。STUCK 通道没有意义，可以不传。
+  domain?: string;
   timestamp: number;
 }
 

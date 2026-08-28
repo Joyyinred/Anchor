@@ -27,6 +27,26 @@ let activationSeq = 0;
 
 const IDLE_DETECTION_INTERVAL_SECONDS = 60;
 
+// A12：真实数据噪音处理。两类噪音源，两种不同的处理方式：
+// ①「tab 快切」——Alt+Tab 连按/双屏工作时 onActivated/onFocusChanged/onUpdated 会在几十到
+//   几百毫秒内连续触发多次，每次都跑一遍完整的 computeFeatureFrame+evaluateFrame+两次
+//   chrome.storage.local 写入，纯属浪费。debounce 只延迟"要不要发信号"这个决定本身——
+//   currentTab 的赋值仍然是同步的，debounce 期间用户再切一次会看到最新的 currentTab，
+//   只有停留超过 TAB_SWITCH_DEBOUNCE_MS 才会真正产出一条 SignalEvent。300ms 选得足够短：
+//   人不可能在这么短时间内真正"看"一眼某个标签页再决定继续切，jumpPattern 关心的是秒级的
+//   往返跳转模式，不会因为吞掉亚秒级抖动而丢失有意义的证据。
+// ②「idle 抖动」——chrome.idle 用固定检测周期，理论上不该重复报同一个状态，但没有文档保证
+//   绝不会；防御性地在真正状态变化时才发信号，避免同状态重复触发一遍完整的评估链路。
+const TAB_SWITCH_DEBOUNCE_MS = 300;
+let tabSwitchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+function emitSignalEventDebounced(reason: string): void {
+  if (tabSwitchDebounceTimer) clearTimeout(tabSwitchDebounceTimer);
+  tabSwitchDebounceTimer = setTimeout(() => {
+    tabSwitchDebounceTimer = null;
+    void emitSignalEvent(reason);
+  }, TAB_SWITCH_DEBOUNCE_MS);
+}
+
 // 'prefix' 模式要求"同域或其子域"，不能用裸 endsWith（会把 notexample.com 误判成命中 example.com）——
 // 复用引擎里同一条边界判断逻辑（perceiver.ts 的 domainMatches），别再自己写一份不带 `.` 边界的版本。
 function isAnchorMatch(domain: string, anchor: SessionContext['anchor']): boolean {
@@ -109,7 +129,7 @@ export function registerSignalListeners(): void {
     };
     currentInteractionType = 'ACTIVE_INPUT';
     if (!tab.url) return;
-    void emitSignalEvent('tab-activated');
+    emitSignalEventDebounced('tab-activated');
   });
 
   // tabs.onActivated 只在同一窗口内切标签时触发——跨窗口切换（真实用户双屏工作很常见）完全静默。
@@ -131,7 +151,7 @@ export function registerSignalListeners(): void {
     };
     currentInteractionType = 'ACTIVE_INPUT';
     if (!tab.url) return;
-    void emitSignalEvent('window-focus-changed');
+    emitSignalEventDebounced('window-focus-changed');
   });
 
   chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -141,7 +161,9 @@ export function registerSignalListeners(): void {
       currentTab.domain = domainOf(changeInfo.url);
     }
     if (changeInfo.title) currentTab.title = changeInfo.title;
-    if (changeInfo.url || changeInfo.title) void emitSignalEvent('tab-updated');
+    // 单次导航期间 Chrome 通常会分好几次触发这个事件（url 先到、title 随后、status 变化再一次）——
+    // debounce 掉，只在字段都稳定下来之后发一条信号，而不是每一小步都跑一遍完整评估链路。
+    if (changeInfo.url || changeInfo.title) emitSignalEventDebounced('tab-updated');
   });
 
   chrome.webNavigation.onCommitted.addListener((details) => {
@@ -161,7 +183,9 @@ export function registerSignalListeners(): void {
 
   chrome.idle.setDetectionInterval(IDLE_DETECTION_INTERVAL_SECONDS);
   chrome.idle.onStateChanged.addListener((state) => {
-    systemIdle = state !== 'active';
+    const nextIdle = state !== 'active';
+    if (nextIdle === systemIdle) return; // 真实状态没变，防御性去重，不重复跑一遍评估链路
+    systemIdle = nextIdle;
     if (systemIdle) currentInteractionType = 'IDLE';
     void emitSignalEvent('idle-state-changed');
   });
