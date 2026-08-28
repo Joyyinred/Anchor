@@ -8,8 +8,8 @@
 // DO_NOTHING 一律映射成 'companion'。DetectionResult 契约本身不带"证据接近阈值"这个信号，
 // 真要区分"平静陪伴"和"有点飘的迹象在多看两眼"，需要 B9 建好状态机之后另外决定信号来源——
 // 到时候只用换这个函数，side panel/cat.tsx 不用改一行。
-import type { FeatureFrame, DetectionResult } from '../../engine/types';
-import { buildCheckInMessage } from '../../engine/wording';
+import type { FeatureFrame, DetectionResult, CheckInFeedback } from '../../engine/types';
+import { buildCheckInMessage, buildMicroRestartMessage } from '../../engine/wording';
 import { PANEL_STATE_KEY, type PanelState } from '../panel-state';
 
 function toPanelState(
@@ -38,4 +38,20 @@ export async function pushPanelState(frame: FeatureFrame, result: DetectionResul
 export async function pushCompanionState(): Promise<void> {
   const panelState: PanelState = { state: 'companion' };
   await chrome.storage.local.set({ [PANEL_STATE_KEY]: panelState });
+}
+
+// B7 的 buildMicroRestartMessage() 写好之后一直没人调用——check-in 答完直接摘成空白
+// companion 态（见上面 pushCompanionState），用户答"飘了"/"在专注"没有任何反馈。这里
+// 先说一句话，过 MICRO_RESTART_TOAST_MS 再摘回真正的空白 companion，两步都还是
+// PetState==='companion'，没有引入第四态（cat.tsx 的"三态之外没有第四态"约束没破）。
+const MICRO_RESTART_TOAST_MS = 2500;
+
+export async function pushMicroRestartToast(feedback: CheckInFeedback): Promise<void> {
+  const toast: PanelState = { state: 'companion', message: buildMicroRestartMessage(feedback.answer) };
+  await chrome.storage.local.set({ [PANEL_STATE_KEY]: toast });
+  // SW 可能在这 2.5s 内被回收——不是致命的（用户最多少看到这句反馈，不影响任何判定逻辑），
+  // 比额外接一个 chrome.alarms 只为了这一句话的收尾要划算得多。
+  setTimeout(() => {
+    void pushCompanionState();
+  }, MICRO_RESTART_TOAST_MS);
 }

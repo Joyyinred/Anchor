@@ -22,3 +22,10 @@ export async function getOrInitSessionContext(): Promise<SessionContext> {
   await chrome.storage.local.set({ [SESSION_KEY]: ctx });
   return ctx;
 }
+
+// 起步教练（B6）完成后，把它真正产出的 SessionContext 写回这同一个 storage key——
+// getOrInitSessionContext() 下次读到的就是这份真实数据，不再是上面那份默认兜底。
+// 只是个 setter，不重新推导任何字段，跟 getOrInitSessionContext() 共享同一份持久化格式。
+export async function saveSessionContext(ctx: SessionContext): Promise<void> {
+  await chrome.storage.local.set({ [SESSION_KEY]: ctx });
+}
