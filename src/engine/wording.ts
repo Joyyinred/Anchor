@@ -136,6 +136,8 @@ const MICRO_RESTART_TEMPLATES: Record<CheckInAnswer, readonly string[]> = {
   FALSE_POSITIVE: ["Got it — I’ll leave that be.", "Noted — I’ll count that one as work.", 'Fair enough.'],
   // 不能出现 again / why / should have：用户刚承认自己飘了，这时候任何一点"你又来了"的
   // 味道都是监工不是朋友。只说"没事，回去吧"。
+  // ★ 这三句都在承诺"我带你回去"——只有 pull-back 真的把用户切回锚点了才说得出口。
+  //   锚点 tab 已经被关掉时走下面 DRIFTED_NO_ANCHOR_TEMPLATES，不能说做不到的事。
   DRIFTED: ["No worries, let’s head back.", 'Happens — back to it.', "Right, let’s pick that back up."],
 };
 
@@ -147,7 +149,39 @@ const MICRO_RESTART_TEMPLATES: Record<CheckInAnswer, readonly string[]> = {
  * @param now 变体轮换用。可选：不传按 0，取每个池的第一个变体——这样 B7 时期只传一个参数的
  *            老调用方（panel.ts）行为完全不变，不用被迫一起改。
  */
-export function buildMicroRestartMessage(answer: CheckInAnswer, now = 0): string {
+// 答"飘了"但锚点 tab 已经不在了（用户自己关掉了）：不能说"我们回去吧"——那是空头支票。
+// 这几句的定位是"知道了，剩下交给你"，一样不说教、不追问，只是不再承诺一个做不到的动作。
+const DRIFTED_NO_ANCHOR_TEMPLATES: readonly string[] = [
+  'Got it — pick it up whenever.',
+  "Okay — that one’s closed, so it’s yours to restart.",
+  'Noted. Whenever you’re ready.',
+];
+
+/** buildMicroRestartMessage 的可选上下文——目前只有 DRIFTED 通道用得到。 */
+export interface MicroRestartContext {
+  /**
+   * 答 DRIFTED 时，是否真的把用户切回锚点了（pull-back.ts 的 pullBackToAnchor 返回值）。
+   * 省略时按 true 处理——B7 时期只传一两个参数的老调用方行为完全不变。
+   */
+  pulledBack?: boolean;
+}
+
+/**
+ * 用户点了气泡里的按钮之后，紧跟着的一句短反馈（"微重启"这一步的措辞，契约v4 §3.6/场景17：
+ * 答"飘了"→ 微重启+重置阶梯；这里只管说什么，重置阶梯是 detector.ts 的 applyCheckInFeedback 已经在做的事）。
+ * 一句话，不说教、不追问第二句——像朋友确认一下就翻篇，不是监工继续盘问。
+ *
+ * @param now 变体轮换用。可选：不传按 0，取每个池的第一个变体。
+ * @param context 目前只有 pulledBack——决定 DRIFTED 那句能不能承诺"带你回去"。
+ */
+export function buildMicroRestartMessage(
+  answer: CheckInAnswer,
+  now = 0,
+  context: MicroRestartContext = {}
+): string {
+  if (answer === 'DRIFTED' && context.pulledBack === false) {
+    return pickVariant(DRIFTED_NO_ANCHOR_TEMPLATES, now);
+  }
   return pickVariant(MICRO_RESTART_TEMPLATES[answer], now);
 }
 

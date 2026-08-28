@@ -167,7 +167,7 @@ describe('B7: buildMicroRestartMessage（契约v4 §3.6/场景17：答"飘了"�
 
   it('三种回答互不相同（不能共用一句万能回复糊弄过去）', () => {
     const all = ['FOCUSED', 'FALSE_POSITIVE', 'DRIFTED'] as const;
-    const messages = all.map(buildMicroRestartMessage);
+    const messages = all.map((a) => buildMicroRestartMessage(a));
     expect(new Set(messages).size).toBe(3);
   });
 });
@@ -335,5 +335,46 @@ describe('收尾反思措辞（J7 最后一环 / B15 最小版）', () => {
     const msg = buildSessionSummaryFooter();
     expect(msg.length).toBeGreaterThan(0);
     expect(msg).not.toMatch(/what.*next|plan|tomorrow?/i);
+  });
+});
+
+describe('「拉我回去」的措辞不能开空头支票（08-28 补的缺口）', () => {
+  const NOWS = Array.from({ length: 12 }, (_, i) => now + i * 60_000);
+
+  it('切回锚点成功时，说的是承诺带你回去的那几句', () => {
+    for (const t of NOWS) {
+      const msg = buildMicroRestartMessage('DRIFTED', t, { pulledBack: true });
+      expect(msg).toMatch(/back|head back|pick that back up/i);
+    }
+  });
+
+  it('★ 锚点 tab 已被关掉（切不回去）时，绝不能再说"我们回去吧"——那是做不到的承诺', () => {
+    for (const t of NOWS) {
+      const msg = buildMicroRestartMessage('DRIFTED', t, { pulledBack: false });
+      // "let’s head back" / "back to it" 这类都在承诺一个不会发生的动作
+      expect(msg).not.toMatch(/let’s head back|back to it|pick that back up/i);
+      expect(msg.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('切不回去时的措辞同样不说教、不追问', () => {
+    for (const t of NOWS) {
+      const msg = buildMicroRestartMessage('DRIFTED', t, { pulledBack: false });
+      expect(msg).not.toMatch(/again|why|should have|closed it yourself/i);
+    }
+  });
+
+  it('pulledBack 只影响 DRIFTED——另外两个回答的意思是"别管我"，本来就不该有切换动作', () => {
+    for (const answer of ['FOCUSED', 'FALSE_POSITIVE'] as const) {
+      expect(buildMicroRestartMessage(answer, now, { pulledBack: false })).toBe(
+        buildMicroRestartMessage(answer, now, { pulledBack: true })
+      );
+    }
+  });
+
+  it('不传 context 时行为跟之前一致（老调用方不用改）', () => {
+    expect(buildMicroRestartMessage('DRIFTED', now)).toBe(
+      buildMicroRestartMessage('DRIFTED', now, { pulledBack: true })
+    );
   });
 });

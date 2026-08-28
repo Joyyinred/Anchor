@@ -74,12 +74,20 @@ export async function pushCompanionState(): Promise<void> {
 // PetState==='companion'，没有引入第四态（cat.tsx 的"三态之外没有第四态"约束没破）。
 const MICRO_RESTART_TOAST_MS = 2500;
 
-export async function pushMicroRestartToast(feedback: CheckInFeedback): Promise<void> {
+/**
+ * @param pulledBack 答 DRIFTED 时是否真的把用户切回了锚点（pullBackToAnchor 的返回值）。
+ *   切成功才能说"我们回去吧"；锚点 tab 已经被关掉时必须换一句不承诺的，
+ *   否则又是"说了不算"——这个功能存在的意义就是消除这种空头支票。
+ */
+export async function pushMicroRestartToast(
+  feedback: CheckInFeedback,
+  pulledBack = true
+): Promise<void> {
   // B11：把 now 传进去，微重启那句才会在多个变体之间轮换；不传的话永远只出每个池的第一句，
   // 一次会话里答两次 check-in 就会看到一模一样的回复。
   const toast: PanelState = {
     state: 'companion',
-    message: buildMicroRestartMessage(feedback.answer, Date.now()),
+    message: buildMicroRestartMessage(feedback.answer, Date.now(), { pulledBack }),
   };
   await chrome.storage.local.set({ [PANEL_STATE_KEY]: toast });
   // SW 可能在这 2.5s 内被回收——不是致命的（用户最多少看到这句反馈，不影响任何判定逻辑），
