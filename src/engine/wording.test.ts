@@ -205,3 +205,76 @@ describe('B: 休息模式措辞（契约v4 §3.8 / 场景23）', () => {
     expect(msg).not.toMatch(/finally|too long|wasted/i);
   });
 });
+
+describe('B11: 变体轮换（阶段二措辞打磨）', () => {
+  // 变体池长度分别是 3/3/2/3，用 20 个相隔一分钟以上的 now 足够把每个池都跑遍。
+  const NOWS = Array.from({ length: 20 }, (_, i) => now + i * 60_000);
+
+  function driftAll() {
+    return NOWS.map((t) =>
+      buildCheckInMessage('DRIFT', { lastAnchorSnapshot: { title: 'login.tsx', url: '', ts: t - 10 * 60_000 }, currentTitle: '' }, t)
+    );
+  }
+  function stuckAll() {
+    return NOWS.map((t) => buildCheckInMessage('STUCK', { lastAnchorSnapshot: { title: '', url: '', ts: t }, currentTitle: 'thesis.pdf' }, t));
+  }
+
+  it('DRIFT 至少有 3 种不同措辞——同一次 demo 里连续触发不会重复同一句', () => {
+    expect(new Set(driftAll()).size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('STUCK 同样有多种措辞', () => {
+    expect(new Set(stuckAll()).size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('★ 每一个 DRIFT 变体都要守住 B7 定下的规则：引用标题 + 带时间 + 问号收尾 + 不说教', () => {
+    for (const msg of driftAll()) {
+      expect(msg).toContain('login.tsx');
+      expect(msg).toMatch(/10 minutes ago/);
+      expect(msg.endsWith('?')).toBe(true);
+      expect(msg).not.toMatch(/you should|stop|focus!|again|why/i);
+    }
+  });
+
+  it('★ 每一个 STUCK 变体同样要守住规则', () => {
+    for (const msg of stuckAll()) {
+      expect(msg).toContain('thesis.pdf');
+      expect(msg.endsWith('?')).toBe(true);
+      expect(msg).not.toMatch(/you should|stop|focus!|again|why/i);
+    }
+  });
+
+  it('★ 每一个微重启变体都要守住各自的禁忌词', () => {
+    for (const t of NOWS) {
+      expect(buildMicroRestartMessage('FALSE_POSITIVE', t)).not.toMatch(/sorry|wrong|mistake/i);
+      expect(buildMicroRestartMessage('DRIFTED', t)).not.toMatch(/again|why|should have/i);
+    }
+  });
+
+  it('三种回答的变体池互不重叠——任何时刻三个答案给出的话都不一样', () => {
+    for (const t of NOWS) {
+      const all = (['FOCUSED', 'FALSE_POSITIVE', 'DRIFTED'] as const).map((a) => buildMicroRestartMessage(a, t));
+      expect(new Set(all).size).toBe(3);
+    }
+  });
+
+  it('确定性：同一个 now 永远出同一句（测试不 flaky，demo 可预演）', () => {
+    const once = buildCheckInMessage('DRIFT', { lastAnchorSnapshot: { title: 'a', url: '', ts: now - 60_000 }, currentTitle: '' }, now);
+    for (let i = 0; i < 5; i++) {
+      expect(buildCheckInMessage('DRIFT', { lastAnchorSnapshot: { title: 'a', url: '', ts: now - 60_000 }, currentTitle: '' }, now)).toBe(once);
+    }
+  });
+
+  it('now 为负数 / NaN（时钟异常）不会崩，也不会返回 undefined', () => {
+    for (const bad of [-1, -60_000, Number.NaN]) {
+      const msg = buildCheckInMessage('STUCK', { lastAnchorSnapshot: { title: '', url: '', ts: 0 }, currentTitle: 'x.pdf' }, bad);
+      expect(typeof msg).toBe('string');
+      expect(msg.length).toBeGreaterThan(0);
+      expect(buildMicroRestartMessage('FOCUSED', bad).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('buildMicroRestartMessage 不传 now 时行为跟 B7 那版一致（老调用方不用改）', () => {
+    expect(buildMicroRestartMessage('FOCUSED')).toBe('Good, carry on.');
+  });
+});

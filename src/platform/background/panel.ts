@@ -75,7 +75,12 @@ export async function pushCompanionState(): Promise<void> {
 const MICRO_RESTART_TOAST_MS = 2500;
 
 export async function pushMicroRestartToast(feedback: CheckInFeedback): Promise<void> {
-  const toast: PanelState = { state: 'companion', message: buildMicroRestartMessage(feedback.answer) };
+  // B11：把 now 传进去，微重启那句才会在多个变体之间轮换；不传的话永远只出每个池的第一句，
+  // 一次会话里答两次 check-in 就会看到一模一样的回复。
+  const toast: PanelState = {
+    state: 'companion',
+    message: buildMicroRestartMessage(feedback.answer, Date.now()),
+  };
   await chrome.storage.local.set({ [PANEL_STATE_KEY]: toast });
   // SW 可能在这 2.5s 内被回收——不是致命的（用户最多少看到这句反馈，不影响任何判定逻辑），
   // 比额外接一个 chrome.alarms 只为了这一句话的收尾要划算得多。
