@@ -1,10 +1,25 @@
 <!doctype html>
 <html>
-  <head><meta charset="UTF-8" /><title>Anchor · B4 桌宠预览</title></head>
-  <body style="margin:0;padding:24px;background:#eef3f1;display:flex;gap:24px;flex-wrap:wrap;">
-    <div id="a" style="width:280px;"></div>
-    <div id="b" style="width:280px;"></div>
-    <div id="c" style="width:280px;"></div>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Anchor · 桌宠预览</title>
+    <style>
+      body { margin:0; padding:24px; background:#eef3f1; font-family:'Nunito',system-ui,sans-serif; }
+      .grid { display:flex; gap:24px; flex-wrap:wrap; }
+      .cell { width:280px; }
+      /* 每格顶上标一下这是哪一态——五格并排时光看猫不容易分清谁是谁 */
+      .label { font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+               color:#8b9995; margin-bottom:4px; }
+    </style>
+  </head>
+  <body>
+    <div class="grid">
+      <div class="cell"><div class="label">companion</div><div id="a"></div></div>
+      <div class="cell"><div class="label">observing</div><div id="b"></div></div>
+      <div class="cell"><div class="label">check-in (DRIFT)</div><div id="c"></div></div>
+      <div class="cell"><div class="label">resting</div><div id="d"></div></div>
+      <div class="cell"><div class="label">rest reminder</div><div id="e"></div></div>
+    </div>
     <script type="module" src="./main.tsx"></script>
   </body>
 </html>
