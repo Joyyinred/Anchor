@@ -98,7 +98,7 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
     - 组件用 `lottie-web`（不是 `lottie-react`）手动挂载动画，并在加载完成后裁剪 SVG 的 `viewBox`，让猫撑满容器、徽章能贴着耳朵而不是飘在空中；`state` 切换不会重新加载动画，只影响徽章样式和气泡。
     - 新依赖：`lottie-web`（还需要 `react`/`react-dom`/`@vitejs/plugin-react` 等 React 相关依赖，项目里原来没有）。
     - 附带交付了一个临时的本地预览工具（`devpreview.vite.config.ts` + `devpreview/`），不影响扩展本身构建，纯粹用来肉眼确认三态长什么样。
-    - ![有背景](image.png)
+    - ![有背景](image-0.png)
     - ![无背景](image-1.png)
     - 我觉得无背景气泡的更符合桌宠的感觉？but feel free to give advice for this.
 
@@ -450,3 +450,11 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
 
 11. ![alt text](image-2.png)
     - 对长标题网页需要做缩略，否则ui呈现不好，明天修改
+
+## 0829
+
+### Jay
+1. 先测试了你昨天说的“真机测出 STUCK 对娱乐视频误报 + DRIFT 完全不触发”：其实我昨天在你更新前的0828测试时发现并修复了这个问题，我昨天测试时显示drift并且swp判定也为IRRELEVANT。今天再测了两次依旧没有问，分别用我昨天测试时的视频'Hailey Bieber Opens Up About Motherhood, Fame and Her $1 Billion Brand - YouTube'和你测试时的视频‘Crossing China One Cigarette at a Time - YouTube’再测了一次，依旧是IRRELEVANT 和 drifted。
+![](./image-4.png)
+
+
