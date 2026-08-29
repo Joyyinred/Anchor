@@ -3,7 +3,13 @@
 //
 // 猫本体是 Lottie 矢量动画（assets/cat.json），保持它原本的配色和那根红线不做任何改动——
 // 三态不再靠猫变色区分，而是靠猫耳朵旁边的小锚徽章（陪伴=描边／观察=描边+波纹脉冲／check-in=实心）
-// 和 check-in 气泡的颜色。素材来源见 assets/cat.json 顶部注释，接入前请确认授权条款。
+// 和 check-in 气泡的颜色。
+//
+// 素材：Kitty Cat Error 404 by Sepehr Radfar（LottieFiles），Lottie Simple License，
+// 08-28 已确认可商用、可分发、署名非强制但鼓励。完整来源/授权/义务见 assets/LICENSE.md。
+// ★ 那个文件是分发义务不是可选文档，别删（license 要求 Files 随附同一份条款）。
+//   —— 原注释写的是"素材来源见 assets/cat.json 顶部注释"，但 JSON 不支持注释、
+//      那个文件里一个来源信息都没有，是句指向空处的话，08-28 一并改掉。
 import { useEffect, useRef } from 'react';
 // lottie-web 的默认打包（'lottie-web'）带 AE expressions 功能，内部用 eval() 实现——
 // MV3 扩展页面的 CSP 硬性禁止 unsafe-eval（跟普通网站不同，这条不能靠 manifest 放开），
