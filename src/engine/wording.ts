@@ -26,9 +26,6 @@ function describeElapsed(minutes: number): string {
 const UNTITLED_TASK_FALLBACK = 'what you were working on';
 const UNTITLED_PAGE_FALLBACK = 'this';
 
-// 08-28 真机测试：真实页面标题（YouTube 标题动辄 60-80 字符）会把气泡撑得比设计时预留的高度
-// 还高，长到能顶穿 side panel 顶部、盖到 Chrome 原生的扩展标题栏下面。裁掉过长标题，气泡高度
-// 才有个上限，顺带也是更好读的措辞——一整条没截断的视频标题堆在对话气泡里本身就不像朋友说话。
 // ── B11：变体选择（阶段二"措辞反复调"）─────────────────────────────────────
 // 每种情况只有一句固定文案时，一次会话里触发两三次 check-in（冷却 5 分钟，demo 里很容易）
 // 就会看到一模一样的句子重复出现——那一瞬间"像朋友"的错觉就没了，变成很明显的模板机器人。
@@ -46,10 +43,40 @@ function pickVariant<T>(pool: readonly T[], now: number): T {
   return pool[idx];
 }
 
-const MAX_TITLE_LENGTH = 60;
+// 08-29 真机：标题在气泡里有两个毛病，各修一处。
+//
+// ① 站点样板后缀。浏览器标题几乎都带一截网站自己的尾巴——GitHub 是 "路径 at 分支 · owner/repo"、
+//    YouTube 是 "标题 - YouTube"、很多站是 "标题 | 站名"。真机上出现过
+//    `You drifted from "Anchor/updateNote/updateNote.md at J4 · Joyyinred/Anchor"`——后半截对用户
+//    零信息量，却占掉气泡近一半宽度。朋友提起你刚在做的事，说的是"那个 updateNote"，
+//    不会把整条浏览器标题栏念一遍。
+// ② 长度上限太宽松。上面那条 56 字符，卡在原来的 60 下面所以**完全没被裁**。
+//
+// ★ 这一层跟 cat.css 那层（气泡改文档流）是两道独立防线，都要有：
+//   CSS 那层保证"再长也不会破坏布局"，这一层保证"读起来像人话"。
+//   注意字数上限本身有个已知缺陷：中日韩字符宽度约是拉丁字母的两倍，42 个汉字 ≈ 84 个字母，
+//   现在测的都是英文标题所以没暴露。真正兜底的是 cat.css 的 overflow-wrap + 文档流布局。
+const MAX_TITLE_LENGTH = 42;
+
+// 站点样板的分隔符。只砍**最后一个**分隔符之后的部分——标题正文里也可能出现这些符号
+// （"Rust vs Go - 性能对比"），从后往前砍才不会把正文腰斩。
+const TITLE_SUFFIX_SEPARATORS = [' · ', ' | ', ' — ', ' - '];
+// 砍完至少要剩这么多字符才算数。否则 "React - Docs" 会被砍成 "React"，
+// 甚至分隔符恰好在开头时砍出个空串。宁可留着样板，也不能把内容砍没。
+const MIN_TITLE_AFTER_STRIP = 12;
+
+function stripSiteSuffix(title: string): string {
+  for (const sep of TITLE_SUFFIX_SEPARATORS) {
+    const idx = title.lastIndexOf(sep);
+    if (idx >= MIN_TITLE_AFTER_STRIP) return title.slice(0, idx).trimEnd();
+  }
+  return title;
+}
+
 function truncateTitle(title: string): string {
-  if (title.length <= MAX_TITLE_LENGTH) return title;
-  return `${title.slice(0, MAX_TITLE_LENGTH - 1).trimEnd()}…`;
+  const cleaned = stripSiteSuffix(title);
+  if (cleaned.length <= MAX_TITLE_LENGTH) return cleaned;
+  return `${cleaned.slice(0, MAX_TITLE_LENGTH - 1).trimEnd()}…`;
 }
 
 /**

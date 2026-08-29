@@ -17,7 +17,17 @@ export async function getGroqApiKey(): Promise<string | undefined> {
  * 任何失败（没配 key / 网络 / 超时 / 非 2xx）都返回 null，从不 throw——
  * 调用方（classifier.ts/starter-coach.ts）按各自的降级策略处理 null。
  */
-export async function callGroq(model: string, userPrompt: string): Promise<string | null> {
+// ★ 08-29：max_tokens 从写死 200 改成可选参数。
+// gpt-oss 是**推理模型**，reasoning 的 token 算进 max_tokens——prompt 越复杂推理越长。
+// 真机实测（起步教练 v1 prompt，422 prompt tokens）：200 的预算里 182 被 reasoning 吃掉，
+// 只剩 18 个给 content，JSON 写到一半就被截断（finish_reason: "length"），解析必然失败。
+// 默认值保持 200 是刻意的：A 侧分类的 prompt 短、输出也短，200 够用且省钱，行为一字不变；
+// 只有确实需要更大预算的调用方（起步教练）才显式传。
+export async function callGroq(
+  model: string,
+  userPrompt: string,
+  options: { maxTokens?: number } = {}
+): Promise<string | null> {
   const apiKey = await getGroqApiKey();
   // 08-28 真机测试：contextRelevance 长期卡 UNKNOWN，排查了很久才发现是 storage.local.clear()
   // 顺手把 Groq key 也清掉了——这条路径原来完全没有日志，没配 key/请求失败/低置信度这三种
@@ -39,7 +49,7 @@ export async function callGroq(model: string, userPrompt: string): Promise<strin
       body: JSON.stringify({
         model,
         messages: [{ role: 'user', content: userPrompt }],
-        max_tokens: 200,
+        max_tokens: options.maxTokens ?? 200,
       }),
       signal: controller.signal,
     });
