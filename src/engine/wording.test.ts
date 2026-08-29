@@ -378,3 +378,50 @@ describe('「拉我回去」的措辞不能开空头支票（08-28 补的缺口�
     );
   });
 });
+
+describe('标题清洗：去站点样板 + 长度上限（08-29 真机 UI 问题）', () => {
+  it('GitHub 标题去掉 "· owner/repo" 尾巴', () => {
+    const msg = buildCheckInMessage('DRIFT', {
+      lastAnchorSnapshot: { title: 'Anchor/updateNote/updateNote.md at J4 · Joyyinred/Anchor', url: '', ts: now - 60_000 },
+      currentTitle: '',
+    }, now);
+    expect(msg).toContain('Anchor/updateNote/updateNote.md');
+    expect(msg).not.toContain('Joyyinred');
+  });
+
+  it('YouTube 标题去掉 "- YouTube" 尾巴', () => {
+    const msg = buildCheckInMessage('STUCK', {
+      lastAnchorSnapshot: { title: '', url: '', ts: now },
+      currentTitle: 'Crossing China One Cigarette at a Time - YouTube',
+    }, now);
+    expect(msg).toContain('Crossing China One Cigarette');
+    expect(msg).not.toContain('- YouTube');
+  });
+
+  it('★ 短标题不能被砍没——"React - Docs" 砍成 "React" 是过度清洗', () => {
+    const msg = buildCheckInMessage('STUCK', {
+      lastAnchorSnapshot: { title: '', url: '', ts: now },
+      currentTitle: 'React - Docs',
+    }, now);
+    expect(msg).toContain('React - Docs');
+  });
+
+  it('只砍最后一个分隔符——正文里的连字符不该把标题腰斩', () => {
+    const msg = buildCheckInMessage('STUCK', {
+      lastAnchorSnapshot: { title: '', url: '', ts: now },
+      currentTitle: 'Rust vs Go - benchmark deep dive - YouTube',
+    }, now);
+    expect(msg).toContain('Rust vs Go - benchmark deep dive');
+    expect(msg).not.toContain('YouTube');
+  });
+
+  it('清洗完仍超长的照样裁，气泡内容要有上限', () => {
+    const longTitle = 'A'.repeat(80) + ' - YouTube';
+    const msg = buildCheckInMessage('STUCK', {
+      lastAnchorSnapshot: { title: '', url: '', ts: now },
+      currentTitle: longTitle,
+    }, now);
+    expect(msg).toContain('…');
+    expect(msg).not.toContain('A'.repeat(60));
+  });
+});

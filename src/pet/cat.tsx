@@ -109,8 +109,12 @@ export function CuteAnchorPet({
         data-bubble-visible={Boolean(bubbleText)}
         data-resting={Boolean(isResting)}
       >
-        <div className="anchor-pet-wrap">
-          <div className="anchor-pet-bubble" role="status" aria-live="polite">
+        {/* ★ 08-29：气泡从 .anchor-pet-wrap 里搬出来，成为 stage 的直接子元素。
+            原来它是 position:absolute + translateY(-100%)——锚在底边往上长，靠 stage 一个
+            写死的 padding-top 给它腾空间。内容一超过那个 padding，顶部就跑出可视区，
+            于是那个数字一路从 60px 猜到 320px：猜小了截断、猜大了短消息时留一大片空白。
+            现在它是文档流里的普通块，stage 高度跟着内容走，多长都不会溢出。 */}
+        <div className="anchor-pet-bubble" role="status" aria-live="polite">
             <span>{bubbleText}</span>
             {/* 气泡本身在非 checkin 态只是靠 CSS opacity/pointer-events 隐藏（cat.css 的
                 [data-state="checkin"] 规则），不是 display:none——只挡鼠标，不挡键盘 tab 顺序。
@@ -148,9 +152,10 @@ export function CuteAnchorPet({
                   </button>
                 )}
               </div>
-            )}
-          </div>
+          )}
+        </div>
 
+        <div className="anchor-pet-wrap">
           <div className="anchor-pet-lottie-wrap">
             <div className="anchor-pet-lottie" ref={containerRef} />
             <span className="anchor-pet-badge" aria-hidden="true">

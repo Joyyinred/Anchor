@@ -14,7 +14,7 @@
 ## 2. Prompt v1（拆解第一步物理动作）
 
 > ★ 以 `src/platform/background/starter-coach.ts` 的 `buildPrompt()` 为准。
-> **08-28 发现本文档 v0 记的 prompt 跟代码里实际那版并不一致**（文档一份、代码一份，各写各的）——
+> **08-29 发现本文档 v0 记的 prompt 跟代码里实际那版并不一致**（文档一份、代码一份，各写各的）——
 > 以后改 prompt 请两边一起改，不然下次没人知道哪份是真的在跑。
 
 ```text
