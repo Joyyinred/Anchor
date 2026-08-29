@@ -42,7 +42,10 @@
   width: 100%;
   max-width: 280px;
   margin: 0 auto;
-  padding: 320px 20px 6px;   /* was 236px — check-in 气泡带按钮行时比预期更高，顶部仍被 Chrome 原生标题栏盖住 */
+  /* ★ 08-29：原来是 padding-top: 320px（一路从 60→200→236→320 猜上来的）——那是在给
+     绝对定位、往上长的气泡硬腾空间。气泡改成文档流之后这个魔数彻底不需要了：
+     舞台高度由内容决定，气泡多长都不会溢出，短消息时也不会留一大片空白。 */
+  padding: 16px 20px 6px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -64,12 +67,11 @@
    边框色跟着 --ap-state 走（companion 态是绿色、checkin 态是橙色），不再写死 checkin 的橙色，
    免得一句陪伴态的反馈看起来像是在质问用户。 */
 .anchor-pet-bubble {
-  position: absolute;
-  top: -30px;
-  left: 50%;
-  transform: translate(-50%, -100%) scale(0.2);   /* was scale(0.9) — bigger delta so it visibly "pops" from a point */
-  transform-origin: 188px 100%;                 /* pinned to the badge's x, bottom edge — bubble grows out of the badge, not its own center */
+  /* 文档流里的普通块（不再 position:absolute）。position:relative 只是为了给下面那个
+     小尖角 ::after 当定位参照。 */
+  position: relative;
   width: 220px;
+  margin: 0 auto 18px;          /* 底部留白 = 气泡和猫之间的距离，兼给尖角让位 */
   background: var(--ap-card);
   border: 1.5px solid var(--ap-state, var(--ap-checkin));
   border-radius: 18px;
@@ -77,10 +79,13 @@
   font-size: 13px;
   line-height: 1.5;
   color: var(--ap-ink);
+  /* 长 URL / 无空格的长标题不能把气泡撑破——软换行兜底，跟措辞层的字数上限是两道独立防线 */
+  overflow-wrap: anywhere;
   box-shadow: 0 8px 24px -12px hsl(var(--ap-shadow) / 0.35);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.35s ease, transform 0.35s cubic-bezier(.34,1.56,.64,1);
+  /* 不显示时整块从布局里移除，否则没话说的时候猫会被凭空推下去一截。
+     用 display 而不是 opacity:0，正因为现在它占布局。 */
+  display: none;
+  transform-origin: 188px 100%;  /* 徽章的 x + 底边：气泡从徽章那个点长出来 */
   z-index: 5;
 }
 .anchor-pet-bubble::after {
@@ -96,9 +101,11 @@
   border-bottom: 1.5px solid var(--ap-state, var(--ap-checkin));
 }
 .anchor-pet-stage[data-bubble-visible="true"] .anchor-pet-bubble {
-  opacity: 1;
-  transform: translate(-50%, -100%) scale(1);
-  pointer-events: auto;
+  display: block;
+  /* 用 animation 而不是 transition：display 的变化没法被 transition 捕捉，但 animation
+     会在元素刚变成 display:block 的那一刻自然播放一次。出场没有动画（瞬间消失）——
+     可以接受，没人会盯着一个气泡消失，入场那一下才是要的。 */
+  animation: ap-bubble-pop 0.35s cubic-bezier(.34,1.56,.64,1);
 }
 .anchor-pet-chips { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 .anchor-pet-chips button {
@@ -267,4 +274,9 @@
   0%   { transform: scale(1); }
   45%  { transform: scale(1.3); }
   100% { transform: scale(1); }
+}
+
+@keyframes ap-bubble-pop {
+  from { opacity: 0; transform: scale(0.2); }
+  to   { opacity: 1; transform: scale(1); }
 }

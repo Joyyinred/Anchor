@@ -3,7 +3,13 @@
 //
 // 猫本体是 Lottie 矢量动画（assets/cat.json），保持它原本的配色和那根红线不做任何改动——
 // 三态不再靠猫变色区分，而是靠猫耳朵旁边的小锚徽章（陪伴=描边／观察=描边+波纹脉冲／check-in=实心）
-// 和 check-in 气泡的颜色。素材来源见 assets/cat.json 顶部注释，接入前请确认授权条款。
+// 和 check-in 气泡的颜色。
+//
+// 素材：Kitty Cat Error 404 by Sepehr Radfar（LottieFiles），Lottie Simple License，
+// 08-28 已确认可商用、可分发、署名非强制但鼓励。完整来源/授权/义务见 assets/LICENSE.md。
+// ★ 那个文件是分发义务不是可选文档，别删（license 要求 Files 随附同一份条款）。
+//   —— 原注释写的是"素材来源见 assets/cat.json 顶部注释"，但 JSON 不支持注释、
+//      那个文件里一个来源信息都没有，是句指向空处的话，08-28 一并改掉。
 import { useEffect, useRef } from 'react';
 // lottie-web 的默认打包（'lottie-web'）带 AE expressions 功能，内部用 eval() 实现——
 // MV3 扩展页面的 CSP 硬性禁止 unsafe-eval（跟普通网站不同，这条不能靠 manifest 放开），
@@ -103,8 +109,12 @@ export function CuteAnchorPet({
         data-bubble-visible={Boolean(bubbleText)}
         data-resting={Boolean(isResting)}
       >
-        <div className="anchor-pet-wrap">
-          <div className="anchor-pet-bubble" role="status" aria-live="polite">
+        {/* ★ 08-29：气泡从 .anchor-pet-wrap 里搬出来，成为 stage 的直接子元素。
+            原来它是 position:absolute + translateY(-100%)——锚在底边往上长，靠 stage 一个
+            写死的 padding-top 给它腾空间。内容一超过那个 padding，顶部就跑出可视区，
+            于是那个数字一路从 60px 猜到 320px：猜小了截断、猜大了短消息时留一大片空白。
+            现在它是文档流里的普通块，stage 高度跟着内容走，多长都不会溢出。 */}
+        <div className="anchor-pet-bubble" role="status" aria-live="polite">
             <span>{bubbleText}</span>
             {/* 气泡本身在非 checkin 态只是靠 CSS opacity/pointer-events 隐藏（cat.css 的
                 [data-state="checkin"] 规则），不是 display:none——只挡鼠标，不挡键盘 tab 顺序。
@@ -142,9 +152,10 @@ export function CuteAnchorPet({
                   </button>
                 )}
               </div>
-            )}
-          </div>
+          )}
+        </div>
 
+        <div className="anchor-pet-wrap">
           <div className="anchor-pet-lottie-wrap">
             <div className="anchor-pet-lottie" ref={containerRef} />
             <span className="anchor-pet-badge" aria-hidden="true">
