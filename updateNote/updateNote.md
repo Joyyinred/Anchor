@@ -450,3 +450,92 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
 
 11. ![alt text](image-2.png)
     - 对长标题网页需要做缩略，否则ui呈现不好，明天修改
+
+## 0829
+### Joy
+
+今天做了 B12（起步教练 prompt 打磨）、清掉了拖三天的 Lottie 授权、重构了气泡布局。过程中我自己引入了一个回归又查出来修掉了（第 4 条），教训值得记。`npm test` **185/185** 全绿，`npm run typecheck` 两边干净，`npm run build` 正常出包。
+
+1. **B12（一）：起步教练 prompt 打磨到 v1**（`starter-coach.ts` + `docs/起步教练prompt-v0.md`）
+    - v0 只有一句指令 + 一组 good/bad 例子，指望模型自己领会。实测会出四类废话，**v1 把这些失败模式当成显式反例写进 prompt**：
+
+      | 失败模式 | 例子 | 为什么是废话 |
+      |---|---|---|
+      | 复述目标 | `Start writing the essay.` | 用户刚说了要写论文，重复一遍等于没说 |
+      | **计划伪装成开始** | `Plan your approach first.` | **最常见的拖延陷阱**——听起来很负责，实际一个字没写 |
+      | 前置条件当动作 | `Open your laptop.` | 不是动作是前提，而且有点侮辱人 |
+      | 一串步骤 | `Open the doc, then outline, then write.` | 看完更不想动了——起步教练的意义正是"只给一步" |
+
+    - 另外三处：①**删掉 v0 开头 "a task they've been avoiding" 这个预设**——那等于假定用户在拖延，但很多人只是正常开工，会让语气变成"我知道你在逃避哦"，跟「像朋友不像监工」正好相反；②**加 12 词长度上限**（要塞进 220px 气泡）；③**显式要求英文输出**（v0 没写，用中文声明任务时模型会跟着回中文）。
+    - **顺带发现文档和代码本来就对不上**：`docs/起步教练prompt-v0.md` 里记的 prompt 跟 `starter-coach.ts` 里实际在跑的**不是同一份**，各写各的。已改成以代码为准，并在文档 §2 加了警示：以后两边一起改。
+
+2. **B12（二）：LLM 预生成 check-in 变体——评估后否决，不做**
+    - 昨天记进 B12 范围时的理由是"LLM 版能说出任务、这个差别评委能感受到"。**今天重新验证，这个判断是错的，方向可能反了。**
+    - **理由一：模板已经有更有用的那个信息。** 对比 `You drifted from "login.tsx" 10 minutes ago` 和 `你本来在准备数据结构考试`——**"login.tsx" 其实更有用**：它精确指出你离开了什么、能直接把你带回去；任务声明是抽象的，用户本来就知道自己的任务。
+    - **理由二：真想加任务，不需要 LLM。** `taskDeclaration` 在措辞层唾手可得（`pushPanelState` 两个调用方作用域里都有 `ctx`），加个参数传下去就行。
+    - **理由三（决定性）：会失去语气保障。** 任务声明是用户自由输入的字符串，塞进句子语法会坏（`still on Study for tomorrow's data structures exam?`），LLM 确实能转写成 `the exam prep` 自然嵌入——**但这是它唯一比模板强的地方，代价是 B11 那些正则（挡 `should`/`again`/`sorry`）测不了 LLM 生成的文本**。我们花整个 B11 把语气用测试焊死，就是因为「像朋友不像监工」是 demo 成败点；**在 check-in 这个全场最关键的一瞬间放一段没有任何自动化保障的用户可见文本，是质量控制上的倒退，正好抵消 B11 做的事。**
+    - 收益配不上代价 + 缓存/失效/兜底那一堆状态管理。**结论：从 B12 范围划掉。**（保留这条记录是因为"评估过决定不做"比"没做"有价值得多，免得下周又有人提一遍重新辩论。）
+
+3. **Lottie 猫的授权确认**（0826/0827/0828 连着三天记"待确认"，今天清掉）
+    - 素材：**Kitty Cat Error 404 by Sepehr Radfar**，https://lottiefiles.com/free-animation/kitty-cat-error-404-fvL7jDNahz ，**Lottie Simple License (FL 9.13.21)**。
+    - 结论：**可以用**。免费、**可商用**、可修改可分发，**署名非强制**（"permitted without attributing... though strongly encouraged"），"不得收集素材做竞品动画服务"那条不适用。
+    - **但有一条实打实的义务我们之前没满足**：条款要求 *"distribution of Files must contain (and be subject to) the same terms and conditions of this license"*——`cat.json` 跟着 repo 分发（公开 + 作业提交），license 全文必须随文件在场，而仓库里之前一个字都没有。新增 `src/pet/assets/LICENSE.md` 归档：来源表、license 全文、署名文本，以及**"我们未修改原文件"的声明**（`CROPPED_VIEW_BOX` 是运行时改渲染出的 SVG 节点、不落回文件，所以不构成 derivative works——这条以后被问到很关键）。**全英文写的**：这不是内部文档，是给第三方（评审、素材作者）看的合规凭证。
+    - **顺带修了一句指向空处的注释**：`cat.tsx` 原来写"素材来源见 assets/cat.json 顶部注释"——但 JSON 不支持注释，那个文件里一个来源信息都没有，这句话本身就是错的。改成指向 `LICENSE.md`。
+    - **选择署名后触发的连带条款**：*"If attributions are included, such attributions should be visible to the end user."* ——署名本身不强制，但既然署了就得让最终用户看得见。**待办记在 LICENSE.md 里：J12 收尾时把 credit 放进 README。**
+    - 副作用：**B13（桌宠三态动画）的前置不确定性解除了**——素材确认可用，在它上面做动画不会白做。
+
+4. **★ 我引入的回归：改 prompt 撑爆了 token 预算，起步教练一直走兜底**
+    - 现象：明明输入了 `coding for my hackathon project`，侧边栏显示的还是兜底文案 `Don't overthink it — just open whatever you need...`。
+    - **查了一大圈才定位，因为这条链路是完全静默的**：`groq.ts` 失败返回 `null`（有 warn）→ `starter-coach.ts` 抛错（**零日志**）→ `coach.ts:103` 是 `catch { ... }`（**空 catch，连错误对象都不接**）。用户只看到一句正常的兜底文案，**分不清是"LLM 这么说的"还是"LLM 挂了"**。
+    - **排除法**：分类（`gpt-oss-20b`）日志里多次成功 → key 有效、网络正常；直接打 API 测两个模型都 HTTP 200 → 模型可用。差别只剩 prompt。
+    - **根因（真机实测数据）**：`gpt-oss` 是**推理模型，reasoning 的 token 计入 `max_tokens`**，而 `groq.ts` 写死 `max_tokens: 200`。
+      ```
+      max_tokens=200  → finish_reason: "length"
+                        content: "{\"firstAction\":\"Open main.py and type #    ← 截断，非法 JSON
+                        reasoning_tokens: 182   ← 200 里 182 被推理吃掉，只剩 18 个给 content
+      max_tokens=1000 → finish_reason: "stop"
+                        content: "{\"firstAction\":\"Open main.py and type // TODO: start\"}"  ✅
+      ```
+      **v0 prompt ~400 字符、推理短，侥幸没撞上；我把它扩到 ~1900 字符（8 条规则 + 8 个例子），推理跟着变长就爆了。**
+    - **教训**：改 prompt 不只是改文案——**对推理模型来说，它同时改了 token 预算的分配**。prompt 越复杂，留给 `content` 的空间越小。
+    - **修法**：①`groq.ts` 的 `max_tokens` 改成可选参数，**默认仍是 200**（A 侧分类的 prompt 短、输出短，够用且省钱，**行为一字不变**），只有起步教练显式传 `1000`；②`starter-coach.ts` 抛错前补日志，区分"调用失败"和"拿到回复但解析不出"，后者**把原始回复打出来**——这次要是有这行，一眼就能看到那半截 JSON，不用绕这么大圈。
+    - 未做的优化：Groq 支持 `reasoning_effort: 'low'`，能从源头压推理长度（182 个推理 token 对"说一句起步动作"是浪费）。**没加是因为没在真机验证过这个参数会不会被拒**，想加的话先在控制台测一次确认 200 再说。
+
+5. **check-in 气泡布局重构（真机 UI 问题的治本解法）**
+    - 问题：气泡是 `position: absolute` + `translateY(-100%)`——**锚在底边往上长**，靠舞台一个写死的 `padding-top` 腾空间。内容一超过那个 padding 顶部就跑出可视区，于是那个数字**一路从 60 猜到 320**：猜小了截断、猜大了短消息时留一大片空白。
+    - **第二层（结构，治本）**：气泡从 `.anchor-pet-wrap` 里搬出来，成为 `.anchor-pet-stage` 的直接子元素，回到**正常文档流**。舞台高度跟着内容走。实测：
+
+      | | 之前 | 现在 |
+      |---|---|---|
+      | 舞台高度 | 写死 320px | **跟内容走**（140 / 317 / 371） |
+      | 气泡起点 | 可能跑出可视区 | **永远在顶部 16px** |
+      | 无气泡时 | 仍占 320px，猫下面一大片空白 | 只有 **140px** |
+
+    - 配套：显隐从 `opacity` 改成 `display`（现在它占布局，光透明会让猫被凭空推下去）；入场动画从 `transition` 改成 `animation`（`display` 变化没法被 transition 捕捉，但 animation 会在元素变成 `display:block` 那一刻自然播放）。**代价：出场没有动画了**（瞬间消失）——判断可接受，没人盯着气泡消失，入场那一下才有感知。
+    - **第一层（内容，治标但立竿见影）**：去站点样板 + 上限 60→42。`Anchor/updateNote/updateNote.md at J4 · Joyyinred/Anchor` 共 56 字符，**卡在原来的 60 下面所以完全没被裁**；去掉 `· Joyyinred/Anchor` 后剩 37。新增 5 条测试锁边界：`React - Docs` 不会被砍成 `React`（过度清洗）、`Rust vs Go - benchmark - YouTube` 只砍最后一个分隔符不腰斩正文。
+    - **两层是互补的**：结构层保证"再长也不会破坏布局"，内容层保证"读起来像人话"。**注意字数上限对中日韩无效**（42 个汉字 ≈ 84 个字母宽），真正兜底的是结构层 + `overflow-wrap: anywhere`。
+
+6. **真机测试时日志里发现一个 A 侧 bug（记给 Jay）**
+    ```
+    [Anchor SW] classifying (async)            ← 域名是空的
+    SignalEvent {domain: '', url: '', title: '新标签页'}
+    [Anchor SW] classified  -> IRRELEVANT      ← 空 URL 被判成"无关"
+    ```
+    **空 URL 也被送去分类了**，还拿回一个 `IRRELEVANT`。既浪费一次 LLM 调用，又可能造成误判——空 URL 判 `IRRELEVANT` 没有意义。`frame-pipeline.ts` 的 `triggerLazyClassification()` 该加个空值守卫。
+
+7. **测试步骤修正（之前给的有坑）**
+    - ❌ 我之前写的重置流程是 `chrome.storage.local.clear()` + 重配 key——**`clear()` 会把 Groq key 一起清掉**，顺序错了就会以为是代码问题。
+    - ✅ 只重置 onboarding、保留 key：
+      ```javascript
+      chrome.storage.local.get('anchor_default_session').then(r => {
+        const ctx = r.anchor_default_session;
+        ctx.taskDeclaration = 'No task declared (default companion mode)';
+        return chrome.storage.local.set({ anchor_default_session: ctx });
+      }).then(() => console.log('已重置，关掉侧边栏再打开'))
+      ```
+
+8. **0830 todo**
+    - **B13 可以做了**（授权已确认，UI 也收拾完了，两边不再撞车）。
+    - 可选：给起步教练加 `reasoning_effort: 'low'`（见第 4 条末尾），先在控制台验证参数可用再说。
+    - J9（deck 骨架）继续等全流程跑通。
+    - **B10 需要等J7+真实数据**
