@@ -72,9 +72,34 @@ function extractFirstAction(text: string | null): string | null {
  * runStarterCoach() 已经用 try/catch 把 llmCall 的失败兜底成 FIRST_ACTION_FALLBACK
  * （coach.ts 已实现，分工v2.md §5 红线2 同一个精神），这里不用重复兜底一次。
  */
+// ★ 08-29：起步教练必须给足 token 预算。gpt-oss 的 reasoning 计入 max_tokens，
+// 而这个 prompt（v1，8 条规则 + 例子）会让模型想得比分类那条长得多——
+// 真机实测 reasoning 就占了 182/200，content 被截断成半截 JSON。1000 是实测够用的值。
+const COACH_MAX_TOKENS = 1000;
+
+/**
+ * runStarterCoach() 的 llmCall 参数就传这个函数。调用失败/解析不出来时抛错——
+ * runStarterCoach() 已经用 try/catch 兜底成 FIRST_ACTION_FALLBACK（红线2 同一个精神）。
+ *
+ * ★ 但抛错前一定要打日志：coach.ts 那边是空 catch（连错误对象都不接），
+ *   所以这里不说，整条链路就是完全静默的——用户只看到一句正常的兜底文案，
+ *   分不清是"LLM 这么说的"还是"LLM 挂了"。08-29 那次 max_tokens 截断就是这么难查的。
+ */
 export const groqStarterCoachCall: StarterCoachLLMCall = async ({ taskDeclaration }) => {
-  const text = await callGroq(GROQ_COACH_MODEL, buildPrompt(taskDeclaration));
+  const text = await callGroq(GROQ_COACH_MODEL, buildPrompt(taskDeclaration), {
+    maxTokens: COACH_MAX_TOKENS,
+  });
+  if (text === null) {
+    // callGroq 已经打过具体原因（没配 key / 非 2xx / 超时），这里补一句把两段日志串起来。
+    console.warn('[Anchor SW] starter coach: Groq call failed, falling back to canned first action');
+    throw new Error('groqStarterCoachCall: no response');
+  }
   const firstAction = extractFirstAction(text);
-  if (!firstAction) throw new Error('groqStarterCoachCall: no usable response');
+  if (!firstAction) {
+    // 拿到回复但抠不出 firstAction——最常见的原因就是 max_tokens 不够、JSON 被截断。
+    // 把原始回复打出来，下次一眼能看出是截断还是模型没按格式输出。
+    console.warn('[Anchor SW] starter coach: unusable response, falling back. Raw:', text);
+    throw new Error('groqStarterCoachCall: no usable response');
+  }
   return { firstAction };
 };
