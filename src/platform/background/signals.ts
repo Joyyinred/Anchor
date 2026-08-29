@@ -49,7 +49,10 @@ function emitSignalEventDebounced(reason: string): void {
 
 // 'prefix' 模式要求"同域或其子域"，不能用裸 endsWith（会把 notexample.com 误判成命中 example.com）——
 // 复用引擎里同一条边界判断逻辑（perceiver.ts 的 domainMatches），别再自己写一份不带 `.` 边界的版本。
-function isAnchorMatch(domain: string, anchor: SessionContext['anchor']): boolean {
+// 导出给 pull-back.ts 复用（用户点"拉我回去"时要找出哪个 tab 是锚点）——
+// 锚点匹配全项目只该有这一份，别再写第四遍（perceiver 的 domainMatches 已经被
+// 这里、heuristics.ts 收敛过一次了，见 08-26 code review ④）。
+export function isAnchorMatch(domain: string, anchor: SessionContext['anchor']): boolean {
   if (anchor.matchMode === 'exact') return domain === anchor.domain;
   return domainMatches(domain, anchor.domain);
 }

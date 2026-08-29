@@ -46,4 +46,47 @@ export interface OnboardingSubmitMessage {
   timestamp: number;
 }
 
-export type RuntimeMessage = ContentScriptReadyMessage | InteractionMessage | CheckInAnswerMessage | OnboardingStatusRequestMessage | OnboardingSubmitMessage;
+// ── 休息模式（契约v4 §3.8）：B 侧 UI 发出，SW 侧接住后操作 BState ──
+// 这三条是 B 定的 UI 契约，A 侧照 CHECK_IN_ANSWER 已有的模式在 background/index.ts 接即可。
+
+// 用户点了桌宠下方的"Take a break"。SW 收到后调 detector.ts 的 startRest(state, now)
+// —— restUntil = now + 20min，期间 isDrifting/isStuck 的公共闸口会让双通道全静默。
+export interface RestStartMessage {
+  type: 'REST_START';
+  timestamp: number;
+}
+
+// 用户在休息提醒里点了"Back to it"（契约里的"继续专注"）。SW 收到后把 restUntil/restStartTs
+// 清回初始值（-Infinity），双通道恢复工作。注意不能只清 restUntil：restStartTs 留着的话
+// restReminderDue() 会继续按老的休息起点判定，提醒不会停。
+export interface RestEndMessage {
+  type: 'REST_END';
+  timestamp: number;
+}
+
+// 用户在休息提醒里点了"Done for today"（契约里的"结束专注"）——语义是"今天这场专注到此为止"，
+// 不是"再休息一会儿"。★ 下游行为还没定：完整的收尾反思是 B15（阶段二，还没开工），
+// 阶段一最小可用的做法是清掉 SessionContext，让用户下次打开侧边栏时重新走一遍起步教练。
+// 具体怎么接由 A/B 一起定，B 侧只保证这条消息会被正确发出来。
+export interface SessionEndMessage {
+  type: 'SESSION_END';
+  timestamp: number;
+}
+
+// 用户在收尾反思视图上点了"Start something new"：清掉 summary，面板随即回到起步教练
+// （SessionContext.taskDeclaration 在 SESSION_END 结算时已经打回默认值了）。
+export interface SessionRestartMessage {
+  type: 'SESSION_RESTART';
+  timestamp: number;
+}
+
+export type RuntimeMessage =
+  | ContentScriptReadyMessage
+  | InteractionMessage
+  | CheckInAnswerMessage
+  | OnboardingStatusRequestMessage
+  | OnboardingSubmitMessage
+  | RestStartMessage
+  | RestEndMessage
+  | SessionEndMessage
+  | SessionRestartMessage;

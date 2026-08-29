@@ -322,3 +322,131 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
     - `signals.ts` 新增 `emitSignalEventDebounced()`（300ms 尾部去抖），套用在 `onActivated`/`onFocusChanged`/`onUpdated` 三个"tab 快切"触发源——`currentTab` 的赋值仍然同步，只延迟"要不要真的产出一条 SignalEvent"这个决定，debounce 期间用户再切一次会看到最新的 currentTab，只有停留超过 300ms 才真正记一条事件。300ms 选得足够短：人不可能在这么短时间内真正"看"一眼某个标签页再决定继续切，`jumpPattern` 关心的是秒级的往返跳转模式，不会因为吞掉亚秒级抖动丢失有意义的证据。`onCommitted`/`onHistoryStateUpdated`（真实导航提交）和 content-script 交互（已在内容脚本层 2s 节流）不受影响，仍然逐条记录。
     - `idle.onStateChanged` 加防御性去重：新状态跟当前追踪的 `systemIdle` 一样就直接跳过，不重复跑一遍完整评估链路。
     - 验证：`npm run typecheck` 两边干净，`npm test` 152/152，`npm run build` 正常出包。同样是真实 chrome API 代码，没有自动化测试覆盖。
+
+### Joy
+
+接着 Jay 上午给的建议做了休息模式 B 侧，然后做完 B11（措辞打磨），再把「最小版收尾反思」补掉（那块不在任何编号里，但同时堵三个洞：给 `SESSION_END` 一个归宿、解开 J7 ↔ B15 互相依赖转不动的死结、补齐 J7「起步 → 陪伴 → 拉回 → 收尾反思」的最后一环），最后发现并修了「拉我回去」这个**说了不算**的大漏洞。`npm test` **180/180** 全绿，`npm run typecheck` 两边干净，`npm run build` 正常出包。
+
+1. **休息模式 B 侧**（契约v4 §3.8，对应 Jay 上午第 6 条的建议）
+    - 新增 `src/platform/rest-state.ts`：`RestState` 形状 + 独立 storage key。**不塞进 `PanelState`**——休息跟三态是正交的两件事，而且分开一个 key 之后，用户点"休息"那一刻不会被下一次心跳的 `pushPanelState` 冲掉。
+    - 新增 `src/platform/background/rest.ts`：`beginRest`/`endRest`/`refreshRestReminder` 三个函数，只负责读写 `BState` + 推面板状态，判定全部复用 B1 早就测过的 `startRest()`/`restReminderDue()`。**这是给 Jay 的参考接线**，她要重写或挪进 `frame-pipeline.ts` 都行。
+    - `wording.ts` 补三句休息措辞；`pet/types.ts` 加 5 个 props；`cat.tsx`/`cat.css` 加休息入口按钮、提醒气泡的两个选项、`data-resting` 视觉；`messages.ts` 加 `REST_START`/`REST_END`/`SESSION_END`；`main.tsx` 订阅 `REST_STATE_KEY`。
+    - **★ 关键设计决定：休息不是第四个 PetState。** `cat.tsx` 顶部明确写了"三态之外没有第四态"，所以休息做成正交标记——休息期间 `state` 仍是 `companion`，只是徽章降饱和度+去脉冲、猫本体淡到 0.7、说明文案换掉。语义上正好："我还在，只是不看着你了"。
+    - **踩过的坑写在注释里了**：结束休息必须**同时**清 `restUntil` 和 `restStartTs`。只清前者的话 `restReminderDue()` 会继续按老的休息起点判定，提醒停不下来（它只读 `restStartTs`）。
+    - UI 微调：`Take a break` 一开始做成了无边框纯灰文字，预览里看着像说明文案不像控件（affordance 不足，**一个点不出来的入口等于没有这个功能**）。改回描边 pill，靠"背景透明 + 更浅文字色"跟 check-in chip 拉开层级，而不是靠去掉按钮特征本身。
+
+2. **B11：check-in / 微重启措辞打磨**（`wording.ts` + `wording.test.ts` + `panel.ts`）
+    - **要解决的是重复。** 每种情况只有一句固定文案，而冷却是 5 分钟——一次 demo 很容易触发两三次 check-in，评委会看到一模一样的句子重复出现，那一瞬间"像朋友"的错觉就破了，变成很明显的模板机器人。
+    - 做法：DRIFT 3 个变体、STUCK 3 个、无快照兜底 2 个、微重启每种回答 3 个，用 `pickVariant()` 按 `Math.floor(now / 60_000) % 池长度` 轮换。
+    - **★ 刻意不用 `Math.random()`**，三个理由：①测试可断言不 flaky；②**demo 可预演**——走查时看到的就是现场会出的那句，不会临场抽到没排练过的文案；③两次 check-in 至少隔 5 分钟冷却，分钟数必然不同，实际观感就是"每次都不一样"。
+    - `panel.ts` 的 `pushMicroRestartToast()` 补传 `Date.now()`——不传的话永远只出每个池的第一句，变体等于白做。第二参数可选，所以是向后兼容的改动。
+    - **测试才是这次的重点**（23→32 条）：不是只测选中的那一句，而是**对每一个变体逐条断言语气规则**——必须引用标题、必须带时间线索、必须问号收尾、不能出现 `should/stop/again/why`；微重启的 `FALSE_POSITIVE` 不能出现 `sorry/wrong/mistake`、`DRIFTED` 不能出现 `again/why`。B11 标着"demo 成败点"，值得用测试把标准焊死，而不是靠每次 review 凭感觉。
+
+3. **最小版收尾反思**（J7 最后一环 / B15 的最小版）
+    - 新增 `src/platform/session-summary-state.ts`（`SessionStats`/`SessionSummary` + 两个 key）、`src/platform/background/session-summary.ts`（累计统计/结算/重启会话）、`src/sidepanel/SummaryPanel.tsx` + `summary.css`；`wording.ts` 补 4 个函数；`messages.ts` 加 `SESSION_RESTART`。
+    - **★ 统计不进 `BStatePersistable`**：那是契约v4 §3.1 定义的"判定状态"（阈值/冷却/休息），塞 UI 统计会污染语义；而且 `frame-pipeline` 的 `toPersistable()` 用的是解构剩余，往 `BState` 加字段会被自动当判定状态一起持久化。改用独立 storage key，跟 `panel-state`/`rest-state`/`onboarding-state` 一个模式。
+    - **★ 只统计"用户真正回答过的" check-in**：没回答就被下一帧顶掉的不算——那不是一次有效对话，算进去会虚高。这个口径正好等于契约v4 §5.4 误报率的分母。
+    - **★ 零次的统计行整块不渲染**（`buildCheckInTally()` 返回 `null`）：说"我一次都没打扰你"像邀功，说"未检测到走神"像系统状态报告——这一行的定位是"顺带一提"，零次就该沉默。
+    - 语气用正则焊死了**不打分**：`great|well done|proud|could have|should have|only` 一律禁，感叹号也禁。**表扬和批评是同一类问题，都是在评价用户，而不是陈述发生了什么。** 用户刚结束一场专注，此刻最不想看到的是一张成绩单。
+    - 结算流程：`SESSION_END` → 存 summary（`taskDeclaration` 要**先**快照再清 context，顺序不能反）→ 把 `taskDeclaration` 打回默认值（复用 onboarding 的同一个判据，两处不会不同步）→ 面板显示收尾视图 → 点"Start something new" → `SESSION_RESTART` → 清 summary → 回到起步教练。
+
+4. **★ 修了「拉我回去」这个说了不算的大漏洞**（新增 `src/platform/background/pull-back.ts`）
+    - **问题**：用户点「Drifted - pull me back」之后，代码只做了三件事——清空证据持续器、记 `lastAnswerTs`、弹一句 "No worries, let's head back."。**然后就没有然后了。** grep 全项目没有任何 `tabs.update`/`tabs.remove`，用户还留在无关页面上。按钮字面写着 pull me back、文案说"我们回去吧"，**但没有任何人真的回去**。这比少了个功能更糟：**文案承诺了一个不存在的动作，"说了不算"比一开始就不说更伤信任。**
+    - **做法**：`pullBackToAnchor(ctx)` 找到锚点 tab → `chrome.tabs.update({active:true})` → 锚点可能在另一个窗口，再 `chrome.windows.update({focused:true})`（只 active 不 focus 的话用户屏幕上什么都不会变，"拉回去了"这件事他根本看不见）。匹配复用 `signals.ts` 的 `isAnchorMatch`（把它从私有改成导出），**不写第四份锚点匹配逻辑**——否则会出现"感知半认为你在锚点上、但拉回功能找不到那个 tab"这种自相矛盾。
+    - **★ 三条边界，这是「朋友」和「监工」的分界线**：
+      - **只切换、绝不关闭。** 一度考虑过强制关掉当前 tab，但那是越权：用户授权的是"带我回去"，不是"把这个弄没"。关 tab 会毁掉视频进度/写了一半的评论，而且**不可逆**——**在"我们可能判错"的前提下，只做可逆的动作**。
+      - **只在答 `DRIFTED` 时做。** `FOCUSED`（我在专注）和 `FALSE_POSITIVE`（你判错了）这两个回答的意思恰恰是"别管我"，这时候切 tab 才真是监工。测试专门锁了这条。
+      - **找不到锚点 tab 就什么都不做，不新开一个。** 用户可能是故意关掉的，硬开回来又越权了。
+    - **顺带解决了"说了不算"的另一半**：切不回去时不能还说"我们回去吧"，那又是空头支票。新增 `DRIFTED_NO_ANCHOR_TEMPLATES`（"Got it — pick it up whenever." 这类），`buildMicroRestartMessage()` 加可选 `context.pulledBack` 决定用哪个池。测试用正则挡死：`pulledBack: false` 时**绝不能出现** `let's head back`/`back to it`/`pick that back up`。
+
+5. **修的 bug：结算时没清空 `sessionWhitelist`**（`session-summary.ts`，我自己刚写的代码里的）
+    - `endSession()` 原本只把 `taskDeclaration` 打回默认值，`sessionWhitelist` 原样留着。但它名字里就写着 session——白名单是"针对**这个任务**，这个域名算相关"的判断，换了任务就不成立：为了"准备数据结构考试"把 YouTube 标成查资料，不代表下一场"写周报"时 YouTube 也该免打扰。
+    - 不清的话它会一直躺在 storage 里，**用户做几场之后常去的域名全进白名单，检测等于被自己悄悄关掉了。**
+
+6. **一个产品设计结论：不对"用户谎称在查资料"做 double check**
+    - 起因：用户在看无关 YouTube 时也可以点"Just researching"把域名洗白。这个洞是真的，但**解法不在当场质疑**。
+    - **不做的四个理由**：①桌宠弹一句"你确定吗？"，那一秒它就从朋友变成监工，直接摧毁 demo 的核心差异点；②用户不是对手——扩展是他自己装的，谎报只坑自己，不存在被欺骗的第三方，跟公司监控软件有本质区别；③为撒谎的用户做设计会**惩罚诚实的用户**（真在查资料的人每次都要多被怀疑一次），为堵一个自愿的漏洞让主路径变差不划算；④跟自欺辩论没用，弹窗反驳不会改变行为，只会让人卸载。
+    - **改在别处**：①白名单作用域收紧（上面第 5 条，换任务就清空）；②**放到收尾反思里说，不在当下说**——统计里已经有 `answers.FALSE_POSITIVE`，收尾时平铺直叙"这一场你标了 N 次'在查资料'"，不评判不追问。这才是朋友的做法：当下不争，事后提一嘴，然后翻篇。用户自己看到那个数字比任何弹窗都有效。
+    - 契约 §5.4 的误报率本来就是这个信号，但**正确的反应是调检测器（B10），不是质问用户**。
+
+7. **预览工具扩充**（`src/devpreview/`，纯本地工具不进扩展构建）
+    - 从 3 格扩到：5 个桌宠状态（含 resting / rest reminder）+ 收尾反思 2 格（有统计 / 全程零打扰）+ **B11 措辞变体一览**（7 组）。
+    - 变体一览**调的是真函数不是写死的假文案**，看到的就是真机上会出的那几句。改 `wording.ts` 任何一句 Vite 热更新即时刷新——这正是"措辞反复调"需要的循环。
+    - 跑法：`npx vite --config Devpreview.vite.config.ts`
+
+8. **等 Jay 接线的 7 处**（全在 `background/index.ts`，一次接完）
+    - `CHECK_IN_ANSWER` 分支 → `recordCheckInAnswer(feedback, now)`
+    - `CHECK_IN_ANSWER` 分支 → 答 DRIFTED 时先 `const pulledBack = await pullBackToAnchor(ctx)`，再 `pushMicroRestartToast(feedback, pulledBack)`（非 DRIFTED 传 true）
+    - `REST_START` 分支 → `beginRest(state, now)` + `recordRestStart(now)`
+    - `REST_END` 分支 → `endRest(state)`
+    - `SESSION_END` 分支（新）→ `endSession(ctx, now)`
+    - `SESSION_RESTART` 分支（新）→ `restartSession()`
+    - 心跳里 → `refreshRestReminder(state, now)`
+
+9. **B12 范围新增：LLM 预生成 check-in 变体**（想到了先记下，不现在做）
+    - 现在的措辞是模板，只能说页面标题（`"login.tsx"`）；LLM 版能说**"你本来在准备数据结构考试"**——这个差别在 demo 上评委能感受到。
+    - **但绝不能在 check-in 触发那一刻现调 LLM**：①延迟正好卡在最要命的位置，"及时性"恰恰是这个产品说服力的来源，慢一秒就从"它注意到了"变成"它反应了一下"；②违反红线1（LLM 不阻塞引擎）——文案没有"看不见的兜底"，要么先显示模板再替换（跳变难看）要么就是在等；③违反红线2/3 的精神，断网/限流时坏掉的**恰好是全场 demo 最关键的那一瞬间**；④没法排练，走查看到的和现场出的不是同一句。
+    - **正确做法**：起步教练那次 LLM 调用**顺带**生成 3-4 句任务相关的 check-in 变体缓存起来 → check-in 时同步取用零延迟 → 缓存为空（断网/失败）自动落回现有模板。零延迟、可降级、可排练、真正任务感知。
+
+10. **★ 待跟 Jay 讨论：真机测出 STUCK 对娱乐视频误报 + DRIFT 完全不触发（契约层 + 分类质量，今天先不改）**
+
+    真机复现：起步教练把 GitHub 设为锚点 → 切到 YouTube 看娱乐视频（`Crossing China One Cigarette at a Time`）→ 期望 `CHECK_IN_DRIFT`，**实际反复出 `CHECK_IN_STUCK`**。桌宠问的是 "You've been sitting still on 'Crossing China One Cigarette at a Time' — stuck on something, or just deep in thought?"——**对着一个娱乐视频问"你是不是卡住了"**，这句话本身就会让用户觉得这东西根本不懂他在干嘛。我切到购物网站则能正常触发drift，你也可以在你那边跑一遍看是不是同样的情况。
+
+    **★ 这其实是三个独立问题，别当成一个修**（这一点很重要，不然明天改完一个发现还是不触发，会白 debug 一轮）：
+
+    | # | 问题 | 性质 | 归属 |
+    |---|---|---|---|
+    | 1 | STUCK 对 `UNKNOWN` 放行，误判成"卡住" | 契约自相矛盾 | 契约 §3.5 / `detector.ts` |
+    | 2 | **YouTube 娱乐视频被判 `UNKNOWN` 而非 `IRRELEVANT`** | **分类质量——这才是 DRIFT 不触发的真原因** | A2/A8 |
+    | 3 | 安静看视频 = `texture: 'idle'` | 信号盲区 | `perceiver.ts` |
+
+    ---
+
+    **先排除两个不是原因的**：①锚点认对了（`lastAnchorSnapshot` 是 GitHub 那个 md 文件，切回去时 `anchorDetachedMs: 0`）；②`detector.ts` 的实现跟契约 §3.5 **逐行一致，我们的代码没写错**。
+
+    ### 问题 1：两条通道对 `UNKNOWN` 的处理不一致
+
+    根因日志：
+    ```
+    [Anchor SW] Groq classify: below confidence threshold {verdict: 'UNKNOWN', confidence: 0.6}
+    [Anchor SW] classified www.youtube.com/watch?v=y_pqNyA9RLo -> UNKNOWN
+    ```
+
+    | 通道 | 契约 §3.4/§3.5 的闸口 | `UNKNOWN` 时 |
+    |---|---|---|
+    | DRIFT | `if (contextRelevance !== 'IRRELEVANT') → false` | **挡住** ✅ 保守 |
+    | STUCK | `if (contextRelevance === 'IRRELEVANT') → false` | **放行** ❌ |
+
+    DRIFT 要求"必须是 IRRELEVANT"，STUCK 只排除"是 IRRELEVANT"——**`UNKNOWN` 从 STUCK 的缝里漏过去了**。这是契约自相矛盾：红线1 白纸黑字写着"判出前一律保守（不触发 check-in）"，**DRIFT 遵守了，STUCK 没有**。
+
+    候选方案（等一起定，我没动代码）：
+    - **方案 A（改一行，我倾向这个）**：`if (f.contextRelevance === 'IRRELEVANT') return false;` → `if (f.contextRelevance !== 'RELEVANT') return false;`。语义变成"**只有确认在做正事、却停住不动了，才问是不是卡住了**"——这才是 STUCK 的本意，也让两条通道对 `UNKNOWN` 的态度一致。
+    - **方案 B（可叠加）**：`contentKind === 'video'` 时排除 STUCK——看视频本来就不该被问"卡住了吗"。
+
+    **⚠️ 但必须清楚：方案 A 只让 STUCK 闭嘴，不会让它变成 DRIFT。** DRIFT 的闸口要求 `=== 'IRRELEVANT'`，`UNKNOWN` 照样被挡 → **改完之后两条通道都不响，桌宠一句话都不说**。比误报好，但这是**漏报**——恰恰是产品最该抓的场景（契约场景3：飘到 youtube 娱乐 → `CHECK_IN_DRIFT`）。**方案 A 是"不说错话"，不是"能说对话"。**
+
+    ### 问题 2：分类质量（DRIFT 不触发的真原因，我也觉得这是根本原因，groq的问题把youtube识别为unknown）
+
+    当前配置：分类 `openai/gpt-oss-20b`，置信度阈值 `0.7`，prompt 只喂 `taskDeclaration + url + title`。四个可能原因：
+
+    - **① 模型太小**：分类用 20b，起步教练用 **120b**——分类是判断题、更吃语义理解，反而用了小六倍的模型。当初选小模型的理由是"高频、追求速度"，但实际有缓存（每页每会话最多一次），频率没那么高。**换 120b 可能是最省事的一刀。**
+    - **② 阈值 0.7 偏高**：`confidence 0.6` 被强制降级。但这是红线1 定的保守值，降它会让所有分类都变激进。**我倾向不动**——0.6 的把握本来就该保守，问题是模型对这个页面不该只有 0.6。
+    - **③ prompt 上下文太薄**：`Crossing China One Cigarette at a Time` + 一句任务声明，模型犹豫情有可原（旅行纪录片理论上可能是 research）。可以补判断准则，比如"娱乐向 vlog/纪录片除非任务明确涉及该主题否则判 IRRELEVANT"。属 A2 prompt 打磨范围。
+    - **④ 任务声明太模糊**：任务越具体分类越准——这正是契约 §5.5 要求 ≥8 字符追问的原因。
+
+    **验证方法（5 分钟出答案，别猜）**：同样的 prompt 分别用 20b 和 120b 手动跑一次那个 YouTube 页面，看置信度差多少。120b 明显更准 → 换模型；都不准 → 改 prompt。
+
+    ### 问题 3：看视频 = `texture: 'idle'`
+
+    日志里心跳帧 `texture: 'idle'` 但视频正在播放。content script 只在键盘/滚动/播放暂停时发事件，**安静看视频不产生任何事件** → 120s 纹理窗口空了 → 判 `idle`。结果"专注看视频"和"盯着静止页面发呆"信号上完全一样，正好喂给 STUCK 的 `texture !== 'idle'` 闸口，让问题 1 雪上加霜。
+
+    ### demo 的现成后门（无论上面怎么改都该做）
+
+    契约 §5.2 明确写了：*"若需断网仍演场景 3，可在 DEMO_MODE 下额外注入 `youtube.com/watch?v=fun*` → IRRELEVANT"*。**A10（demo 域名预热进缓存）本来就是干这个的，现在还是 ⬜。** 录 demo 不能赌 LLM 当场判得准——这本来就是红线2/3 的既定策略。
+
+    ### 为什么今天不改
+
+    问题 1 动的是契约 §3.5 + `detector.ts` + 可能影响 `frames.json` 既有断言，属于跨人的主缝；问题 2 是 A 侧范围。**都该两个人一起拍**。建议明天先做影响面评估（把方案 A 改上去看 180 条测试挂几条），拿数据讨论而不是空谈。
+
+11. ![alt text](image-2.png)
+    - 对长标题网页需要做缩略，否则ui呈现不好，明天修改

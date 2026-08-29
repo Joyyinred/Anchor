@@ -1,6 +1,16 @@
 // B7 单测：check-in / 微重启措辞 v1
 import { describe, it, expect } from 'vitest';
-import { buildCheckInMessage, buildMicroRestartMessage } from './wording';
+import {
+  buildCheckInMessage,
+  buildMicroRestartMessage,
+  buildRestStartMessage,
+  buildRestReminderMessage,
+  buildRestEndMessage,
+  buildSessionSummaryHeadline,
+  buildCheckInTally,
+  buildRestTally,
+  buildSessionSummaryFooter,
+} from './wording';
 
 const now = 1_000_000;
 
@@ -157,7 +167,214 @@ describe('B7: buildMicroRestartMessage（契约v4 §3.6/场景17：答"飘了"�
 
   it('三种回答互不相同（不能共用一句万能回复糊弄过去）', () => {
     const all = ['FOCUSED', 'FALSE_POSITIVE', 'DRIFTED'] as const;
-    const messages = all.map(buildMicroRestartMessage);
+    const messages = all.map((a) => buildMicroRestartMessage(a));
     expect(new Set(messages).size).toBe(3);
+  });
+});
+
+describe('B: 休息模式措辞（契约v4 §3.8 / 场景23）', () => {
+  it('刚点休息：说的是"我不会打扰你"，不是功能性的计时描述', () => {
+    const msg = buildRestStartMessage();
+    expect(msg.length).toBeGreaterThan(0);
+    expect(msg).not.toMatch(/timer|20 minutes|countdown/i);
+  });
+
+  it('提醒带上已休息时长，且单复数正确', () => {
+    expect(buildRestReminderMessage(15)).toContain('15 minutes');
+    expect(buildRestReminderMessage(1)).toContain('1 minute');
+    expect(buildRestReminderMessage(1)).not.toContain('1 minutes');
+  });
+
+  it('提醒文案随时长变化——每 5 分钟重复时不会是一模一样的一句话', () => {
+    expect(buildRestReminderMessage(15)).not.toBe(buildRestReminderMessage(20));
+  });
+
+  it('时长为 0 / 负数（时钟异常）也不会说出 "0 minutes" 或负数', () => {
+    for (const v of [0, -3]) {
+      const msg = buildRestReminderMessage(v);
+      expect(msg).not.toMatch(/-d/);
+      expect(msg).not.toContain('0 minute');
+    }
+  });
+
+  it('提醒是疑问句，不是催促（"像朋友不像监工"）', () => {
+    const msg = buildRestReminderMessage(15);
+    expect(msg.endsWith('?')).toBe(true);
+    expect(msg).not.toMatch(/should|get back|stop resting|enough/i);
+  });
+
+  it('结束休息：一句话确认就翻篇，不说教', () => {
+    const msg = buildRestEndMessage();
+    expect(msg.length).toBeGreaterThan(0);
+    expect(msg).not.toMatch(/finally|too long|wasted/i);
+  });
+});
+
+describe('B11: 变体轮换（阶段二措辞打磨）', () => {
+  // 变体池长度分别是 3/3/2/3，用 20 个相隔一分钟以上的 now 足够把每个池都跑遍。
+  const NOWS = Array.from({ length: 20 }, (_, i) => now + i * 60_000);
+
+  function driftAll() {
+    return NOWS.map((t) =>
+      buildCheckInMessage('DRIFT', { lastAnchorSnapshot: { title: 'login.tsx', url: '', ts: t - 10 * 60_000 }, currentTitle: '' }, t)
+    );
+  }
+  function stuckAll() {
+    return NOWS.map((t) => buildCheckInMessage('STUCK', { lastAnchorSnapshot: { title: '', url: '', ts: t }, currentTitle: 'thesis.pdf' }, t));
+  }
+
+  it('DRIFT 至少有 3 种不同措辞——同一次 demo 里连续触发不会重复同一句', () => {
+    expect(new Set(driftAll()).size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('STUCK 同样有多种措辞', () => {
+    expect(new Set(stuckAll()).size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('★ 每一个 DRIFT 变体都要守住 B7 定下的规则：引用标题 + 带时间 + 问号收尾 + 不说教', () => {
+    for (const msg of driftAll()) {
+      expect(msg).toContain('login.tsx');
+      expect(msg).toMatch(/10 minutes ago/);
+      expect(msg.endsWith('?')).toBe(true);
+      expect(msg).not.toMatch(/you should|stop|focus!|again|why/i);
+    }
+  });
+
+  it('★ 每一个 STUCK 变体同样要守住规则', () => {
+    for (const msg of stuckAll()) {
+      expect(msg).toContain('thesis.pdf');
+      expect(msg.endsWith('?')).toBe(true);
+      expect(msg).not.toMatch(/you should|stop|focus!|again|why/i);
+    }
+  });
+
+  it('★ 每一个微重启变体都要守住各自的禁忌词', () => {
+    for (const t of NOWS) {
+      expect(buildMicroRestartMessage('FALSE_POSITIVE', t)).not.toMatch(/sorry|wrong|mistake/i);
+      expect(buildMicroRestartMessage('DRIFTED', t)).not.toMatch(/again|why|should have/i);
+    }
+  });
+
+  it('三种回答的变体池互不重叠——任何时刻三个答案给出的话都不一样', () => {
+    for (const t of NOWS) {
+      const all = (['FOCUSED', 'FALSE_POSITIVE', 'DRIFTED'] as const).map((a) => buildMicroRestartMessage(a, t));
+      expect(new Set(all).size).toBe(3);
+    }
+  });
+
+  it('确定性：同一个 now 永远出同一句（测试不 flaky，demo 可预演）', () => {
+    const once = buildCheckInMessage('DRIFT', { lastAnchorSnapshot: { title: 'a', url: '', ts: now - 60_000 }, currentTitle: '' }, now);
+    for (let i = 0; i < 5; i++) {
+      expect(buildCheckInMessage('DRIFT', { lastAnchorSnapshot: { title: 'a', url: '', ts: now - 60_000 }, currentTitle: '' }, now)).toBe(once);
+    }
+  });
+
+  it('now 为负数 / NaN（时钟异常）不会崩，也不会返回 undefined', () => {
+    for (const bad of [-1, -60_000, Number.NaN]) {
+      const msg = buildCheckInMessage('STUCK', { lastAnchorSnapshot: { title: '', url: '', ts: 0 }, currentTitle: 'x.pdf' }, bad);
+      expect(typeof msg).toBe('string');
+      expect(msg.length).toBeGreaterThan(0);
+      expect(buildMicroRestartMessage('FOCUSED', bad).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('buildMicroRestartMessage 不传 now 时行为跟 B7 那版一致（老调用方不用改）', () => {
+    expect(buildMicroRestartMessage('FOCUSED')).toBe('Good, carry on.');
+  });
+});
+
+describe('收尾反思措辞（J7 最后一环 / B15 最小版）', () => {
+  it('时长格式化：分钟 / 小时+分钟 / 单复数', () => {
+    expect(buildSessionSummaryHeadline(25 * 60_000)).toContain('25 minutes');
+    expect(buildSessionSummaryHeadline(60 * 60_000)).toContain('1 hour');
+    expect(buildSessionSummaryHeadline(95 * 60_000)).toContain('1 hour 35 minutes');
+    expect(buildSessionSummaryHeadline(60_000)).toContain('1 minute');
+    expect(buildSessionSummaryHeadline(60_000)).not.toContain('1 minutes');
+  });
+
+  it('不满一分钟不会说成 "0 minutes"', () => {
+    const msg = buildSessionSummaryHeadline(5_000);
+    expect(msg).not.toContain('0 minute');
+    expect(msg).toContain('less than a minute');
+  });
+
+  it('负数时长（时钟异常）不会出现负号', () => {
+    expect(buildSessionSummaryHeadline(-60_000)).not.toMatch(/-d/);
+  });
+
+  it('★ 零次统计返回 null——调用方不渲染这一行，而不是说"我一次都没打扰你"（那是邀功）', () => {
+    expect(buildCheckInTally(0)).toBeNull();
+    expect(buildRestTally(0)).toBeNull();
+  });
+
+  it('check-in 次数单复数正确', () => {
+    expect(buildCheckInTally(1)).toContain('once');
+    expect(buildCheckInTally(3)).toContain('3 times');
+  });
+
+  it('休息次数单复数正确', () => {
+    expect(buildRestTally(1)).toContain('one break');
+    expect(buildRestTally(2)).toContain('2 breaks');
+  });
+
+  it('★ 全程不打分、不评判、不鼓励式说教——收工不是成绩单', () => {
+    const lines = [
+      buildSessionSummaryHeadline(45 * 60_000),
+      buildCheckInTally(3),
+      buildRestTally(2),
+      buildSessionSummaryFooter(),
+    ].filter((l): l is string => l !== null);
+    for (const line of lines) {
+      // 表扬和批评是同一类问题：都是在评价用户，而不是陈述发生了什么
+      expect(line).not.toMatch(/great|well done|nice job|proud|could have|should have|only|just d/i);
+      expect(line).not.toContain('!');
+    }
+  });
+
+  it('结尾把门留开着，不追问下一步计划', () => {
+    const msg = buildSessionSummaryFooter();
+    expect(msg.length).toBeGreaterThan(0);
+    expect(msg).not.toMatch(/what.*next|plan|tomorrow?/i);
+  });
+});
+
+describe('「拉我回去」的措辞不能开空头支票（08-28 补的缺口）', () => {
+  const NOWS = Array.from({ length: 12 }, (_, i) => now + i * 60_000);
+
+  it('切回锚点成功时，说的是承诺带你回去的那几句', () => {
+    for (const t of NOWS) {
+      const msg = buildMicroRestartMessage('DRIFTED', t, { pulledBack: true });
+      expect(msg).toMatch(/back|head back|pick that back up/i);
+    }
+  });
+
+  it('★ 锚点 tab 已被关掉（切不回去）时，绝不能再说"我们回去吧"——那是做不到的承诺', () => {
+    for (const t of NOWS) {
+      const msg = buildMicroRestartMessage('DRIFTED', t, { pulledBack: false });
+      // "let’s head back" / "back to it" 这类都在承诺一个不会发生的动作
+      expect(msg).not.toMatch(/let’s head back|back to it|pick that back up/i);
+      expect(msg.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('切不回去时的措辞同样不说教、不追问', () => {
+    for (const t of NOWS) {
+      const msg = buildMicroRestartMessage('DRIFTED', t, { pulledBack: false });
+      expect(msg).not.toMatch(/again|why|should have|closed it yourself/i);
+    }
+  });
+
+  it('pulledBack 只影响 DRIFTED——另外两个回答的意思是"别管我"，本来就不该有切换动作', () => {
+    for (const answer of ['FOCUSED', 'FALSE_POSITIVE'] as const) {
+      expect(buildMicroRestartMessage(answer, now, { pulledBack: false })).toBe(
+        buildMicroRestartMessage(answer, now, { pulledBack: true })
+      );
+    }
+  });
+
+  it('不传 context 时行为跟之前一致（老调用方不用改）', () => {
+    expect(buildMicroRestartMessage('DRIFTED', now)).toBe(
+      buildMicroRestartMessage('DRIFTED', now, { pulledBack: true })
+    );
   });
 });

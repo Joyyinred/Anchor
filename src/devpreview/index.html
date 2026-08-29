@@ -1,10 +1,53 @@
 <!doctype html>
 <html>
-  <head><meta charset="UTF-8" /><title>Anchor · B4 桌宠预览</title></head>
-  <body style="margin:0;padding:24px;background:#eef3f1;display:flex;gap:24px;flex-wrap:wrap;">
-    <div id="a" style="width:280px;"></div>
-    <div id="b" style="width:280px;"></div>
-    <div id="c" style="width:280px;"></div>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Anchor · 桌宠 + 措辞预览</title>
+    <style>
+      body { margin:0; padding:24px; background:#eef3f1; color:#1f2b29;
+             font-family:'Nunito',system-ui,-apple-system,sans-serif; }
+      h2 { font-size:13px; letter-spacing:.06em; text-transform:uppercase; color:#8b9995;
+           margin:0 0 12px; font-weight:700; }
+      .grid { display:flex; gap:24px; flex-wrap:wrap; }
+      .cell { width:280px; }
+      .label { font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+               color:#8b9995; margin-bottom:4px; }
+      hr { border:none; border-top:1px solid #d9e3df; margin:36px 0 24px; }
+      /* B11 变体一览：一眼看全所有文案，逐句念一遍判断语气 */
+      #wording { display:flex; flex-wrap:wrap; gap:16px; }
+      .vg { background:#fff; border:1px solid #d9e3df; border-radius:14px;
+            padding:14px 16px; width:420px; }
+      .vg-title { font-size:12px; font-weight:700; color:#4c5b57; margin-bottom:8px;
+                  display:flex; justify-content:space-between; align-items:baseline; }
+      .vg-count { font-size:10px; font-weight:700; color:#8b9995; }
+      .vg ol { margin:0; padding-left:20px; }
+      .vg li { font-size:13px; line-height:1.55; margin-bottom:6px; }
+      .vg li::marker { color:#8b9995; font-size:11px; }
+    </style>
+  </head>
+  <body>
+    <h2>桌宠状态</h2>
+    <div class="grid">
+      <div class="cell"><div class="label">companion</div><div id="a"></div></div>
+      <div class="cell"><div class="label">observing</div><div id="b"></div></div>
+      <div class="cell"><div class="label">check-in (DRIFT)</div><div id="c"></div></div>
+      <div class="cell"><div class="label">resting</div><div id="d"></div></div>
+      <div class="cell"><div class="label">rest reminder</div><div id="e"></div></div>
+    </div>
+
+    <hr />
+
+    <h2>收尾反思（J7 最后一环）</h2>
+    <div class="grid">
+      <div class="cell"><div class="label">有统计</div><div id="summary1"></div></div>
+      <div class="cell"><div class="label">全程零打扰（统计行不渲染）</div><div id="summary2"></div></div>
+    </div>
+
+    <hr />
+
+    <h2>B11 · 措辞变体一览（调的是真函数，不是写死的假文案）</h2>
+    <div id="wording"></div>
+
     <script type="module" src="./main.tsx"></script>
   </body>
 </html>
