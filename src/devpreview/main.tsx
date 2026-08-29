@@ -14,10 +14,19 @@ const log = (...args: unknown[]) => console.log(...args);
 
 // ── 第一排：五个状态 ─────────────────────────────────────────
 createRoot(document.getElementById('a')!).render(
-  <CuteAnchorPet state="companion" focusedMinutes={12} onRestStart={() => log('REST_START')} />
+  <CuteAnchorPet
+    state="companion"
+    focusedMinutes={12}
+    onRestStart={() => log('REST_START')}
+    onSessionEnd={() => log('SESSION_END')}
+  />
 );
 createRoot(document.getElementById('b')!).render(
-  <CuteAnchorPet state="observing" onRestStart={() => log('REST_START')} />
+  <CuteAnchorPet
+    state="observing"
+    onRestStart={() => log('REST_START')}
+    onSessionEnd={() => log('SESSION_END')}
+  />
 );
 createRoot(document.getElementById('c')!).render(
   <CuteAnchorPet
@@ -26,17 +35,24 @@ createRoot(document.getElementById('c')!).render(
     message="You drifted from that login-page bug 10 minutes ago — still researching, or did you wander off?"
     onAnswer={(answer, channel) => log('answered:', answer, channel)}
     onRestStart={() => log('REST_START')}
+    onSessionEnd={() => log('SESSION_END')}
   />
 );
 // 休息不是第四个 PetState：下面两格 state 都还是 'companion'，只是 isResting 打开了。
+// 08-29：格 d 是"休息中但还没到提醒节拍"（比如刚休息 3 分钟）——修复前这一格是没有任何
+// 按钮的死角，Back to it/Done for today 都焊死在提醒节拍上；现在两个按钮随时都在。
 createRoot(document.getElementById('d')!).render(
-  <CuteAnchorPet state="companion" isResting onRestEnd={() => log('REST_END')} />
+  <CuteAnchorPet
+    state="companion"
+    isResting
+    onRestEnd={() => log('REST_END')}
+    onSessionEnd={() => log('SESSION_END')}
+  />
 );
 createRoot(document.getElementById('e')!).render(
   <CuteAnchorPet
     state="companion"
     isResting
-    isRestReminder
     message={buildRestReminderMessage(16)}
     onRestEnd={() => log('REST_END')}
     onSessionEnd={() => log('SESSION_END')}

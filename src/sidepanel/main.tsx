@@ -127,7 +127,6 @@ function SidePanelApp() {
       channel={panelState.channel}
       onAnswer={handleAnswer}
       isResting={restState.isResting}
-      isRestReminder={restState.isReminderDue}
       onRestStart={() => sendRest('REST_START')}
       onRestEnd={() => sendRest('REST_END')}
       onSessionEnd={() => sendRest('SESSION_END')}

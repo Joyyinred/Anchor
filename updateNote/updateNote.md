@@ -453,10 +453,6 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
 
 ## 0829
 
-### Jay
-1. 先测试了你昨天说的“真机测出 STUCK 对娱乐视频误报 + DRIFT 完全不触发”：其实我昨天在你更新前的0828测试时发现并修复了这个问题，我昨天测试时显示drift并且swp判定也为IRRELEVANT。今天再测了两次依旧没有问，分别用我昨天测试时的视频'Hailey Bieber Opens Up About Motherhood, Fame and Her $1 Billion Brand - YouTube'和你测试时的视频‘Crossing China One Cigarette at a Time - YouTube’再测了一次，依旧是IRRELEVANT 和 drifted。
-![](./image-4.png)
-
 ### Joy
 
 今天做了 B12（起步教练 prompt 打磨）、清掉了拖三天的 Lottie 授权、重构了气泡布局。过程中我自己引入了一个回归又查出来修掉了（第 4 条），教训值得记。`npm test` **185/185** 全绿，`npm run typecheck` 两边干净，`npm run build` 正常出包。
@@ -544,3 +540,34 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
     - 可选：给起步教练加 `reasoning_effort: 'low'`（见第 4 条末尾），先在控制台验证参数可用再说。
     - J9（deck 骨架）继续等全流程跑通。
     - **B10 需要等J7+真实数据**
+
+### Jay
+1. 先测试了你昨天说的“真机测出 STUCK 对娱乐视频误报 + DRIFT 完全不触发”：其实我昨天在你更新前的0828测试时发现并修复了这个问题，我昨天测试时显示drift并且swp判定也为IRRELEVANT。今天再测了两次依旧没有问，分别用我昨天测试时的视频'Hailey Bieber Opens Up About Motherhood, Fame and Her $1 Billion Brand - YouTube'和你测试时的视频‘Crossing China One Cigarette at a Time - YouTube’再测了一次，依旧是IRRELEVANT 和 drifted。检查代码部分确定已经修复问题2，3， 至于问题1，我同意将STUCK改为仅对RELEVANT放行。
+![](./image-4.png)
+
+你那边出问题可能是没merge和pull我0828更新后的J4。
+
+2. 完成reststates 从B到A的接线：
+    1. CHECK_IN_ANSWER → recordCheckInAnswer(feedback, now)
+    2. CHECK_IN_ANSWER 内答 DRIFTED 时 → pullBackToAnchor(ctx) 拿到 pulledBack，非 DRIFTED 固定传 true，再传给 pushMicroRestartToast(feedback, pulledBack)
+    3. REST_START（新分支）→ beginRest(state, now) + recordRestStart(now)
+    4. REST_END（新分支）→ endRest(state)
+    5. SESSION_END（新分支）→ endSession(ctx, now)
+    6. SESSION_RESTART（新分支）→ restartSession()
+    7. 心跳里 → refreshRestReminder(state, now)
+
+    rest.ts/session-summary.ts 里的函数不碰持久化细节，只改内存里的 BState，所以给 frame-pipeline.ts 补了一对导出（getBStateForSession/persistBState），保证 REST_START/REST_END/心跳三处拿到的是同一个内存态 BState 引用（不是各自新水合一份），改完显式 persistBState 存盘——这样休息状态和 evaluateAndPersist 后续读到的 state.restUntil 不会打架。
+
+3. 顺带解决了B侧几个问题：
+- cat.tsx 里 "Back to it"/"Done for today" 原来焊死在 isRestReminder（休息满 15 分钟才第一次为 true，之后每 5 分钟一个约 1 分钟宽的窗口）上，用户无法随时'继续专注'或'结束专注'"。假设休息第 3 分钟这两个按钮压根不在 DOM 里，点不到。
+- 改法：
+    - 两个按钮的门禁从 isRestReminder 改成 isResting——休息中随时都在,不再等提醒节拍。提醒气泡文案本身（"该继续了吗"那句）不受影响,仍然只在 restReminderDue() 为真时通过 message 出现。
+    - isRestReminder prop 因此彻底没有消费者了,连同 main.tsx/devpreview/main.tsx 里的用法一起删掉,没留死代码。
+    - "Done for today" 挪到和 "Take a break" 同一常驻行:companion/observing 时显示「Take a break + Done for today」，resting 时换成「Back to it + Done for today」；checkin 时该行不显示（避免和三个判定按钮抢注意力），改在气泡内部加一个视觉弱化的小字入口——三种状态加起来覆盖了 companion/observing/checkin/resting 全部四种情形。
+
+4. 发现B侧新问题：
+    i.选择结束任务后弹出总结页面，底下”start something new"按钮点击后直接出陪伴界面，系统没有主动询问新任务内容。更新：发现规律，点”start something new"按钮后页面会回到点击”done for today"前的页面，比如我在点击done for today前的页面是resting，那么done后再次start something new 后又回到了resting界面。
+    ii. 最新版本的起步教练设定的“YOUR FIRST STEP"有点形同虚设，如我输入的任务内容是“review computer network for the exam",它给出的第一步为：Open the network textbook, flip to chapter 4. （不符合实际且没有具体依据，没有具体textbook和chapter来源，不问复习具体板块就给指令，有胡诌的嫌疑，，，）但实际上在不全面过问用户任务具体内容的情况下训练出精准踩中用户需求的起步教练非常有难度，所以接下来如何做还需要商讨一下。我认为可以暂时放一边。
+
+5. 将STUCK 修改为只放行确认relevant。
+

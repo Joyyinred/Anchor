@@ -134,7 +134,13 @@ export function isStuck(
   if (!p.stuckChannelEnabled) return false;
   if (f.systemIdle) return false;
   if (f.texture !== 'idle') return false;
-  if (f.contextRelevance === 'IRRELEVANT') return false;
+  // 08-30：原来只挡 IRRELEVANT，UNKNOWN 会从缝里漏过去被判"卡住"——跟 DRIFT 通道
+  // （`!== 'IRRELEVANT'` → false，UNKNOWN 一律保守挡住）的态度不一致，是契约红线1
+  // "判出前一律保守"没有在 STUCK 通道落实到位。改成只放行确认 RELEVANT，语义变成
+  // "确认在做正事、却停住不动了，才问是不是卡住了"——跟 DRIFT 通道对 UNKNOWN 一样保守。
+  // 代价（0828 已记录、这次确认接受）：分类还没判出来的这段时间窗口内，两条通道都会
+  // 沉默——比"对着可能无关的页面误判卡住"更能接受，是漏报换误报的取舍，不是免费修复。
+  if (f.contextRelevance !== 'RELEVANT') return false;
   if (f.contentFormat === 'short_feed') return false;
 
   // 净时长（扣除上次回答后的影响）

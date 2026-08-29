@@ -238,3 +238,19 @@ export async function applyCheckInAnswer(
     }
   }
 }
+
+/**
+ * 休息模式（rest.ts）/心跳的 refreshRestReminder 需要直接改 BState.restUntil/restStartTs，
+ * 但持久化+水合是 frame-pipeline 内部状态（跟 eventHistory 一样只活在这个模块里）——
+ * 暴露这一对函数而不是把 bState 变量导出去，调用方拿到的仍是同一个内存引用（
+ * ensureBStateLoaded 命中同一 sessionId 时直接返回旧引用），改完调 persistBState
+ * 存盘即可，跟 evaluateAndPersist 走的是同一把 toPersistable/setBState。
+ */
+export async function getBStateForSession(ctx: SessionContext): Promise<BState> {
+  const archetype = ctx.profile.archetype as Archetype;
+  return ensureBStateLoaded(ctx.sessionId, archetype);
+}
+
+export function persistBState(ctx: SessionContext, state: BState): void {
+  void setBState(ctx.sessionId, toPersistable(state));
+}

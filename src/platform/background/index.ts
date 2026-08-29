@@ -4,9 +4,12 @@ import type { RuntimeMessage } from '../messages';
 import { getDemoMode, setDemoMode } from './state';
 import { getOrInitSessionContext } from './session';
 import { ensureCurrentTab, handleInteractionMessage, isTrackedTab, registerSignalListeners } from './signals';
-import { applyCheckInAnswer, recomputeOnHeartbeat } from './frame-pipeline';
+import { applyCheckInAnswer, recomputeOnHeartbeat, getBStateForSession, persistBState } from './frame-pipeline';
 import { pushPanelState, pushMicroRestartToast } from './panel';
 import { pushOnboardingStatus, handleOnboardingSubmit } from './onboarding';
+import { beginRest, endRest, refreshRestReminder } from './rest';
+import { pullBackToAnchor } from './pull-back';
+import { recordCheckInAnswer, recordRestStart, endSession, restartSession } from './session-summary';
 
 const HEARTBEAT_ALARM_NAME = 'anchor-heartbeat';
 const HEARTBEAT_PERIOD_MINUTES = 1;
@@ -55,6 +58,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       // 文案（"X 分钟前"）必须算的是同一个 now，不能分两次各取各的，见 08-27 code review。
       const isDemoMode = await getDemoMode();
       const ctx = await getOrInitSessionContext();
+      // 休息提醒节拍（契约v4 §3.8：15min 首次，之后每 5min）跟"有没有新事件"无关，
+      // 独立于 recomputeOnHeartbeat 的 eventHistory 空则 null-return 那条早退路径。
+      const restState = await getBStateForSession(ctx);
+      await refreshRestReminder(restState, now);
       const outcome = await recomputeOnHeartbeat(ctx, now, isDemoMode);
       if (!outcome) return;
       await pushPanelState(outcome.frame, outcome.result, outcome.petState, now);
@@ -85,12 +92,55 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
     void (async () => {
       const ctx = await getOrInitSessionContext();
       const feedback = { channel: message.channel, answer: message.answer };
-      await applyCheckInAnswer(ctx, feedback, Date.now(), message.domain);
+      const now = Date.now();
+      await applyCheckInAnswer(ctx, feedback, now, message.domain);
+      await recordCheckInAnswer(feedback, now);
+      // pull-back.ts 的边界：只在答 DRIFTED 时把用户真的切回锚点 tab——FOCUSED/FALSE_POSITIVE
+      // 意思都是"别管我"，这时候切 tab 才是越权。非 DRIFTED 答案直接当 pulledBack=true，
+      // 因为微重启文案压根不会走"拉回去了"那句，pulledBack 对它们没有意义。
+      const pulledBack = feedback.answer === 'DRIFTED' ? await pullBackToAnchor(ctx) : true;
       // check-in 已经处理完了——立刻把 panel 摘出 checkin 态，不能干等下一次心跳/事件
       // 才刷新（那样按钮还留在 UI 上能点，手快的话 applyCheckInFeedback 会被再触发一次）。
       // pushMicroRestartToast 会先短暂显示 B7 的一句反馈，过会儿再自己摘回空白 companion。
-      await pushMicroRestartToast(feedback);
-      console.log('[Anchor SW] applied check-in feedback', message.answer, message.channel);
+      await pushMicroRestartToast(feedback, pulledBack);
+      console.log('[Anchor SW] applied check-in feedback', message.answer, message.channel, 'pulledBack =', pulledBack);
+    })();
+    return;
+  }
+  if (message.type === 'REST_START') {
+    void (async () => {
+      const ctx = await getOrInitSessionContext();
+      const now = Date.now();
+      const state = await getBStateForSession(ctx);
+      await beginRest(state, now);
+      persistBState(ctx, state);
+      await recordRestStart(now);
+      console.log('[Anchor SW] rest started');
+    })();
+    return;
+  }
+  if (message.type === 'REST_END') {
+    void (async () => {
+      const ctx = await getOrInitSessionContext();
+      const state = await getBStateForSession(ctx);
+      await endRest(state);
+      persistBState(ctx, state);
+      console.log('[Anchor SW] rest ended');
+    })();
+    return;
+  }
+  if (message.type === 'SESSION_END') {
+    void (async () => {
+      const ctx = await getOrInitSessionContext();
+      await endSession(ctx, Date.now());
+      console.log('[Anchor SW] session ended');
+    })();
+    return;
+  }
+  if (message.type === 'SESSION_RESTART') {
+    void (async () => {
+      await restartSession();
+      console.log('[Anchor SW] session restarted');
     })();
     return;
   }

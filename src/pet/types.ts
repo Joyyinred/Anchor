@@ -47,18 +47,21 @@ export interface CuteAnchorPetProps {
    */
   isResting?: boolean;
   /**
-   * 此刻该弹一次"休息够了吗"的提醒（restReminderDue() 判定为 true）。为 true 时气泡里
-   * 显示的是休息模式那两个按钮，而不是 check-in 的三个——两套按钮永远不会同时出现。
-   * 提醒文案本身走 message 字段（跟 check-in 共用），由 B7 的 buildRestReminderMessage() 生成。
+   * 用户点了"休息"入口。调用方负责发 REST_START 消息给 SW（那边调 startRest()）。
+   * 08-29 修过一个 bug：这个按钮和下面 onRestEnd/onSessionEnd 原来分别焊死在
+   * !isResting 和"提醒节拍到了"（当时还有个 isRestReminder prop）上——契约v4 §3.8
+   * 明确写着"可随时'继续专注'或'结束专注'"，休息中途想提前回来却要等到 15min 首次
+   * 提醒才有按钮可点，是真 bug 不是设计。现在 onRestStart/onRestEnd/onSessionEnd
+   * 只按 isResting 二选一切换，不再依赖是否到了提醒节拍——提醒文案（"该继续了吗"那句）
+   * 仍然只在 restReminderDue() 为 true 时才通过 message 出现，但按钮本身随时都在。
    */
-  isRestReminder?: boolean;
-  /** 用户点了"休息"入口。调用方负责发 REST_START 消息给 SW（那边调 startRest()）。 */
   onRestStart?: () => void;
-  /** 用户在提醒里点了"继续专注"。调用方负责发 REST_END 消息（那边清空 restUntil）。 */
+  /** 用户点了"继续专注"（随时，不限于提醒弹出时）。调用方发 REST_END 消息（那边清空 restUntil）。 */
   onRestEnd?: () => void;
   /**
-   * 用户在提醒里点了"结束专注"——契约v4 §3.8 里跟"继续专注"并列的第二个选项。
-   * 语义是"今天这场专注到此为止"，不是"再休息一会儿"。
+   * 用户点了"结束专注"——契约v4 §3.8 里跟"继续专注"并列的第二个选项，语义是
+   * "今天这场专注到此为止"。随时可点：companion/observing/resting 时在锚点下方常驻，
+   * checkin 时挪进气泡内部（弱化视觉，不跟三个判定按钮抢注意力）——任何状态都有出口。
    */
   onSessionEnd?: () => void;
   /** 透传到最外层容器，方便调用方做定位/尺寸调整。 */

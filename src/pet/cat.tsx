@@ -54,7 +54,6 @@ export function CuteAnchorPet({
   channel,
   onAnswer,
   isResting,
-  isRestReminder,
   onRestStart,
   onRestEnd,
   onSessionEnd,
@@ -132,27 +131,15 @@ export function CuteAnchorPet({
                 <button type="button" onClick={() => onAnswer('DRIFTED', channel)}>
                   Drifted - pull me back
                 </button>
-              </div>
-            )}
-
-            {/* 休息提醒的两个选项（契约v4 §3.8）。跟上面 check-in 那组互斥——isRestReminder
-                只在休息模式里为 true，而休息期间双通道全静默、state 不可能是 'checkin'，
-                所以两套按钮永远不会同时出现。同样只在真的要提醒时才进 DOM，不靠 CSS 藏
-                （否则键盘用户能 tab 到看不见的按钮上，08-26 code review ④ 修过一次）。 */}
-            {isRestReminder && (
-              <div className="anchor-pet-chips">
-                {onRestEnd && (
-                  <button type="button" onClick={onRestEnd}>
-                    Back to it
-                  </button>
-                )}
+                {/* 契约要求"结束专注"随时可点，check-in 那一刻也不例外——但视觉上要弱于
+                    上面三个真正在回答问题的按钮，不能让它看起来像第四个判定选项。 */}
                 {onSessionEnd && (
-                  <button type="button" onClick={onSessionEnd}>
+                  <button type="button" className="anchor-pet-chip-quiet" onClick={onSessionEnd}>
                     Done for today
                   </button>
                 )}
               </div>
-          )}
+            )}
         </div>
 
         <div className="anchor-pet-wrap">
@@ -184,14 +171,41 @@ export function CuteAnchorPet({
         {caption}
       </p>
 
-      {/* 休息入口。checkin 态不显示——那一刻已经在问用户一个问题了，再叠一个"要不要休息"
-          是两个决定同时压过来，反而让人不知道先点哪个。休息中也不显示（这时候该显示的是
-          提醒气泡里的"继续专注"，不是再点一次休息）。 */}
-      {onRestStart && !isResting && state !== 'checkin' && (
+      {/* 休息/结束专注入口——契约v4 §3.8："可随时'继续专注'或'结束专注'"，08-29 真机检查
+          发现这两个按钮之前被焊死在 isRestReminder（15min 首次提醒才出现）上，休息中途
+          想提前回来完全点不到，是个真 bug，不是"故意等提醒"。改成常驻同一行：
+          不在休息时是「休息 + 结束专注」的入口，休息中是「回来 + 结束专注」的出口——
+          "结束专注"本身不跟"是否在休息"绑定，同一个按钮换个邻居而已。
+          checkin 态不显示这一整行——那一刻已经在问用户一个问题了，再叠一组决定容易选花眼；
+          "结束专注"在 checkin 态改从气泡内部的小字入口走（见上面 chips 那段），不消失。
+          resting && checkin 不会同时发生（休息期间双通道全静默，见 detector.ts），
+          所以这里不需要再叠一次 state !== 'checkin' 判断。 */}
+      {!isResting && state !== 'checkin' && (onRestStart || onSessionEnd) && (
         <div className="anchor-pet-rest-row">
-          <button type="button" className="anchor-pet-rest-button" onClick={onRestStart}>
-            Take a break
-          </button>
+          {onRestStart && (
+            <button type="button" className="anchor-pet-rest-button" onClick={onRestStart}>
+              Take a break
+            </button>
+          )}
+          {onSessionEnd && (
+            <button type="button" className="anchor-pet-rest-button" onClick={onSessionEnd}>
+              Done for today
+            </button>
+          )}
+        </div>
+      )}
+      {isResting && (onRestEnd || onSessionEnd) && (
+        <div className="anchor-pet-rest-row">
+          {onRestEnd && (
+            <button type="button" className="anchor-pet-rest-button" onClick={onRestEnd}>
+              Back to it
+            </button>
+          )}
+          {onSessionEnd && (
+            <button type="button" className="anchor-pet-rest-button" onClick={onSessionEnd}>
+              Done for today
+            </button>
+          )}
         </div>
       )}
     </div>

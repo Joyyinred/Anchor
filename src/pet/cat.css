@@ -125,6 +125,20 @@
   color: var(--ap-checkin);
   transform: translateY(-1px);
 }
+/* check-in 气泡里的"结束专注"出口——视觉上要弱于上面三个真正在回答问题的按钮，
+   不能让它看起来像第四个判定选项（08-29：契约要求随时可结束专注，check-in 也不例外）。 */
+.anchor-pet-chips button.anchor-pet-chip-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ap-ink-faint);
+  font-weight: 600;
+  padding: 5px 4px;
+}
+.anchor-pet-chips button.anchor-pet-chip-quiet:hover {
+  border-color: transparent;
+  color: var(--ap-ink-soft);
+  background: transparent;
+}
 
 /* ── 猫（Lottie），裁过 viewBox 让它撑满容器 ── */
 .anchor-pet-lottie-wrap {
@@ -206,6 +220,7 @@
 .anchor-pet-rest-row {
   display: flex;
   justify-content: center;
+  gap: 8px;
   margin-top: 8px;
 }
 /* 比 check-in 那几个 chip 弱一档，但仍然要一眼看得出是"能点的东西"——
