@@ -571,3 +571,6 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
 
 5. 将STUCK 修改为只放行确认relevant。
 
+6. 真机测试发现代码 bug（这是我给 index.ts 接 CHECK_IN_ANSWER 时留的漏洞）：pullBackToAnchor() 原来只判断 answer==='DRIFTED'，没管是哪条 channel。STUCK 通道现在只在 contextRelevance==='RELEVANT' 时才会触发, 也就是说你压根还停留在相关页面上，根本不存在"脱离锚点"这回事。STUCK 的"Drifted"选项语义是"我人还在这页，但刚才走神了"（对应 applyCheckInFeedback 里的阶梯重置，不是导航），不是"我跑去别处了，带我回去"。原代码不分 channel，会把你从一个真正相关的页面拽到一个跟当前任务无关的旧锚点。
+
+已修复：index.ts 现在只在 channel==='DRIFT' && answer==='DRIFTED' 时才调用 pullBackToAnchor；STUCK+DRIFTED 时 pulledBack 显式给 false。

@@ -95,10 +95,25 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
       const now = Date.now();
       await applyCheckInAnswer(ctx, feedback, now, message.domain);
       await recordCheckInAnswer(feedback, now);
-      // pull-back.ts 的边界：只在答 DRIFTED 时把用户真的切回锚点 tab——FOCUSED/FALSE_POSITIVE
-      // 意思都是"别管我"，这时候切 tab 才是越权。非 DRIFTED 答案直接当 pulledBack=true，
-      // 因为微重启文案压根不会走"拉回去了"那句，pulledBack 对它们没有意义。
-      const pulledBack = feedback.answer === 'DRIFTED' ? await pullBackToAnchor(ctx) : true;
+      // 0830 真机测试发现的 bug：这里原来只判断 answer==='DRIFTED'，没管是哪条 channel——
+      // STUCK 通道现在（08-30 那次修复后）只在 contextRelevance==='RELEVANT' 时才会触发，
+      // 意味着用户压根还停留在相关页面上，根本没有"脱离锚点"这回事；STUCK+DRIFTED 的语义
+      // 是"我人是在这页上，但刚才走神了"（applyCheckInFeedback 里对应的是阶梯重置，不是导航），
+      // 不是"我跑去了别的页面，带我回去"。之前的写法会把 pullBackToAnchor(ctx) 切到
+      // ctx.anchor.domain——那可能是很久以前（甚至是跳过起步教练时，SW 第一次启动那一刻
+      // 恰好停留的某个不相关 tab，例如开发时常开着的 chrome://extensions/）锁定的锚点，
+      // 跟用户此刻正在做的事毫无关系，会把人从一个真正相关的页面上生拉硬拽走。
+      // pull-back.ts 自己的边界注释也明确写着"只在答 DRIFTED 时做"，指的是 DRIFT 通道那次
+      // "真的导航去了别处"的 DRIFTED，不是任何通道的任何 DRIFTED——这里补上 channel 判断。
+      // ★ STUCK+DRIFTED 分支的 pulledBack 必须给 false（不是 true）：buildMicroRestartMessage
+      // 只在 answer==='DRIFTED' 时才会看 pulledBack，给 true 会让文案照样说出"let's head back"
+      // 这种没发生过的承诺——只是换了一种方式重复同一个"说了不算"的问题，不是真的修好。
+      // FOCUSED/FALSE_POSITIVE 两种答案不会走进 wording.ts 那条 pulledBack 分支，值给 true
+      // 只是保持"默认不特殊处理"的语义，不影响任何文案。
+      let pulledBack = true;
+      if (feedback.answer === 'DRIFTED') {
+        pulledBack = feedback.channel === 'DRIFT' ? await pullBackToAnchor(ctx) : false;
+      }
       // check-in 已经处理完了——立刻把 panel 摘出 checkin 态，不能干等下一次心跳/事件
       // 才刷新（那样按钮还留在 UI 上能点，手快的话 applyCheckInFeedback 会被再触发一次）。
       // pushMicroRestartToast 会先短暂显示 B7 的一句反馈，过会儿再自己摘回空白 companion。

@@ -141,6 +141,13 @@ async function evaluateAndPersist(
 // 重新计算帧时使用——不会让当前这一帧变成 RELEVANT/IRRELEVANT，只影响未来。
 function triggerLazyClassification(event: SignalEvent, ctx: SessionContext, frame: FeatureFrame): void {
   if (frame.contextRelevance !== 'UNKNOWN') return;
+  // 0829 真机测试发现（Joy）：chrome://newtab/ 刚打开、tab.url 还没被真实地址补上那一小段
+  // 空档期（signals.ts 的 onUpdated 只要 title 变了就会发信号，即使 url 仍是空字符串），
+  // 会喂出一条 domain/url 全空的 SignalEvent。空 URL 送去分类没有任何意义——LLM 拿不到
+  // 页面内容可判，白白浪费一次调用，还可能拿回一个没道理的判定（域名/URL 都是空的，
+  // 不该被算作"IRRELEVANT"或任何确定结论）。domain 判空即可：cacheKey 用 domain 打头，
+  // url 为空但 domain 有值的情况理论上不存在（domainOf('') === ''）。
+  if (!event.domain) return;
   const key = cacheKey(event.domain, event.url);
   if (inFlightClassification.has(key) || classificationCache.has(key)) return;
 
