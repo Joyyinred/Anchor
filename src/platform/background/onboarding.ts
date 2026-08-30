@@ -8,6 +8,7 @@ import { runStarterCoach } from '../../engine/coach';
 import { DEFAULT_TASK_DECLARATION, type SessionContext } from '../../engine/types';
 import { groqStarterCoachCall } from './starter-coach';
 import { saveSessionContext } from './session';
+import { resetSessionState } from './frame-pipeline';
 import { domainOf } from './domain';
 import { ONBOARDING_STATE_KEY, type OnboardingState } from '../onboarding-state';
 
@@ -60,6 +61,12 @@ export async function handleOnboardingSubmit(
     await pushOnboardingState({ status: 'NEEDS_FOLLOWUP', prompt: result.prompt, roundsUsed: result.roundsUsed });
     return;
   }
+
+  // 08-30：起步教练每完成一次都是"新的一场专注"，理应从零开始——sessionId 目前一直是
+  // 硬编码的 'default'，不清空的话上一场攒的 eventHistory/BState 会原样带进这一场，
+  // 真机复现过：旧证据里"这一页最后一次交互"的陈旧时间戳直接让 STUCK 在新会话第一帧
+  // 就顶格触发（详见 frame-pipeline.ts 的 resetSessionState 注释）。
+  resetSessionState(result.sessionContext.sessionId);
 
   // READY：先把这次真实产出的 SessionContext 存回 getOrInitSessionContext() 读的那个 key，
   // 再推 UI 状态——两步顺序不能反，不然 UI 已经显示"完成"了，但下一次心跳/事件读到的

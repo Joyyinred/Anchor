@@ -25,3 +25,7 @@ export async function getBState(sessionId: string): Promise<BStatePersistable | 
 export async function setBState(sessionId: string, state: BStatePersistable): Promise<void> {
   await chrome.storage.local.set({ [bstateKey(sessionId)]: state });
 }
+
+export async function removeBState(sessionId: string): Promise<void> {
+  await chrome.storage.local.remove(bstateKey(sessionId));
+}

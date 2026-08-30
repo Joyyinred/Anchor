@@ -585,3 +585,34 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
 
     ③ 跨 profile 准确性：integration.test.ts 23 个场景覆盖 CREATOR/READER/VIEWER 三档，mock/events.json 显式含 VIEWER×matchMode=prefix（系列课连播前缀匹配）场景。
 
+2. A10（demo 域名预热）检查+修复，warmup.ts。
+
+    **涉及文件**：
+    - 新增 `src/platform/background/warmup.ts`：`DEFAULT_DEMO_WARMUP_PAGES`（预热页面列表）+ `loadDemoWarmupPages()`（读 `chrome.storage.local` 的 `anchor_demo_warmup_pages` 覆盖，没有就退回默认列表）+ `warmupDemoClassifications()`（逐页跑 `classifyDomainRelevance()` 写入缓存，返回 `{warmed, total}`）。
+    - `src/platform/messages.ts`：新增 `WarmupDemoClassificationsMessage`（`type: 'WARMUP_DEMO_CLASSIFICATIONS'`），并入 `RuntimeMessage` 联合类型。
+    - `src/platform/background/frame-pipeline.ts`：新增导出 `getClassificationCache()`——`classificationCache` 原来是模块私有变量，warmup 需要往同一份缓存里写，不能自己另开一份（否则 `triggerLazyClassification()` 读的和 warmup 写的不是同一个 Map，预热等于白做）。
+    - `src/platform/background/index.ts`：接了 `WARMUP_DEMO_CLASSIFICATIONS` 消息分支，调 `warmupDemoClassifications(ctx, getClassificationCache())` 并打印 `warmed/total` 日志。SW 控制台手动触发：`chrome.runtime.sendMessage({ type: 'WARMUP_DEMO_CLASSIFICATIONS', timestamp: Date.now() })`。
+
+    **demo 流程**：起步教练输入任务声明 `study neural network`，然后依次访问：
+    - YouTube 娱乐视频（预期 IRRELEVANT）：https://www.youtube.com/watch?v=-IaGmGc4iZ4（标题 `100 Hours In The Coldest City On Earth! (-71°C, -96°F) - Yakutsk, Siberia`）
+    - YouTube 神经网络学习视频（预期 RELEVANT，demo 卖点：同域内容级区分）：https://www.youtube.com/watch?v=aircAruvnKk&list=PLZHQObOWTQDNU6R1_67000Dx_ZCJB-3pi（标题 `But what is a neural network? | Deep learning chapter 1`）
+    - GitHub neural network study repo（域名级预置缓存直接判 RELEVANT）：https://github.com/karpathy/nn-zero-to-hero/tree/master
+    - AI 学习辅助（域名级预置缓存直接判 RELEVANT）：https://claude.ai/new
+    - 黑名单页面（域名级黑名单直接判 IRRELEVANT）：https://www.booking.com/index.en-gb.html
+
+    **修的两个真 bug**：
+    - `index.ts` 导入的是 `DEMO_WARMUP_PAGES`，但 `warmup.ts` 导出的是 `DEFAULT_DEMO_WARMUP_PAGES`，名字对不上，typecheck 直接报错——这是我介入前就有的状态。顺手把 `warmupDemoClassifications()` 的返回值从裸 `number` 改成 `{warmed, total}`，`total` 是实际跑的页面数（`anchor_demo_warmup_pages` 有覆盖时会跟着走，不会像原来硬编码 `.length` 那样在覆盖后数字对不上）。
+    - **缓存 key 不一致，会让预热对两个 YouTube 页面完全失效**：`warmupDemoClassifications()` 写缓存时自己做了 `.replace(/^www\./, '')` 去掉 `www.`，但真实运行时 `signals.ts` 产出的 `SignalEvent.domain` 是 `domainOf()` 的原始结果（**带** `www.`），`resolveContextRelevance()`/`triggerLazyClassification()` 读写缓存全部用带 www. 的 domain 拼 key。两边不一致 → 预热写进去的 `youtube.com/watch?v=...` 跟现场查的 `www.youtube.com/watch?v=...` 是两个不同字符串 → **缓存命中率 0%，预热白跑，demo 现场那两个 YouTube 页面照样要等 LLM 现场判**——刚好是这次预热最该保护的两个页面。改成直接复用 `domainOf()`，跟真实运行时同一份实现，不会再漂移。
+
+    **删了不需要预热的域名**：GitHub/Claude.ai/Booking 三个已经被 `DEMO_PRESET_CACHE`（github.com/claude.ai → RELEVANT）和 `BUILTIN_ENTERTAINMENT_BLACKLIST`（booking.com → IRRELEVANT）在 `resolveContextRelevance()` 里域名级短路覆盖，短路排在 classificationCache 之前，预热它们的结果永远不会被读到——按 Groq 免费层 30 RPM 预算删掉这三条纯浪费调用的 entry。现在列表只剩①②那两个真正需要预热的 youtube.com 页面（youtube 是故意不进任何静态表的混合站，页面级相关性只能靠 LLM/缓存判）。
+
+    **★ demo 现场要注意的一条提醒**：cacheKey 是按 URL 精确匹配的（domain+pathname+search），demo 现场必须直接在地址栏粘贴这个精确 URL——如果从 YouTube 播放列表 UI 里点进去，YouTube 经常会在地址栏补上 `&index=`/`&t=` 之类的参数，query string 一变 key 就变，照样会缓存未命中。
+
+3. **A10 最终决定：整个删掉**，不留自动触发版本。
+
+    真机测试时发现，warmup 是在起步教练完成**之前**跑的（那时 `taskDeclaration` 还是默认占位文案），`classifyDomainRelevance()` 被问的其实是"这页面跟'没有任务'相关吗"，模型诚实地答了 UNKNOWN——但 `cacheKey` 不含 `taskDeclaration`，这个错误判定会一直躺在缓存里，直到下次起步教练完成（`resetSessionState()` 清缓存）才会被冲掉，中间会一直误导。而重新加载 SW、不跑 warmup、走真实起步教练流程后，同一个视频现场分类**很快**就正确判成了 IRRELEVANT。
+
+    本来打算修成"起步教练完成时自动触发 warmup（仅 DEMO_MODE），不再需要手动切控制台"来同时解决时序坑和"评委面前敲命令很难看"这两个问题，但验证下来：DRIFT 需要的 30s 持续证据窗口通常比 LLM 响应时间长得多，**不预热，现场分类也来得及**——那这层保险的收益已经小到不值得维护成本了（多一个消息类型、多一份 demo 页面清单要跟真实 demo 保持同步、多一处"必须先起步教练再预热"的隐性时序要求）。
+
+    最终**决定删掉 A10**：`src/platform/background/warmup.ts`、`messages.ts` 的 `WarmupDemoClassificationsMessage`、`frame-pipeline.ts` 的 `getClassificationCache()` 导出全部移除。**接受的风险**：现场 Groq 抖动/限流的极小概率仍无兜底——demo 前建议至少手动把要用的页面（尤其两个 YouTube 视频）访问一遍走一次真实分类，当纯人工预热，不依赖代码机制。188/188 测试、typecheck、build 干净（构建产物 50→49 模块）。
+

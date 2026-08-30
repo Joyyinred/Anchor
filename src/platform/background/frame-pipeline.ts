@@ -11,7 +11,7 @@ import { evaluateFrame, applyCheckInFeedback } from '../../engine/detector';
 import { createPetStateMachine, advancePetState } from '../../engine/pet-state';
 import type { PetState } from '../../pet/types';
 import { classifyDomainRelevance } from './classifier';
-import { getBState, setBState } from './state';
+import { getBState, setBState, removeBState } from './state';
 import { saveSessionContext } from './session';
 
 
@@ -89,6 +89,41 @@ async function ensureBStateLoaded(sessionId: string, archetype: Archetype): Prom
     : createInitialBState(archetype);
   bStateLoadedForSession = sessionId;
   return bState;
+}
+
+/**
+ * 08-30 真机测试发现的缺口：`sessionId` 一直是硬编码的 `'default'`（session.ts/onboarding.ts
+ * 都这样），不管重开几次起步教练、声明几次新任务，都是同一个 sessionId——`ensureHistoryLoaded`/
+ * `ensureBStateLoaded` 的"同一 session 就不重新水合"这条判断因此永远命中旧数据，`eventHistory`/
+ * `BState`（`stuckThresholdMs`/`stuckLadderIndex`/`lastCheckInTs`/`lastAnswerTs`/`restUntil` 这些
+ * 持久化字段）会原样跨会话延续。真机复现：手动只重置了 `taskDeclaration`（`chrome.storage.local`
+ * 里的 `anchor_default_session.taskDeclaration`），没碰事件历史/BState，重新走一遍起步教练声明
+ * "study neural network"后，浏览器当前活动 tab 其实还停在上一场测试收尾时的那个页面
+ * （"Computer Networks"）——`computeStillnessMs()` 找"这一页最后一次真实交互"时，翻到的是
+ * 上一场测试留在 `eventHistory` 里的旧交互事件（可能是几十分钟甚至几小时前），`stillnessMs`
+ * 因此直接爆表，STUCK 在新会话第一帧就顶格触发，文案还是拿旧标题拼的——像是"上一场测试的
+ * check-in 穿越过来了"，其实是旧证据从来没被清过。
+ *
+ * 起步教练每完成一次都视为"新的一场专注"，理应清空上一场攒的全部证据——不能指望调用方
+ * 记得手动清 `eventHistory`/`BState`/`classificationCache` 三处不同的 storage，这里统一收口：
+ * 内存态归零 + 对应的 storage key 一并删掉。分类缓存/`inFlightClassification` 也一并清空——
+ * 页面相关性是相对 `taskDeclaration` 判的，换了任务，旧任务下判出来的 RELEVANT/IRRELEVANT
+ * верdict 对新任务没有意义，尤其是反复用同一批 demo URL 测试时最容易踩到这个坑。
+ */
+export function resetSessionState(sessionId: string): void {
+  eventHistory = [];
+  historyLoadedForSession = sessionId; // 标记"已加载"为这份空数组，避免下一次又从 storage 读回旧数据
+  void chrome.storage.local.remove(historyKey(sessionId));
+
+  bState = null;
+  bStateLoadedForSession = null;
+  void removeBState(sessionId);
+
+  previousTexture = 'idle';
+  petStateMachine = createPetStateMachine();
+
+  classificationCache.clear();
+  inFlightClassification.clear();
 }
 
 // recordEventAndEvaluate（有新事件）和 recomputeOnHeartbeat（没有新事件，只是时间往前走了）

@@ -69,5 +69,14 @@ export async function classifyDomainRelevance(input: ClassifyInput): Promise<Con
     console.log('[Anchor SW] Groq classify: below confidence threshold', parsed);
     return 'UNKNOWN';
   }
+  // 08-30 真机排查：模型自己给出的答案就是 UNKNOWN 且置信度够（prompt 本来就把 UNKNOWN
+  // 列为三个合法答案之一——"genuinely ambiguous, or a general-purpose page whose content
+  // can't be determined from title alone"），这条路径原来完全没有日志。跟前面两条
+  // "调用失败"/"低置信度"的 UNKNOWN 长得一模一样，但根因完全不同（不是故障，是模型
+  // 判断力不够/prompt 给的上下文太薄），排查时误以为是 key/网络问题，翻遍日志找不到任何
+  // Groq 相关输出——因为这条分支压根没打印过。
+  if (parsed.verdict === 'UNKNOWN') {
+    console.log('[Anchor SW] Groq classify: model confidently answered UNKNOWN', parsed);
+  }
   return parsed.verdict;
 }
