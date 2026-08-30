@@ -55,9 +55,18 @@ function SidePanelApp() {
     // 不是一次性 sendMessage（那样 panel 没打开时消息会直接丢，storage 里的值不会）。
     function onStorageChanged(changes: Record<string, chrome.storage.StorageChange>, area: string) {
       if (area !== 'local') return;
-      if (changes[PANEL_STATE_KEY]) setPanelState(changes[PANEL_STATE_KEY].newValue as PanelState);
+      // ★ 08-30：每个 key 都必须处理"被删除"的情况——storage.onChanged 在 remove 时也会
+      //   触发，此时 newValue 是 undefined。这一行原来是裸赋值，因为 PANEL_STATE_KEY 从来
+      //   没被删过；endSession() 开始清它之后，setPanelState(undefined) 让渲染时读
+      //   panelState.state 抛错，**整棵 React 树崩掉、桌宠直接消失**（白屏）。
+      if (changes[PANEL_STATE_KEY]) {
+        setPanelState((changes[PANEL_STATE_KEY].newValue as PanelState | undefined) ?? DEFAULT_PANEL_STATE);
+      }
       if (changes[ONBOARDING_STATE_KEY]) {
-        setOnboardingState(changes[ONBOARDING_STATE_KEY].newValue as OnboardingState);
+        // 同上：现在没人删这个 key，但留着裸赋值就是下一个等着被踩的坑。
+        setOnboardingState(
+          (changes[ONBOARDING_STATE_KEY].newValue as OnboardingState | undefined) ?? DEFAULT_ONBOARDING_STATE
+        );
       }
       if (changes[REST_STATE_KEY]) {
         setRestState((changes[REST_STATE_KEY].newValue as RestState | undefined) ?? DEFAULT_REST_STATE);

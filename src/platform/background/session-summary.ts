@@ -12,6 +12,7 @@ import type { CheckInFeedback, SessionContext } from '../../engine/types';
 import { DEFAULT_TASK_DECLARATION } from '../../engine/types';
 import { saveSessionContext } from './session';
 import { pushOnboardingStatus } from './onboarding';
+import { resetSessionState } from './frame-pipeline';
 import { REST_STATE_KEY } from '../rest-state';
 import { PANEL_STATE_KEY } from '../panel-state';
 import {
@@ -93,6 +94,14 @@ export async function endSession(ctx: SessionContext, now: number): Promise<void
   //   它是一份独立推送的快照，不推的话会一直停在上一场的 DONE，
   //   面板的 `onboardingState.status !== 'DONE'` 那道门就永远打不开，
   //   用户点完"Start something new"直接落到桌宠界面，没人问他新任务是什么。
+  // ★ 08-30 真机 bug（第二轮）：只清 UI 状态不够，还得清生成它的引擎状态。
+  //   BState.restUntil 在用户点"Take a break"时被设成 now+20min，结算时没人碰它——
+  //   于是下一次心跳（最多 1 分钟）里 refreshRestReminder() 看到 restUntil 还在未来，
+  //   就把 { isResting: true } 又写回 REST_STATE_KEY，用户点完"Start something new"
+  //   一分钟内被打回休息态。同理 stuckLadderIndex/lastCheckInTs 也会带进新会话。
+  //   会话结束和会话开始一样是边界，走同一套重置（起步教练完成时也调这个）。
+  resetSessionState(endedCtx.sessionId);
+
   await pushOnboardingStatus(endedCtx);
 }
 
