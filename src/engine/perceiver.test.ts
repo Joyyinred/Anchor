@@ -183,27 +183,73 @@ describe('computeFeatureFrame: 派生字段（场景1 数据）', () => {
     expect(computeFeatureFrame([idleEvent], ctx, 0).systemIdle).toBe(true);
   });
 
-  it('anchorDetachedMs：命中锚点且为有意义交互时归零', () => {
+  // 08-30：锚点不再是"起步教练最初声明的那一个固定页面"——真实专注场景里会从 GitHub 切到
+  // Jupyter 再切到 Notion，只要都判 RELEVANT 就该算"还在干正事"。events 的第二条事件在
+  // react.dev（DEMO_PRESET_CACHE 里是 RELEVANT），isAnchor:false（不是最初声明的那个 vscode.dev），
+  // 但现在判定标准已经不看 isAnchor 了——PASSIVE_SCROLL + RELEVANT 依然归零。
+  it('anchorDetachedMs：切到另一个 RELEVANT 页面（不是最初的锚点）依然归零', () => {
     const frame = computeFeatureFrame(events, ctx, 45000);
-    // 最后一条不是锚点交互，但上一条（t=0）是 ACTIVE_INPUT+isAnchor，锚点脱离时长 = 45000-0
-    expect(frame.anchorDetachedMs).toBe(45000);
+    expect(frame.anchorDetachedMs).toBe(0);
   });
 
-  it('anchorDetachedMs：PASSIVE_SCROLL 命中锚点时归零', () => {
+  it('anchorDetachedMs：PASSIVE_SCROLL 在 RELEVANT 页面上归零', () => {
     const scrollOnAnchor: SignalEvent = { ...anchorEvent, timestamp: 45000, interactionType: 'PASSIVE_SCROLL' };
     const frame = computeFeatureFrame([anchorEvent, scrollOnAnchor], ctx, 50000);
     expect(frame.anchorDetachedMs).toBe(5000);
   });
 
-  it('anchorDetachedMs：MEDIA_PLAY 命中锚点不归零（契约明确排除在有意义交互之外）', () => {
+  it('anchorDetachedMs：MEDIA_PLAY 在 RELEVANT 页面上不归零（契约明确排除在有意义交互之外）', () => {
     const playOnAnchor: SignalEvent = { ...anchorEvent, timestamp: 45000, interactionType: 'MEDIA_PLAY' };
     const frame = computeFeatureFrame([anchorEvent, playOnAnchor], ctx, 50000);
     expect(frame.anchorDetachedMs).toBe(50000); // 仍从 t=0 的 ACTIVE_INPUT 算起
   });
 
-  it('lastAnchorSnapshot 记录最后一次有意义锚点交互', () => {
+  // isAnchor 字段本身不再决定这个信号——一个页面哪怕标了 isAnchor:true，只要判定不是
+  // RELEVANT（比如分类还没判出来，UNKNOWN），也不该被当成"还在干正事"。用一个不在任何
+  // 预置表/白名单/黑名单里的域名（会落到 UNKNOWN）验证这一点。
+  it('anchorDetachedMs：isAnchor:true 但页面判定不是 RELEVANT 时不归零', () => {
+    const unknownDomainAnchor: SignalEvent = {
+      ...anchorEvent,
+      domain: 'some-random-unclassified-site.com',
+      url: 'https://some-random-unclassified-site.com/page',
+      isAnchor: true, // 就算平台层标记了 isAnchor，这个信号现在也不看它
+      timestamp: 45000,
+    };
+    const frame = computeFeatureFrame([unknownDomainAnchor], ctx, 50000);
+    // events[0] 就是 unknownDomainAnchor 本身，lastTs 兜底成这条事件的时间戳（45000），
+    // 不是因为它被判成"命中"，纯粹是"这份历史最早一条事件"这个兜底逻辑生效。
+    expect(frame.anchorDetachedMs).toBe(5000);
+    expect(frame.lastAnchorSnapshot).toEqual({ title: '', url: '', ts: 0 }); // 快照没被这条事件更新
+  });
+
+  it('lastAnchorSnapshot 记录最后一次"RELEVANT 页面"上的有意义交互（不要求是最初的锚点）', () => {
     const frame = computeFeatureFrame(events, ctx, 45000);
-    expect(frame.lastAnchorSnapshot).toEqual({ title: 'login.tsx', url: 'https://vscode.dev/proj', ts: 0 });
+    expect(frame.lastAnchorSnapshot).toEqual({ title: 'Hooks Reference', url: 'https://react.dev/reference/hooks', ts: 45000 });
+  });
+
+  // 08-30 真机测试暴露的 bug：历史里从来没有一条"RELEVANT 页面上的有意义交互"时（比如
+  // 用户全程没碰过任何相关页面），lastTs 原来是字面量 0（Unix epoch），
+  // anchorDetachedMs = now - 0，从会话第一帧起就是个天文数字，anchorAbandoned 恒为 true。
+  // 契约§1信号2明确写的是"从 sessionStart 起累计"——应该从一个很小的数开始涨，不是天文数字。
+  it('anchorDetachedMs：从未命中过 RELEVANT 页面时，从这段历史最早一条事件算起（不是 Unix epoch）', () => {
+    // 域名不在任何预置表/白名单/黑名单里，落到 UNKNOWN——整段历史都判不出 RELEVANT。
+    const neverAnchored: SignalEvent = {
+      ...anchorEvent,
+      domain: 'some-random-unclassified-site.com',
+      url: 'https://some-random-unclassified-site.com/page',
+      isAnchor: false,
+      timestamp: 1_700_000_000_000,
+    };
+    const later: SignalEvent = { ...neverAnchored, timestamp: 1_700_000_060_000, interactionType: 'PASSIVE_SCROLL' };
+    const frame = computeFeatureFrame([neverAnchored, later], ctx, 1_700_000_090_000);
+    // 应该是"距这段历史最早一条事件过了多久"（90000ms），不是距 1970 年过了多久。
+    expect(frame.anchorDetachedMs).toBe(90_000);
+    expect(frame.lastAnchorSnapshot).toEqual({ title: '', url: '', ts: 0 }); // 快照本身仍是空的，这条只锁 anchorDetachedMs
+  });
+
+  it('anchorDetachedMs：真正的会话第一帧（events 为空）从 0 起算', () => {
+    const frame = computeFeatureFrame([], ctx, 1_700_000_000_000);
+    expect(frame.anchorDetachedMs).toBe(0);
   });
 });
 

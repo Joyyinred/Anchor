@@ -9,7 +9,7 @@ import { DEFAULT_TASK_DECLARATION, type SessionContext } from '../../engine/type
 import { groqStarterCoachCall } from './starter-coach';
 import { saveSessionContext } from './session';
 import { resetSessionState } from './frame-pipeline';
-import { domainOf } from './domain';
+import { domainOf, isInternalBrowserUrl } from './domain';
 import { ONBOARDING_STATE_KEY, type OnboardingState } from '../onboarding-state';
 
 async function pushOnboardingState(state: OnboardingState): Promise<void> {
@@ -44,7 +44,10 @@ export async function handleOnboardingSubmit(
   // anchorDetachedMs 直接等于当前 epoch 时间戳（而不是"脱离了多久"），lastAnchorSnapshot
   // 也拿不到真实标题，B7 的 check-in 文案只能退回"what you were working on"那句兜底。
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const url = activeTab?.url ?? '';
+  const rawUrl = activeTab?.url ?? '';
+  // 08-30：chrome://extensions/ 这类浏览器内部页面不该被锁成锚点——真机复现过：调试时
+  // 开着这个 tab 提交任务，会把它当成锚点，后面 YouTube 上发生的事全部判不出"在锚点上"。
+  const url = isInternalBrowserUrl(rawUrl) ? '' : rawUrl;
   const result = await runStarterCoach(
     text,
     roundsUsed,

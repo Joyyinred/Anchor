@@ -110,9 +110,14 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
       // 这种没发生过的承诺——只是换了一种方式重复同一个"说了不算"的问题，不是真的修好。
       // FOCUSED/FALSE_POSITIVE 两种答案不会走进 wording.ts 那条 pulledBack 分支，值给 true
       // 只是保持"默认不特殊处理"的语义，不影响任何文案。
+      // 08-30：目标从 ctx.anchor.domain 改成 message.anchorUrl（触发那一刻 PanelState.anchorUrl
+      // 原样带回来的 frame.lastAnchorSnapshot.url）——check-in 文案是拿 lastAnchorSnapshot 拼的，
+      // "带我回去"必须去文案说的那个地方，不能各读各的（见 pull-back.ts 顶部注释）。
       let pulledBack = true;
       if (feedback.answer === 'DRIFTED') {
-        pulledBack = feedback.channel === 'DRIFT' ? await pullBackToAnchor(ctx) : false;
+        pulledBack = feedback.channel === 'DRIFT' && message.anchorUrl
+          ? await pullBackToAnchor(message.anchorUrl)
+          : false;
       }
       // check-in 已经处理完了——立刻把 panel 摘出 checkin 态，不能干等下一次心跳/事件
       // 才刷新（那样按钮还留在 UI 上能点，手快的话 applyCheckInFeedback 会被再触发一次）。

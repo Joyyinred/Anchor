@@ -140,7 +140,11 @@ export const PROFILE_PRESETS: Record<'CREATOR' | 'READER' | 'VIEWER', SignalPoli
     muteJumpPattern: true,
     mutePassiveTexture: false,
     stuckChannelEnabled: true,
-    anchorDetachedThresholdMs: 8 * 60_000,
+    // 08-30 真机测试后从 8min 调到 5min：黑名单命中的页面现在走 detector.ts 里独立的
+    // 15s 快速通道（不再等这个阈值），这个通用值实际上只剩"LLM 判 IRRELEVANT 但不在
+    // 静态黑名单里"这类没那么确定的情况在用——3min 对分类器置信度勉强够格的边界判断
+    // 偏激进，5min 留了缓冲，比原来的 8min 快得多但不至于对模糊判定反应过度。
+    anchorDetachedThresholdMs: 5 * 60_000,
     stuckLadderMs: [15 * 60_000, 20 * 60_000],
     matchMode: 'exact',
   },

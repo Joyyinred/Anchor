@@ -27,6 +27,10 @@ export interface CheckInAnswerMessage {
   // 答 FALSE_POSITIVE 时 SW 用它写回 SessionContext.sessionWhitelist（J6：sessionWhitelist
   // 一直只有读没有写的那个缺口）。STUCK 通道没有意义，可以不传。
   domain?: string;
+  // 08-30：DRIFT 通道触发时的 frame.lastAnchorSnapshot.url，从 PanelState.anchorUrl
+  // 原样带回来——答 DRIFTED 时 SW 用它调 pullBackToAnchor()，要跟触发那一刻 check-in
+  // 文案说的是同一个地方，不能读用户点按钮那一刻的最新状态（sticky 面板的同一个道理）。
+  anchorUrl?: string;
   timestamp: number;
 }
 

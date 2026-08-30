@@ -3,6 +3,10 @@ import { FeatureFrame, SignalPolicy, SessionContext, CheckInFeedback, DEFAULT_ST
 // defaultSessionContext 的 graceUntil 压缩也要用它）。这里重新导出，pet-state.ts（B9）
 // 现有的 `import { scaled } from './detector'` 不用跟着改。
 export { scaled };
+// 08-30：黑名单快速通道要判断"这个域名是不是命中静态黑名单"，直接复用 perceiver.ts 已经
+// 导出的这两个——不写第四份匹配逻辑（08-25 code review 已经因为这个理由把 signals.ts/
+// heuristics.ts 收敛过一次）。依赖方向没有反：perceiver.ts 不 import detector.ts，不会循环。
+import { domainMatches, BUILTIN_ENTERTAINMENT_BLACKLIST } from './perceiver';
 
 // B 侧内部状态接口
 export interface BState {
@@ -83,6 +87,23 @@ export function isDrifting(
 
   // 1. 形态硬判：Shorts + 锚点抛弃
   if (f.contentFormat === 'short_feed' && f.anchorDetachedMs > anchorDetachedThresholdMs) {
+    return sustainedWithWindow(state.driftSustainer, true, now, SUSTAINED_EVIDENCE_MS);
+  }
+
+  // 2. 域名硬判：命中静态黑名单的页面用远短于通用阈值的专属等待时间。黑名单是"确定无关"
+  //   的高置信度判定，跟 LLM 判出来、多少有点不确定性的 IRRELEVANT 不是一回事，不需要陪它
+  //   等 anchorDetachedThresholdMs（08-30 从 8min 调到 5min，见 types.ts CREATOR 预设的注释）
+  //   那么久——但仍然要求"稳定"（标准 30s 持续窗口），不能因为一帧命中就立刻开口，防止
+  //   手滑/中转页触发误报。
+  //   ★ 先看 f.contextRelevance 而不是只查域名表：sessionWhitelist 的优先级比黑名单高
+  //   （resolveContextRelevance 的短路顺序），域名在黑名单里但已经被用户手动纠正成
+  //   "查资料"时，f.contextRelevance 会是 RELEVANT——这个分支要尊重那次纠正，不能绕过
+  //   白名单去查静态表，否则用户答过一次"查资料"，下次访问同一个黑名单域名还是会被打扰。
+  const BLACKLIST_ANCHOR_DETACHED_THRESHOLD_MS = scaled(15_000, isDemoMode);
+  const isBlacklistedDomain =
+    f.contextRelevance === 'IRRELEVANT' &&
+    [...BUILTIN_ENTERTAINMENT_BLACKLIST].some((d) => domainMatches(f.currentDomain, d));
+  if (isBlacklistedDomain && f.anchorDetachedMs > BLACKLIST_ANCHOR_DETACHED_THRESHOLD_MS) {
     return sustainedWithWindow(state.driftSustainer, true, now, SUSTAINED_EVIDENCE_MS);
   }
 
