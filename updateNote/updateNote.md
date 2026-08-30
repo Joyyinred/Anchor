@@ -574,3 +574,14 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
 6. 真机测试发现代码 bug（这是我给 index.ts 接 CHECK_IN_ANSWER 时留的漏洞）：pullBackToAnchor() 原来只判断 answer==='DRIFTED'，没管是哪条 channel。STUCK 通道现在只在 contextRelevance==='RELEVANT' 时才会触发, 也就是说你压根还停留在相关页面上，根本不存在"脱离锚点"这回事。STUCK 的"Drifted"选项语义是"我人还在这页，但刚才走神了"（对应 applyCheckInFeedback 里的阶梯重置，不是导航），不是"我跑去别处了，带我回去"。原代码不分 channel，会把你从一个真正相关的页面拽到一个跟当前任务无关的旧锚点。
 
 已修复：index.ts 现在只在 channel==='DRIFT' && answer==='DRIFTED' 时才调用 pullBackToAnchor；STUCK+DRIFTED 时 pulledBack 显式给 false。
+
+## 0830
+
+### Jay
+1. A13检查后标记完成。
+    ① anchor 驱动锚点判定（matchMode）：signals.ts 的 isAnchorMatch() 按 matchMode 分流（exact 精确匹配 / prefix 走 domainMatches() 同域或子域），每条 SignalEvent.isAnchor 由它标记；引擎侧只信任这个标记，不重复判断。
+
+    ② sessionWhitelist 短路分类：perceiver.ts 的 resolveContextRelevance() 短路优先级本就把它排第二（仅次于 demo 预置缓存），perceiver.test.ts 4 条专项测试覆盖；写入端是 J6 补的那个口子。
+
+    ③ 跨 profile 准确性：integration.test.ts 23 个场景覆盖 CREATOR/READER/VIEWER 三档，mock/events.json 显式含 VIEWER×matchMode=prefix（系列课连播前缀匹配）场景。
+

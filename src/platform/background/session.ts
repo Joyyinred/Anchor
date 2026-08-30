@@ -1,4 +1,9 @@
-// Anchor · 今天范围内的默认 SessionContext（A13 才会接真正的起步教练产出）
+// Anchor · SessionContext 的读写入口。getOrInitSessionContext() 首次调用时按下面的默认
+// 策略现造一份并落盘；`onboarding.ts` 的 handleOnboardingSubmit() 完成后会用真正的起步教练
+// 产出通过 saveSessionContext() 覆盖它——这里不区分"默认兜底"和"真实产出"两种来源，
+// 两者共享同一个 storage key/格式（08-30：A13 消费 SessionContext 已确认，这条注释原来写的
+// "A13 才会接真正的起步教练产出"是 08-27 Joy 补上 onboarding.ts/OnboardingPanel.tsx 之前
+// 留下的过期说法，起步教练产出早就在接了）。
 // 契约v4"无起步教练默认策略"：当前活动 tab 设为锚点、CREATOR 档、graceUntil = now + 2min
 // 具体默认值规则由 src/engine/types.ts 的 defaultSessionContext()（纯函数，B1 产出，过了
 // metaScenario 22 单测）定义——这里不再手写一份同样的逻辑（之前两处独立维护，容易改一处忘
