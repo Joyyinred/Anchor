@@ -71,6 +71,15 @@ function SidePanelApp() {
     return () => chrome.storage.onChanged.removeListener(onStorageChanged);
   }, []);
 
+  // ★ 08-30 真机 bug：onboardingDismissed 原来是"点过 Let's go 就永久为 true"的一次性
+  //   本地记忆，收尾结算后没有任何人把它设回 false——于是用户点完"Start something new"，
+  //   `!onboardingDismissed` 这半边恒为 false，起步教练根本没机会显示，直接落到桌宠界面。
+  //   改成跟着 SW 推来的状态走：只要 SW 说现在是 PENDING（新一场、还没声明任务），
+  //   本地那份"我已经翻过起步页"的记忆就作废。
+  useEffect(() => {
+    if (onboardingState.status === 'PENDING') setOnboardingDismissed(false);
+  }, [onboardingState.status]);
+
   function handleAnswer(answer: CheckInAnswer, channel?: CheckInChannel) {
     // channel 理论上 state==='checkin' 时才会被点到，此时 panelState.channel 必然有值——
     // 防御性判断一下，避免拼出一条 channel 缺失的消息。

@@ -11,6 +11,9 @@
 import type { CheckInFeedback, SessionContext } from '../../engine/types';
 import { DEFAULT_TASK_DECLARATION } from '../../engine/types';
 import { saveSessionContext } from './session';
+import { pushOnboardingStatus } from './onboarding';
+import { REST_STATE_KEY } from '../rest-state';
+import { PANEL_STATE_KEY } from '../panel-state';
 import {
   SESSION_STATS_KEY,
   SESSION_SUMMARY_KEY,
@@ -71,12 +74,26 @@ export async function endSession(ctx: SessionContext, now: number): Promise<void
   // 这个域名算相关"的判断，换了任务就不成立了：为了"准备数据结构考试"把 YouTube 标成
   // 查资料，不代表下一场"写周报"时 YouTube 也该免打扰。不清的话它会一直躺在 storage 里，
   // 用户攒几场之后所有常去的域名都进了白名单，检测等于被自己关掉了。
-  await saveSessionContext({
+  const endedCtx: SessionContext = {
     ...ctx,
     taskDeclaration: DEFAULT_TASK_DECLARATION,
     sessionWhitelist: [],
-  });
-  await chrome.storage.local.remove(SESSION_STATS_KEY);
+  };
+  await saveSessionContext(endedCtx);
+
+  // ★ 08-30 真机 bug：结算 = 这一场彻底翻篇，**所有属于"这一场"的状态都要清**，
+  //   不能只清 SessionContext。之前只清了 taskDeclaration，结果：
+  //     · REST_STATE_KEY 还停在 resting → 点完"Start something new"看到的是上一场的休息态
+  //       （用户报的"回到点击 done for today 前的页面"就是这个，不是真的"回到上一页"，
+  //        是那个状态压根没被清过）；
+  //     · PANEL_STATE_KEY 还留着上一场的气泡文案/channel，会带进新会话。
+  await chrome.storage.local.remove([SESSION_STATS_KEY, REST_STATE_KEY, PANEL_STATE_KEY]);
+
+  // ★ taskDeclaration 已经打回默认值，但 ONBOARDING_STATE_KEY 不会自己跟着变——
+  //   它是一份独立推送的快照，不推的话会一直停在上一场的 DONE，
+  //   面板的 `onboardingState.status !== 'DONE'` 那道门就永远打不开，
+  //   用户点完"Start something new"直接落到桌宠界面，没人问他新任务是什么。
+  await pushOnboardingStatus(endedCtx);
 }
 
 /**
