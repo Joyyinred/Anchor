@@ -149,6 +149,40 @@
 .anchor-pet-lottie { width: 100%; height: 100%; }
 .anchor-pet-lottie svg { display: block; }
 
+/* ── B13 原型：猫本体跟着三态微调（08-30，待评审，不满意就整块删掉即可）──────────
+   背景：原设计是"三态只靠锚徽章区分，猫本体不变"（见 cat.tsx 顶部"不再靠猫变色区分"，
+   那个"不再"说明更重的方案试过并退回过）。但休息态其实已经开了先例（猫淡到 0.7），
+   所以这里是把同一手法扩展到另外两态，不是推翻原设计。
+
+   ★ 为什么不用 lottie-web 的 setSpeed()/playSegments()：
+     · 这份素材是 7 秒单循环，8 个 marker 全是空的（AE 导出的关键帧标记），没有可切的语义片段；
+     · 速度的语义是反的——猫玩电线放慢读起来是"更困"，不是"更警觉"。
+   所以全部在 CSS 层做，不碰 Lottie，随时可整块回退。
+
+   ★ 幅度刻意压得很小。原设计退回过一次重方案，这次做过头很可能踩同一个坑。 */
+.anchor-pet-lottie {
+  transition: transform 0.4s cubic-bezier(.34,1.56,.64,1), filter 0.4s ease, opacity 0.4s ease;
+}
+
+/* observing：轻微上浮 + 一层很淡的暖色外发光（跟徽章 --ap-observing 同色系）。
+   读起来像"竖起耳朵了"，而不是"变了个样子"。 */
+.anchor-pet-stage[data-state="observing"]:not([data-resting="true"]) .anchor-pet-lottie {
+  transform: translateY(-3px);
+  filter: drop-shadow(0 0 6px hsl(43 71% 46% / 0.35));
+}
+
+/* checkin：一次性的注意力弹跳，跟徽章的 ap-badge-pop 同拍（0.4s、同一条缓动曲线），
+   两个动作读起来像一个手势而不是两件事。弹完就停，不做持续动画——
+   气泡已经在说话了，猫再一直动会抢注意力。 */
+.anchor-pet-stage[data-state="checkin"]:not([data-resting="true"]) .anchor-pet-lottie {
+  animation: ap-cat-alert 0.4s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes ap-cat-alert {
+  0%   { transform: translateY(0) scale(1); }
+  45%  { transform: translateY(-5px) scale(1.04); }
+  100% { transform: translateY(0) scale(1); }
+}
+
 /* ── 小锚徽章：贴着猫耳朵，是三态唯一的"变色"信号 ── */
 .anchor-pet-badge {
   position: absolute;
