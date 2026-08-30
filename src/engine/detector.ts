@@ -59,6 +59,38 @@ function isContinuouslyDisengaged(
 }
 
 /**
+ * 契约v4 §3.7「冷却后持续器重置」的实现（B10，08-30 补上）。
+ *
+ * 要解决的问题：check-in 触发时 lastCheckInTs = now，之后 5 分钟里 isDrifting/isStuck
+ * 在冷却闸口**提前 return**，压根碰不到下面的持续器——所以 driftSustainer.since 会一直
+ * 停在"证据开始累积的那一刻"（check-in 之前）。冷却一过的第一帧，`now - since` 早就
+ * 远超 30s 窗口，于是**同一批旧证据立刻又触发一次 check-in**，用户完全没有喘息。
+ * 场景：用户看到气泡但没回答（直接忽略），5 分钟后又被同一件事问一遍。
+ *
+ * ★ 实现方式跟契约给的伪代码不同，但语义等价，而且更简单：
+ *   契约写的是 onCooldownEnd(state)，需要"上一帧是否在冷却中"的边缘检测才能只跑一次
+ *   （detector.ts 原注释也是这么记的，还说要为此往 BState 加字段）。
+ *   但根本不需要边缘检测——**凡是 since 早于上次 check-in 的证据，就是已经导致过那次
+ *   check-in 的旧证据，一律作废**即可。这样：
+ *     · 不用往 BStatePersistable 加字段（不动持久化格式，不牵连 toPersistable/storage）
+ *     · 天然幂等：清完 since=null，下一帧 sustainedWithWindow 会把它设成 now（> lastCheckInTs），
+ *       之后再调用就不会重复清
+ *     · lastCheckInTs 初始是 -Infinity，任何真实时间戳都不满足 <=，所以从没 check-in 过时不误伤
+ */
+function discardEvidenceFromBeforeCheckIn(state: BState): void {
+  if (state.driftSustainer.since !== null && state.driftSustainer.since <= state.lastCheckInTs) {
+    state.driftSustainer.since = null;
+  }
+  if (state.stuckSustainer.since !== null && state.stuckSustainer.since <= state.lastCheckInTs) {
+    state.stuckSustainer.since = null;
+  }
+  // passiveSince 是"连续非主动纹理"的计时起点，同属 check-in 前攒下的证据，一起作废。
+  if (state.passiveSince !== null && state.passiveSince <= state.lastCheckInTs) {
+    state.passiveSince = null;
+  }
+}
+
+/**
  * 通道一：DRIFT 走神检测
  */
 export function isDrifting(
@@ -75,6 +107,9 @@ export function isDrifting(
   // 公共闸口
   if (state.restUntil > now) return false;
   if (now - state.lastCheckInTs < CHECKIN_COOLDOWN_MS) return false;
+  // 走到这里说明冷却已经过了——把 check-in 之前攒的旧证据作废（契约v4 §3.7），
+  // 否则下面的持续器会拿着 5 分钟前的 since 立刻判定"已持续足够久"。
+  discardEvidenceFromBeforeCheckIn(state);
   if (now < ctx.graceUntil) return false;
 
   // DEMO_MODE 下 policy 里的阈值常量本身也要压缩（契约v4 §3.2），否则 demo 事件流用的是
@@ -129,6 +164,9 @@ export function isStuck(
   // 公共闸口
   if (state.restUntil > now) return false;
   if (now - state.lastCheckInTs < CHECKIN_COOLDOWN_MS) return false;
+  // 走到这里说明冷却已经过了——把 check-in 之前攒的旧证据作废（契约v4 §3.7），
+  // 否则下面的持续器会拿着 5 分钟前的 since 立刻判定"已持续足够久"。
+  discardEvidenceFromBeforeCheckIn(state);
   if (now < ctx.graceUntil) return false;
 
   if (!p.stuckChannelEnabled) return false;
