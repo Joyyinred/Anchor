@@ -800,6 +800,22 @@ J7 走通之后开始真机连测，抓出并修掉了一串「收尾 → 新会
 
 3. check-in 在面板之外没有任何提醒机制：我的想法是直接悬浮在网页上，等功能实现的差不多之后直接完全变成悬浮态，彻底抛弃side panel。
 
+4. **08-30 加的黑名单 15s 快速通道，真机测的实际延迟接近 2 分钟，不是 15s**——真机复现：进 `booking.com`（黑名单域）安静阅读、不滚动不打字，`SignalEvent`/`FeatureFrame` 日志显示从进页面到真正弹出 `CHECK_IN_DRIFT` 用了约 131 秒：
+    - t≈10.6s（tab-activate 那帧）：`anchorDetachedMs=10647` < 15000，条件还没成立，`DO_NOTHING` 正确。
+    - t≈70s（第2次心跳，60s 后）：`anchorDetachedMs=70785` > 15000，条件**第一次**成立，`sustainedWithWindow` 记下 `since=now`，但要满 30s 持续窗口才返回 true，这一帧只能 `DO_NOTHING`。
+    - t≈131s（第3次心跳，又是 60s 后）：距上次 `since` 已经过了 ~60s（≥30s 窗口），才判定"已持续足够久"，触发 `CHECK_IN_DRIFT`。
+
+    **根因**：`booking.com` 这类"安静阅读、不滚动不打字"的场景压根不产生新 `SignalEvent`（content-script 只在 keydown/scroll/video 时才发），`isDrifting()` 只能靠 `chrome.alarms` 心跳（`index.ts` 的 `HEARTBEAT_PERIOD_MINUTES = 1`）重新评估。15s 阈值 + 30s 持续窗口这个设计隐含假设了"评估频率比窗口更细"，但实际评估频率（60s）比窗口本身（30s）还粗——"确认持续"这一步天然要等到下一次心跳，最坏情况堆两次心跳粒度，逼近 2 分钟。
+
+     **同一天真机又测出一个关联场景：刷 Instagram Reels 也等了 66s 才 check-in**——`instagram.com` 本就在域名黑名单里，`contextRelevance` 从第一帧起就是 `IRRELEVANT`（这部分没问题）。日志逐帧对下来：`anchorDetachedMs` 在 t≈15168ms 第一次 >15000，`sustainedWithWindow` 记下 `since`；接着一串划 reel 产生的 `nav-history-state` 事件密集打到 `since+24549ms`，还差一点到 30s；然后出现一个**约 26.5 秒的事件真空**（用户在安静看一条播放中的 reel，没有划走，content-script 不产生任何新事件——心跳这时也还没到点），真空结束后下一条划走事件落在 `since+51101ms`，这才第一次满足 `≥30000` 判定，触发。
+
+
+6. **设计通用方案解决以上两个问题**（虽然属于B侧代码，但这几天测试都看到类似问题，所以我顺便来解决）：以上问题拆开看是两个成因（心跳周期 vs `MEDIA_PLAY` 只发一次），但共同点是同一句话：`sustainedWithWindow()`（`detector.ts`）本身只是"记一个 `since`，问 `now-since` 够不够"，从不会自己醒来检查，必须靠"新事件到达"或"心跳打到"这两条外部触发路径去按一下"现在几点了"——用户在两者之间空档里越安静，判定就越晚发现，晚多少纯看运气。
+
+    **通用修复**：新增 `RecheckMessage`（`messages.ts`）。`content-script.ts` 只要页面可见（`!document.hidden`），固定每 **8s** 发一个不落库的轻量 tick（不是伪造交互，不追加 `SignalEvent`，不影响 `anchorDetachedMs`/`texture` 的判定输入）——content script 活在标签页渲染进程里，不受 SW/`chrome.alarms` 的 MV3 平台下限限制，想多久发一次都行。`index.ts` 收到 `RECHECK` 后，跟 `INTERACTION` 同一道 `isTrackedTab` 校验（只信任当前被追踪的锚点 tab，避免开一堆无关标签页各自定时空转），复用心跳已有的 `recomputeOnHeartbeat` 路径重新算一遍 `FeatureFrame`/`DetectionResult` 并 `pushPanelState`。
+
+    效果：把"下一次评估机会"的等待上限从"心跳周期（60s）"统一压到"8s"——不管是安静阅读、安静看视频、还是任何没预料到的安静场景，只要标签页可见，评估空档都不会超过 8 秒。黑名单心跳粒度问题严格说也被这个改动顺带缓解了（`booking.com` 场景现在最多等 8s 而不是心跳的 60s）。
+
 
 
 

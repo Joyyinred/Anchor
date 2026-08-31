@@ -1,5 +1,5 @@
 // Anchor · Content Script：交互纹理采集（A4）
-import type { InteractionMessage, RuntimeMessage } from '../messages';
+import type { InteractionMessage, RecheckMessage, RuntimeMessage } from '../messages';
 
 console.log('[Anchor content script] injected on', location.href);
 
@@ -45,3 +45,16 @@ function bindAllVideos(): void {
 bindAllVideos();
 const videoObserver = new MutationObserver(bindAllVideos);
 videoObserver.observe(document.documentElement, { childList: true, subtree: true });
+
+// 08-31：见上面 RecheckMessage 的注释——安静阅读/安静看视频都不产生新 SignalEvent，SW 侧
+// DRIFT 判定只能干等下一次事件/心跳才有机会重新检查"持续证据是否已经攒够"，空档最长能撞到
+// chrome.alarms 的 ≥1min 平台下限。这里按固定节奏发一个不落库、不改变判定输入的轻量 tick，
+// 把"下一次评估机会"的等待上限从"心跳周期"压到 RECHECK_MS。只在页面可见时发——后台标签页
+// 本来就不该占用评估资源（SW 侧 isTrackedTab 校验也只认当前活动 tab，多发也会被直接丢弃，
+// 这里提前不发是省一次跨进程消息，不是靠它保证正确性）。
+const RECHECK_MS = 8000;
+setInterval(() => {
+  if (document.hidden) return;
+  const message: RecheckMessage = { type: 'RECHECK', timestamp: Date.now() };
+  chrome.runtime.sendMessage(message).catch(() => {});
+}, RECHECK_MS);

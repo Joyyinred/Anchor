@@ -86,6 +86,23 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
     });
     return;
   }
+  if (message.type === 'RECHECK') {
+    // 08-31：content script 按固定节奏（比 1min 心跳密得多）发来的"到点了，重新算一下"
+    // tick——不追加 SignalEvent，只用当前 eventHistory + 最新 now 重新跑一遍判定，跟心跳复用
+    // 同一条 recomputeOnHeartbeat 路径（见 messages.ts 顶部 RecheckMessage 注释）。跟
+    // INTERACTION 一样只信任当前被追踪的锚点 tab 发来的——不然开着一堆无关标签页也会各自
+    // 定时发 tick，白白跑一堆没有意义的计算。
+    void ensureCurrentTab().then(async () => {
+      if (sender.tab?.id === undefined || !isTrackedTab(sender.tab.id)) return;
+      const now = Date.now();
+      const isDemoMode = await getDemoMode();
+      const ctx = await getOrInitSessionContext();
+      const outcome = await recomputeOnHeartbeat(ctx, now, isDemoMode);
+      if (!outcome) return;
+      await pushPanelState(outcome.frame, outcome.result, outcome.petState, now);
+    });
+    return;
+  }
   if (message.type === 'CHECK_IN_ANSWER') {
     // 来自 side panel，不是某个特定 tab 发的（sender.tab 通常是 undefined），
     // 不需要走 isTrackedTab 那道锚点 tab 校验。

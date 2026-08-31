@@ -291,6 +291,29 @@ describe('computeFeatureFrame: texture（场景21 打字型走神盲区修复）
     expect(frame.texture).toBe('passive');
   });
 
+  // A15：keystroke/feed_scroll/media_seek 三种交互纹理要分开判——不是所有 IDLE_BLOCKING_TYPES
+  // 都算"主动投入"，被动划动跟主动拖进度条/暂停找内容的投入程度不一样。
+  it('PASSIVE_SCROLL（feed_scroll）单独出现时判 passive，不是 purposeful——被动划动跟主动敲键盘/主动拖进度条要分开', () => {
+    const ctx = mkCtx();
+    const scrollEvent: SignalEvent = { ...anchorEvent, timestamp: 60000, interactionType: 'PASSIVE_SCROLL' };
+    const frame = computeFeatureFrame([scrollEvent], ctx, 90000);
+    expect(frame.texture).toBe('passive');
+  });
+
+  it('MEDIA_SEEK 单独出现时判 purposeful——主动拖进度条找内容跟被动播放（MEDIA_PLAY）要分开', () => {
+    const ctx = mkCtx();
+    const seekEvent: SignalEvent = { ...anchorEvent, timestamp: 60000, interactionType: 'MEDIA_SEEK' };
+    const frame = computeFeatureFrame([seekEvent], ctx, 90000);
+    expect(frame.texture).toBe('purposeful');
+  });
+
+  it('MEDIA_PAUSE 单独出现时同样判 purposeful', () => {
+    const ctx = mkCtx();
+    const pauseEvent: SignalEvent = { ...anchorEvent, timestamp: 60000, interactionType: 'MEDIA_PAUSE' };
+    const frame = computeFeatureFrame([pauseEvent], ctx, 90000);
+    expect(frame.texture).toBe('purposeful');
+  });
+
   it('冷启动（窗口内事件 < 2）沿用 previousTexture', () => {
     const ctx = mkCtx();
     const frame = computeFeatureFrame([anchorEvent], ctx, 0, new Map(), 'purposeful');
