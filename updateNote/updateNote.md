@@ -692,3 +692,65 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
     **测试**：`perceiver.test.ts` 重写/新增锚点相关用例（"切到另一个 RELEVANT 页面依然归零""isAnchor:true 但不 RELEVANT 时不归零"），`detector.test.ts` 新增黑名单快速通道 4 条（含"sessionWhitelist 纠正后不会绕过"这条边界）+ 通用阈值调整 2 条。202/202 全绿，`npm run typecheck`/`npm run build` 干净。
 
 
+### Joy
+
+J7 走通之后开始真机连测，抓出并修掉了一串「收尾 → 新会话」链路上的状态残留 bug（jay提到的新问题），补完了 B10 里不依赖数据的那部分（契约 §3.7），并做了 B13 的可评审原型。`npm test` **192/192** 全绿，`npm run typecheck` 两边干净，`npm run build` 正常出包。
+
+1. **★「Done for today → Start something new」之后回不到起步教练**（真机报的第一个问题）
+    - 现象：点完"Start something new"直接落到桌宠界面，系统不问新任务。**而且有规律——回到的是点"Done for today"之前那一屏**（之前在 resting，结算后又回 resting）。
+    - 查下来是**三处状态没被重置叠加**，任何一处单独存在都会有这个现象：
+
+      | # | 没被重置的东西 | 后果 |
+      |---|---|---|
+      | ① | `onboardingDismissed`（面板本地 state） | 点过一次"Let's go"就永久为 `true`，**没有任何人把它设回 false** → `!onboardingDismissed` 恒为 false，起步教练根本没机会显示 |
+      | ② | `ONBOARDING_STATE_KEY` | `endSession()` 把 `taskDeclaration` 打回默认值了，但**没推送 onboarding 状态**，那个 key 一直停在上一场的 `DONE` |
+      | ③ | `REST_STATE_KEY` / `PANEL_STATE_KEY` | 完全没被清 → **这就是"回到上一屏"的真相**：不是真的回退，是那个状态压根没被清过 |
+
+    - 修法：`endSession()` 里 `remove([SESSION_STATS_KEY, REST_STATE_KEY, PANEL_STATE_KEY])` + `pushOnboardingStatus(endedCtx)`；`main.tsx` 里 `onboardingDismissed` 改成跟着 SW 状态走（`status === 'PENDING'` 时自动作废本地记忆），不再是一次性记忆。
+
+2. **★ 上一条的修复引入了白屏（我的回归，第一次）**
+    - 现象：点完"Start something new"**桌宠直接消失**。
+    - 根因：`storage.onChanged` 在 **remove 时也会触发，此时 `newValue` 是 `undefined`**。而监听器里这一行是裸赋值：
+      ```js
+      if (changes[PANEL_STATE_KEY]) setPanelState(changes[PANEL_STATE_KEY].newValue as PanelState);
+      ```
+      我在第 1 条里开始 `remove(PANEL_STATE_KEY)` 之后，`setPanelState(undefined)` → 渲染时读 `panelState.state` 抛错 → **整棵 React 树崩掉**。
+    - **`as PanelState` 这个断言是元凶**：`newValue` 真实类型是 `any`，断言之后编译器就不再警告可能为 `undefined`。旁边的 `REST_STATE_KEY`/`SESSION_SUMMARY_KEY` 本来就写了 `?? 默认值`，**只有这两行是裸的**——因为它们此前从没被删过，洞一直没暴露。
+    - 顺手把 `ONBOARDING_STATE_KEY` 那行也补上兜底：现在没人删它，但留着裸赋值就是下一个等着被踩的坑。
+
+3. **★ 修完还是回到 resting（我的回归，第二次）**
+    - 现象：点完"Start something new"看起来对了，**但一分钟内又被打回休息态**。
+    - 根因：第 1 条只清了 **UI 状态**（`REST_STATE_KEY`），**完全没碰 `BState`**。而 `BState.restUntil` 在用户点"Take a break"时被设成 `now + 20min`，结算时没人清它——于是下一次心跳里：
+      ```ts
+      refreshRestReminder(state, now)
+        if (!(state.restUntil > now)) return;   // restUntil 还在未来，不 return
+        await pushRestState({ isResting: true, ... });   // ← 把休息状态又写回来了
+      ```
+      **UI 状态被清掉了，但生成它的引擎状态还在，心跳一到就复活。**
+    - 修法：`endSession()` 调用 `resetSessionState(sessionId)`——起步教练完成时用的是同一个函数。**会话结束和会话开始一样是边界，该走同一套重置。**
+    - 顺带这也解决了 `stuckLadderIndex`/`lastCheckInTs` 被带进新会话的问题。
+    - **这三次（第 1/2/3 条）的共同点值得记**：每次都只改了链路的一端——加了写入没检查读取方、清了 UI 状态没清生成它的引擎状态。**改 storage 的写入方时，必须同时检查所有读取方怎么处理这个变化。**
+
+4. **B10（部分）：契约v4 §3.7「冷却后持续器重置」**（`detector.ts` + 新增 `cooldown.test.ts`）
+    - 要防的场景：**用户看到 check-in 气泡但没有回答**（直接忽略）。check-in 触发时 `lastCheckInTs = now`，之后 5 分钟冷却期里 `isDrifting`/`isStuck` 在闸口**提前 return**、碰不到持续器 → `driftSustainer.since` 一直停在 check-in 之前那一刻 → 冷却一结束的第一帧 `now - since` 早已远超 30s 窗口，**同一批旧证据立刻又触发一次**，用户被同一件事连着问两遍。
+    - 注意这跟 B2 的 `applyCheckInFeedback` 清持续器是**两条独立路径**——那条只在用户**回答了**时才走。忽略气泡的用户之前完全没有保护。
+    - **★ 实现方式跟契约给的伪代码不同但语义等价**：契约写的是 `onCooldownEnd(state)`，需要"上一帧是否在冷却中"的边缘检测（`detector.ts` 原注释也这么记的，还说要为此往 `BState` 加字段）。但根本不用边缘检测——**凡是 `since` 早于上次 check-in 的证据，就是已经导致过那次 check-in 的旧证据，一律作废**即可。好处：不动 `BStatePersistable`（不牵连 `toPersistable`/storage）、天然幂等、`lastCheckInTs` 初始 `-Infinity` 时不误伤。
+    - **★ 做了一次"测试有效性"验证**：写完 4 条测试后，把修复临时撤掉重跑——两条关键断言立刻挂，恢复后又全过。**新写的测试全绿不代表它测到了东西**（前几天那几个"代码在、测试绿、功能是空的"洞就是例子），撤掉实现看测试挂不挂是唯一能证明测试有效的办法。
+    - B10 剩下的调参部分（阶梯 15→20 该不该改、冷却 5 分钟合不合适、白名单要不要过期）**仍然等真实数据**——那些是参数，这次补的是逻辑缺口。
+
+5. **B13 原型：猫本体要不要跟着三态变（待评审，未定稿）**
+    - 先查了素材的可操作空间：`cat.json` 是 **7 秒单循环**，8 个 marker **全是空的**（AE 导出的关键帧标记，不是语义分段）——**没有可切的片段**，所以 `playSegments()` 那条路走不通。
+    - 也没用 `setSpeed()`：**语义是反的**——猫玩电线放慢读起来是"更困"，不是"更警觉"。
+    - 最后全部放在 CSS 层（不碰 Lottie，随时可整块回退）。第一版做得很克制（observing 上浮 3px + 淡暖色发光；checkin 一次性弹跳，跟徽章 `ap-badge-pop` 同拍），**真机反馈是"太不明显、用户观察不到"**。
+    - 于是加了 **observing 四档强度对照**进预览页：v1 现状 / v2 强发光不变色 / v3 整只猫变橙 / v4 变橙+发光。
+    - **变色方案的已知副作用**（实测素材主色）：猫身 hue≈191°（青）、电线 hue≈345°（粉红）。CSS filter 作用于**整个 SVG**，`hue-rotate(200deg)` 把猫转成橙色的同时，**电线会从粉红变成青绿**。要避免只能改 `cat.json` 的颜色数据——但那样 `LICENSE.md` 里"我们未修改原文件"那句声明就得跟着改（授权允许修改，只是声明要准确）。
+    - **checkin 我建议不改**，理由是一个不对称：observing 只有 30px 的徽章在变（所以需要帮忙），而 checkin 时 **220px 的气泡整个弹出来**（不可能错过）。加了反而抢注意力——那一刻用户要读文字做选择。而且**把"猫会变"这张牌留给最需要它的 observing，反差才立得住**。
+    - **待 Jay 一起定**：选哪一档、checkin 那个弹跳留不留。原设计写的是"三态不再靠猫变色区分"，那个"不再"说明重方案试过并退回过——推翻它是个有意识的决定，不是顺手改。
+    - ![alt text](image.png)
+
+6. **两条记下来待议的（今天没做）**
+    - **起步教练的"第一步物理动作"有胡诌问题**：输入 `review computer network for the exam`，它给的是 `Open the network textbook, flip to chapter 4.`——**哪本书、哪一章都是编的**。而且 **B12 那版 prompt 让它更严重了**：里面写着 *"If you cannot name the thing, you are being too vague"*，等于**在要求一个不知道你有哪本书的模型必须说出具体书名**。demo 风险比功能缺失更大——评委第一反应是"它怎么知道我有这本书"，**这个破绽出现在整场 demo 的第一屏**。三个方向：①直接删掉 firstAction（违背 B6 定义）；②**改成用户自己填第一步**（准确性问题消失，而且 implementation intention 研究里自己生成的比被指派的更容易执行）；③放宽 prompt（会退化成跟兜底文案差不多的废话）。**我倾向 ②，等 J10 demo 走查时再定**——那时会更清楚这一屏该演成什么样。
+    - **check-in 在面板之外没有任何提醒机制**：grep 确认 `manifest` 权限里没有 `notifications`，代码里也没有 `setBadgeText`/`chrome.action` 的任何用法。用户飘到 YouTube 时侧边栏很可能根本没开——**check-in 弹了他看不见**。但这条**对 demo 不影响**（演示时侧边栏一定开着），而且如果 B16（悬浮桌宠）做了就自然解决。**等 B16 开工时一起决定**：B16 表单上写的是 `documentPictureInPicture`（独立置顶小窗），跟"直接悬浮在网页上"（content script 注入）**不是一回事**，选哪个会决定还要不要 badge 兜底。
+
+
+

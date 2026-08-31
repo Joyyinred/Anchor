@@ -151,3 +151,26 @@ createRoot(document.getElementById("summary2")!).render(
     onRestart={() => log("SESSION_RESTART")}
   />
 );
+
+// ── B13 原型对照（08-30）：上排开效果、下排关效果，同样的三态并排看 ──
+const B13_MSG = buildCheckInMessage(
+  'DRIFT',
+  { lastAnchorSnapshot: { title: 'login.tsx — auth bug', url: '', ts: BASE - 10 * 60_000 }, currentTitle: '' },
+  BASE
+);
+for (const [id, state] of [['p1', 'companion'], ['q1', 'companion']] as const) {
+  createRoot(document.getElementById(id)!).render(<CuteAnchorPet state={state} />);
+}
+for (const id of ['p2', 'q2']) {
+  createRoot(document.getElementById(id)!).render(<CuteAnchorPet state="observing" />);
+}
+for (const id of ['p3', 'q3']) {
+  createRoot(document.getElementById(id)!).render(
+    <CuteAnchorPet state="checkin" channel="DRIFT" message={B13_MSG} onAnswer={() => {}} />
+  );
+}
+
+// observing 强度四档（08-30 待评审）：同一个 observing 态，靠外层 class 施加不同滤镜
+for (const id of ['o1', 'o2', 'o3', 'o4']) {
+  createRoot(document.getElementById(id)!).render(<CuteAnchorPet state="observing" />);
+}
