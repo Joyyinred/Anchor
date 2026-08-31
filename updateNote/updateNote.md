@@ -752,5 +752,54 @@ J7 走通之后开始真机连测，抓出并修掉了一串「收尾 → 新会
     - **起步教练的"第一步物理动作"有胡诌问题**：输入 `review computer network for the exam`，它给的是 `Open the network textbook, flip to chapter 4.`——**哪本书、哪一章都是编的**。而且 **B12 那版 prompt 让它更严重了**：里面写着 *"If you cannot name the thing, you are being too vague"*，等于**在要求一个不知道你有哪本书的模型必须说出具体书名**。demo 风险比功能缺失更大——评委第一反应是"它怎么知道我有这本书"，**这个破绽出现在整场 demo 的第一屏**。三个方向：①直接删掉 firstAction（违背 B6 定义）；②**改成用户自己填第一步**（准确性问题消失，而且 implementation intention 研究里自己生成的比被指派的更容易执行）；③放宽 prompt（会退化成跟兜底文案差不多的废话）。**我倾向 ②，等 J10 demo 走查时再定**——那时会更清楚这一屏该演成什么样。
     - **check-in 在面板之外没有任何提醒机制**：grep 确认 `manifest` 权限里没有 `notifications`，代码里也没有 `setBadgeText`/`chrome.action` 的任何用法。用户飘到 YouTube 时侧边栏很可能根本没开——**check-in 弹了他看不见**。但这条**对 demo 不影响**（演示时侧边栏一定开着），而且如果 B16（悬浮桌宠）做了就自然解决。**等 B16 开工时一起决定**：B16 表单上写的是 `documentPictureInPicture`（独立置顶小窗），跟"直接悬浮在网页上"（content script 注入）**不是一回事**，选哪个会决定还要不要 badge 兜底。
 
+## 0831
+
+### Jay
+1. 关于三态ui：同意checkin不改，observing 我觉得v2好看一点。
+
+2. **起步教练问题**：我昨天pull request里更新的版本写了一版参考prompt，但我觉得那一版生成的first step 也不会很具体很精准，但起码避免了编造。我认为现在的问题出在 ：
+    i. 现在的LLM只收到 taskDeclaration，收不到用户当下的上下文，也就无法根据用户现在所在的页面提出精准的行动建议。比如：：用户声明 "study neural network"，且他已经开着 3b1b 的视频页——精准的第一步应该是 "Press play on the 3Blue1Brown video you already have open"，但 LLM 看不见这个页面，只能给出泛化的 "Open a neural network tutorial video"。
+    ii. 追问是固定文案，没有针对性: 契约 §5.5 规定追问不占用 LLM 调用（纯本地长度判断）。所以用户输入 "study"，追问永远是同一句 "Can you be a bit more specific?..."——它不问"学什么""为了考试还是作业"。模糊任务的信息缺口没有被定向补掉，后面的拆解自然泛。契约设计时候没有考虑这么细，现在可以重新讨论：我认为追问可以走 LLM ，最多 3 次调用（2 轮追问 + 1 次拆解），现在我们用的groq模型应该够用的。
+    iii. (kimi给的建议) 没有评测集：现在判断"prompt 好不好"的唯一依据是 demo 时肉眼看一眼。没有一组固定任务 + 期望标准，就无法回答"v2 比 v1 好多少"，也无法防止修一个失败模式引入另一个。、
+    iv. archetype 没进 prompt：阶段一统一 CREATOR 近似（这是当时拍板的简化）。但"读论文"的第一步和"debug"的第一步形态完全不同，画像不进 prompt，输出就会很宽泛。
+
+    **建议**：
+    第一步
+    1. 给 StarterCoachLLMCall 加 anchorContext?: { title, url }：runStarterCoach 把 inferredAnchor 透传进 LLM 调用，prompt 里加一段 "They currently have this page open: ... If it's related to the task, the first action should use it."——签名是内部接口（不走 FeatureFrame 缝），改动可控，单测好写。
+    2. 建评测集 evals/starter-coach.cases.json：手写 20 条任务声明（覆盖三类画像、中英文、具体/模糊各档），每条标注 rubric 检查点（物理性/无计划伪装/无目标复述/≤12 词/用了锚点上下文）。
+    3. 写 evals/run-starter-coach.ts 脚本：批量打 Groq，输出每条 pass/fail + 失败原因归类。规则类检查（长度、序列、复述）用代码断言；语义类（是否真的"具体到能命名东西"）用 LLM-as-judge 二次打分。以后每次改 prompt 先跑这个，让通过率数字代替感觉。
+
+    第二步（阶段二 B12 范围）
+    4. 追问 LLM 化：针对性追问（需要改契约 §5.5 的"追问不调 LLM"约束）。
+        - 起步教练产出中，`taskDeclaration.length >= 8`（"学习"不满足）
+        - 若 < 8 且追问未满 2 轮 → 调用一次 LLM 生成针对性追问（根据用户输入推断缺口：学什么/目标/截止）
+        - 追问最多 2 轮，之后接受用户输入（避免僵住）
+        - ★ v4.1：追问走 LLM，最多 3 次调用（2 轮追问 + 1 次拆解）
+
+        - 追问prompt 例子：
+        ```
+        The user wants to start a task but gave a vague answer: "{userInput}"
+
+        Ask ONE follow-up question to help them be more specific. The question should:
+        - Ask about ONE of: what exactly to study/do, what the goal is, or what the deadline is
+        - Be natural and warm, not interrogative
+        - Be at most 15 words
+        - Not repeat the user's words back
+
+        Good: "What subject are you studying, and is it for an exam or homework?"
+        Good: "What's the deadline for this task?"
+        Bad: "Can you be more specific?" (too generic, doesn't help)
+        Bad: "Tell me more about your task." (sounds like a form)
+
+        Output JSON only:
+        {"followupQuestion": string}
+        ```
+    5. archetype 合并进同一次调用：输出 { firstAction, archetype }，一次调用两个产出，不增加延迟。
+    6. few-shot 示例按画像分组：CREATOR/READER/VIEWER 各配 2 条 good 例子。
+
+
+3. check-in 在面板之外没有任何提醒机制：我的想法是直接悬浮在网页上，等功能实现的差不多之后直接完全变成悬浮态，彻底抛弃side panel。
+
+
 
 
