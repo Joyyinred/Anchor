@@ -55,9 +55,18 @@ function SidePanelApp() {
     // 不是一次性 sendMessage（那样 panel 没打开时消息会直接丢，storage 里的值不会）。
     function onStorageChanged(changes: Record<string, chrome.storage.StorageChange>, area: string) {
       if (area !== 'local') return;
-      if (changes[PANEL_STATE_KEY]) setPanelState(changes[PANEL_STATE_KEY].newValue as PanelState);
+      // ★ 08-30：每个 key 都必须处理"被删除"的情况——storage.onChanged 在 remove 时也会
+      //   触发，此时 newValue 是 undefined。这一行原来是裸赋值，因为 PANEL_STATE_KEY 从来
+      //   没被删过；endSession() 开始清它之后，setPanelState(undefined) 让渲染时读
+      //   panelState.state 抛错，**整棵 React 树崩掉、桌宠直接消失**（白屏）。
+      if (changes[PANEL_STATE_KEY]) {
+        setPanelState((changes[PANEL_STATE_KEY].newValue as PanelState | undefined) ?? DEFAULT_PANEL_STATE);
+      }
       if (changes[ONBOARDING_STATE_KEY]) {
-        setOnboardingState(changes[ONBOARDING_STATE_KEY].newValue as OnboardingState);
+        // 同上：现在没人删这个 key，但留着裸赋值就是下一个等着被踩的坑。
+        setOnboardingState(
+          (changes[ONBOARDING_STATE_KEY].newValue as OnboardingState | undefined) ?? DEFAULT_ONBOARDING_STATE
+        );
       }
       if (changes[REST_STATE_KEY]) {
         setRestState((changes[REST_STATE_KEY].newValue as RestState | undefined) ?? DEFAULT_REST_STATE);
@@ -70,6 +79,15 @@ function SidePanelApp() {
     chrome.storage.onChanged.addListener(onStorageChanged);
     return () => chrome.storage.onChanged.removeListener(onStorageChanged);
   }, []);
+
+  // ★ 08-30 真机 bug：onboardingDismissed 原来是"点过 Let's go 就永久为 true"的一次性
+  //   本地记忆，收尾结算后没有任何人把它设回 false——于是用户点完"Start something new"，
+  //   `!onboardingDismissed` 这半边恒为 false，起步教练根本没机会显示，直接落到桌宠界面。
+  //   改成跟着 SW 推来的状态走：只要 SW 说现在是 PENDING（新一场、还没声明任务），
+  //   本地那份"我已经翻过起步页"的记忆就作废。
+  useEffect(() => {
+    if (onboardingState.status === 'PENDING') setOnboardingDismissed(false);
+  }, [onboardingState.status]);
 
   function handleAnswer(answer: CheckInAnswer, channel?: CheckInChannel) {
     // channel 理论上 state==='checkin' 时才会被点到，此时 panelState.channel 必然有值——
