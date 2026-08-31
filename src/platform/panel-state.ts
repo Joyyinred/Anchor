@@ -14,4 +14,9 @@ export interface PanelState {
   // 判成走神了"），答 FALSE_POSITIVE 时要把这个域名写回 SessionContext.sessionWhitelist，
   // 而不是用户点按钮那一刻恰好在哪个域名（sticky 面板允许用户在气泡还没消失时已经切走）。
   domain?: string;
+  // 08-30：DRIFT check-in 触发那一刻的 frame.lastAnchorSnapshot.url——check-in 文案
+  // "Last I saw you on X"就是拿它拼的，答 DRIFTED 时"带我回去"也要去同一个地方，
+  // 不能文案说 X、却把人带去别处（说了不算）。跟上面的 `domain` 是两码事：`domain` 是
+  // "把我判成走神的那个页面"（写白名单用），这个是"走神前最后待着的相关页面"（拉回去用）。
+  anchorUrl?: string;
 }

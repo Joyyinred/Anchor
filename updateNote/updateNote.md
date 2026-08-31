@@ -587,26 +587,12 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
 
 2. A10（demo 域名预热）检查+修复，warmup.ts。
 
-    **涉及文件**：
-    - 新增 `src/platform/background/warmup.ts`：`DEFAULT_DEMO_WARMUP_PAGES`（预热页面列表）+ `loadDemoWarmupPages()`（读 `chrome.storage.local` 的 `anchor_demo_warmup_pages` 覆盖，没有就退回默认列表）+ `warmupDemoClassifications()`（逐页跑 `classifyDomainRelevance()` 写入缓存，返回 `{warmed, total}`）。
-    - `src/platform/messages.ts`：新增 `WarmupDemoClassificationsMessage`（`type: 'WARMUP_DEMO_CLASSIFICATIONS'`），并入 `RuntimeMessage` 联合类型。
-    - `src/platform/background/frame-pipeline.ts`：新增导出 `getClassificationCache()`——`classificationCache` 原来是模块私有变量，warmup 需要往同一份缓存里写，不能自己另开一份（否则 `triggerLazyClassification()` 读的和 warmup 写的不是同一个 Map，预热等于白做）。
-    - `src/platform/background/index.ts`：接了 `WARMUP_DEMO_CLASSIFICATIONS` 消息分支，调 `warmupDemoClassifications(ctx, getClassificationCache())` 并打印 `warmed/total` 日志。SW 控制台手动触发：`chrome.runtime.sendMessage({ type: 'WARMUP_DEMO_CLASSIFICATIONS', timestamp: Date.now() })`。
-
     **demo 流程**：起步教练输入任务声明 `study neural network`，然后依次访问：
     - YouTube 娱乐视频（预期 IRRELEVANT）：https://www.youtube.com/watch?v=-IaGmGc4iZ4（标题 `100 Hours In The Coldest City On Earth! (-71°C, -96°F) - Yakutsk, Siberia`）
     - YouTube 神经网络学习视频（预期 RELEVANT，demo 卖点：同域内容级区分）：https://www.youtube.com/watch?v=aircAruvnKk&list=PLZHQObOWTQDNU6R1_67000Dx_ZCJB-3pi（标题 `But what is a neural network? | Deep learning chapter 1`）
     - GitHub neural network study repo（域名级预置缓存直接判 RELEVANT）：https://github.com/karpathy/nn-zero-to-hero/tree/master
     - AI 学习辅助（域名级预置缓存直接判 RELEVANT）：https://claude.ai/new
     - 黑名单页面（域名级黑名单直接判 IRRELEVANT）：https://www.booking.com/index.en-gb.html
-
-    **修的两个真 bug**：
-    - `index.ts` 导入的是 `DEMO_WARMUP_PAGES`，但 `warmup.ts` 导出的是 `DEFAULT_DEMO_WARMUP_PAGES`，名字对不上，typecheck 直接报错——这是我介入前就有的状态。顺手把 `warmupDemoClassifications()` 的返回值从裸 `number` 改成 `{warmed, total}`，`total` 是实际跑的页面数（`anchor_demo_warmup_pages` 有覆盖时会跟着走，不会像原来硬编码 `.length` 那样在覆盖后数字对不上）。
-    - **缓存 key 不一致，会让预热对两个 YouTube 页面完全失效**：`warmupDemoClassifications()` 写缓存时自己做了 `.replace(/^www\./, '')` 去掉 `www.`，但真实运行时 `signals.ts` 产出的 `SignalEvent.domain` 是 `domainOf()` 的原始结果（**带** `www.`），`resolveContextRelevance()`/`triggerLazyClassification()` 读写缓存全部用带 www. 的 domain 拼 key。两边不一致 → 预热写进去的 `youtube.com/watch?v=...` 跟现场查的 `www.youtube.com/watch?v=...` 是两个不同字符串 → **缓存命中率 0%，预热白跑，demo 现场那两个 YouTube 页面照样要等 LLM 现场判**——刚好是这次预热最该保护的两个页面。改成直接复用 `domainOf()`，跟真实运行时同一份实现，不会再漂移。
-
-    **删了不需要预热的域名**：GitHub/Claude.ai/Booking 三个已经被 `DEMO_PRESET_CACHE`（github.com/claude.ai → RELEVANT）和 `BUILTIN_ENTERTAINMENT_BLACKLIST`（booking.com → IRRELEVANT）在 `resolveContextRelevance()` 里域名级短路覆盖，短路排在 classificationCache 之前，预热它们的结果永远不会被读到——按 Groq 免费层 30 RPM 预算删掉这三条纯浪费调用的 entry。现在列表只剩①②那两个真正需要预热的 youtube.com 页面（youtube 是故意不进任何静态表的混合站，页面级相关性只能靠 LLM/缓存判）。
-
-    **★ demo 现场要注意的一条提醒**：cacheKey 是按 URL 精确匹配的（domain+pathname+search），demo 现场必须直接在地址栏粘贴这个精确 URL——如果从 YouTube 播放列表 UI 里点进去，YouTube 经常会在地址栏补上 `&index=`/`&t=` 之类的参数，query string 一变 key 就变，照样会缓存未命中。
 
 3. **A10 最终决定：整个删掉**，不留自动触发版本。
 
@@ -615,6 +601,95 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
     本来打算修成"起步教练完成时自动触发 warmup（仅 DEMO_MODE），不再需要手动切控制台"来同时解决时序坑和"评委面前敲命令很难看"这两个问题，但验证下来：DRIFT 需要的 30s 持续证据窗口通常比 LLM 响应时间长得多，**不预热，现场分类也来得及**——那这层保险的收益已经小到不值得维护成本了（多一个消息类型、多一份 demo 页面清单要跟真实 demo 保持同步、多一处"必须先起步教练再预热"的隐性时序要求）。
 
     最终**决定删掉 A10**：`src/platform/background/warmup.ts`、`messages.ts` 的 `WarmupDemoClassificationsMessage`、`frame-pipeline.ts` 的 `getClassificationCache()` 导出全部移除。**接受的风险**：现场 Groq 抖动/限流的极小概率仍无兜底——demo 前建议至少手动把要用的页面（尤其两个 YouTube 视频）访问一遍走一次真实分类，当纯人工预热，不依赖代码机制。188/188 测试、typecheck、build 干净（构建产物 50→49 模块）。
+
+4. 建立新联合分支stage2，用于merge我们第二阶段的工作，第二阶段代码我会更新在A13。
+
+5. **给 Joy：起步教练"胡编具体细节"的具体修复方案**（B12 范围）。
+
+    **根因**：不是模型偶尔抽风，是 prompt 自己在教它编。`buildPrompt()` 的规则6写着"If the task is vague, pick the most likely concrete reading and commit to it...hedging is worse than guessing"——直接告诉模型"编一个可信细节，好过承认不知道"。更关键的是，3 个 Good 范例里有 2 个本身就在示范这个 bug：`"Pull up lecture 5 slides..."`（编了"lecture 5"）和 `"Put the textbook on your desk, open to chapter 3."`（编了"chapter 3"）。few-shot 范例对小模型（`gpt-oss-120b`）行为的影响通常比规则文字更大，只改规则文字不换范例大概率压不住。
+
+    **不建议的方向**：加一轮"追问具体章节"的二次 LLM 交互。契约 §5.5 对 `taskDeclaration` 只要求长度 ≥8 字符、不够追问最多2轮（纯长度闸门，不涉及语义），`coach.ts` 的 `StarterCoachLLMCall` 是单次调用设计，`callGroq()` 单轮无历史。加语义追问会：多一轮延迟、复用/污染契约明文只给长度检查用的那 2 轮预算、多一个"追问问题本身也可能问不好"的新故障面——超出这一个 bug 该有的改动范围。
+
+    **建议方案：纯 prompt 重写 + 一层运行时正则兜底，不碰调用架构**（`coach.ts`/`coach.test.ts` 不用动）。
+
+    ① **重写 `buildPrompt()`**——规则2加"只用任务里真实给出的细节，编的等于说谎"；规则6拆开"必须给出具体动作"（保留，vague 任务也不能反问/hedge，这部分设计是对的）和"不能编造事实"（新增）；2 个 Good 范例换成不编号的表述；新增一条 Bad 范例用这次真机复现的原句，让 few-shot 集合正面教它别这么答：
+
+    ```
+    You are a warm, practical friend helping someone begin a work session.
+    Not a coach and not a manager — a friend who knows that starting is the hard part.
+
+    Their task: "${taskDeclaration}"
+
+    Name ONE physical first action: something their hands can do in the next 10 seconds,
+    on their screen or on their desk. It should be small enough that refusing feels silly.
+
+    Rules:
+    - One action only. Never a sequence, never "first... then...".
+    - Be physical and specific, but only with details that actually appear in their task above.
+      Name a file, chapter, or number ONLY if it was given to you. Never invent one — a chapter
+      number, page number, book title, or file name you made up is a lie, not a detail. If the
+      task didn't give you a name, point at something real but generic: "your notes", "the
+      material you have open", "your textbook" — that is still physical, just not fabricated.
+    - Planning is not starting. Reject "outline your approach", "think about the structure",
+      "make a list of what to do" — that is procrastination wearing a productive costume.
+    - Do not restate the goal. "Start writing the essay" is the goal, not an action.
+    - Do not name a prerequisite. "Open your laptop" is not an action, it is a precondition,
+      and saying it sounds condescending.
+    - If the task is vague, still commit to ONE concrete action — never ask a question, never
+      hedge, you get one shot. But "concrete" describes the ACTION (open, pick up, type, scroll),
+      not invented facts about material you were never shown. A generic-but-honest object beats
+      a specific-but-made-up one.
+    - At most 12 words. It is displayed in a small speech bubble.
+    - Write in English regardless of the language of the task. Plain and warm; no exclamation
+      marks, no cheerleading, no praise.
+
+    Good: "Open the essay doc and type just the title."
+    Good: "Pull up your slides and read the first one."
+    Good: "Put your textbook on the desk, open to today's topic."
+    Bad:  "Start writing the essay."                    (restates the goal)
+    Bad:  "Plan your essay structure."                  (planning, not starting)
+    Bad:  "Open your laptop."                           (a precondition, not an action)
+    Bad:  "Open the doc, then outline, then write."     (a sequence)
+    Bad:  "You can do this! Just begin."                (cheerleading, says nothing)
+    Bad:  "Open the network textbook, flip to chapter 4." (invents a chapter nobody gave you)
+
+    Output JSON only, no extra text:
+    {"firstAction": string}
+    ```
+
+    ② **二次防线（可选）：运行时正则守卫**——纯字符串函数，不碰 chrome API，可以完整单测：
+
+    ```ts
+    const FABRICATION_PATTERN = /\b(chapter|page|lecture|section|unit|module|slide|problem|exercise|week)\s+\d+\b/gi;
+
+    export function hasFabricatedSpecific(firstAction: string, taskDeclaration: string): boolean {
+      const matches = firstAction.match(FABRICATION_PATTERN) ?? [];
+      const task = taskDeclaration.toLowerCase();
+      return matches.some((m) => !task.includes(m.toLowerCase()));
+    }
+    ```
+
+    放进 `groqStarterCoachCall`：`extractFirstAction` 成功之后、`return` 之前查一遍，命中就 `console.warn` + `throw`，直接复用 `coach.ts` 已有的 try/catch → `FIRST_ACTION_FALLBACK`，不需要新架构。**局限性**：只能挡"任务里没给的数字型编号"（chapter/page/lecture/section/unit/module/slide/problem/exercise/week + 数字），挡不住编书名/文件名这类非数字的胡诌——是第二道防线不是完整方案，真正修复靠 prompt。建议新建 `starter-coach.test.ts` 只测这个纯函数（不碰 `groqStarterCoachCall`/`callGroq`，不会破坏"chrome API 相关代码不做自动化测试"这条现有共识）。
+
+    ③ **同步范围**：改完记得同步 `docs/起步教练prompt-v0.md`（文件自己写了"以代码为准，两边一起改"，08-29 刚踩过两边漂移的坑）；`Anchor_工作流程表单.md` 的 B12 行建议标 🔄 不是 ✅（只修了这一个具体 bug，B12 范围更大）。
+
+    ④ **验证方式**：prompt 质量本身没法自动化验证（正则守卫那个纯函数除外，有单测），走真机手测——原始复现用例（"review computer network for the exam"）+ 3 个变体（已带真实细节的任务，如 "finish chapter 3 of the react docs"／很模糊但够8字符的任务，如 "study for the test"／非学术类任务，如 "write a blog post about my trip"），检查不再编造数字细节的同时，原有 5 类失败模式（复述目标/伪装成计划/前置条件当动作/分步骤/加油打气式空话）没有被这次改动带回来。
+
+6. **锚点设计跟真实专注场景不符，改了三处**（都是契约信号2/DRIFT判定的语义改动，大修）。
+
+    **真机复现链路**：起步页面设成 GitHub 仓库 → 中途切到相关的 YouTube 学习视频看了好几分钟（`lastAnchorSnapshot` 没更新，因为 YouTube 不是最初声明的那个锚点）→ 切到黑名单页面 booking.com，`contextRelevance` 立刻判 `IRRELEVANT`，但等了将近 10 分钟才 check-in（8min 通用阈值 + 60s 纹理证据 + 30s 持续窗口，一分不少地全部叠满）。
+
+    **我的判断**：锚点不该只能是起步教练最初声明的那一个固定页面——专注过程中从 GitHub 切到 Jupyter 再切到 Notion 都可能是任务相关资源。
+
+    ① **`lastAnchorSnapshot`/`anchorDetachedMs` 改成追踪"最后一次判定 RELEVANT 的页面"**：`perceiver.ts` 的 `computeAnchorSignal()` 判定标准从 `isAnchor===true`（按 `matchMode` 精确/前缀匹配那一个固定锚点）改成 `resolveContextRelevance(e,ctx,cache)==='RELEVANT'`。`isAnchor` 字段本身没删（jumpPattern 的 segment 判断、signals.ts 还在用），只是这一个信号改了口径。
+
+    ② **`pullBackToAnchor()` 跟着改成跟随 `lastAnchorSnapshot`，不再是固定的 `ctx.anchor.domain`**：不然会出现"check-in 文案说上次在 Jupyter，点'带我回去'却被拉去最初的 GitHub"这种自相矛盾——check-in 文案本来就是拿 `lastAnchorSnapshot` 拼的，两处必须指向同一个地方。新增 `PanelState.anchorUrl`（DRIFT 触发时 `frame.lastAnchorSnapshot.url`），一路穿到 `CheckInAnswerMessage.anchorUrl` → `pullBackToAnchor(anchorUrl)`。匹配逻辑也从 `isAnchorMatch`（exact/prefix）换成 `domainMatches`（同域或子域），跟白名单/黑名单同一套判断。
+
+    ③ **DRIFT 阈值调整**：
+    - 黑名单命中的域名新增独立 **15s** 快速通道（`detector.ts` `isDrifting()` 里短路优先级排在通用逻辑之前的新分支）——域名黑名单是"确定无关"的高置信度判定，不用像 LLM 判出来的 IRRELEVANT 那样等那么久。★ 先检查 `f.contextRelevance==='IRRELEVANT'` 而不是只查静态表：如果这个域名已经被 `sessionWhitelist` 纠正成 RELEVANT，不会绕过纠正走快速通道。仍然要求标准 30s 持续窗口，不会因为一帧命中就立刻开口。
+    - CREATOR 的通用 `anchorDetachedThresholdMs` 从 8min 调到 **5min**（`types.ts` `PROFILE_PRESETS.CREATOR`）——黑名单已经走快速通道，这个值现在只服务"LLM 判 IRRELEVANT 但不在黑名单里"这类没那么确定的情况。READER/VIEWER 没动：READER 阶段一 archetype 永远是 CREATOR，改了也验证不到；VIEWER 的 20min 是给长视频课程的独立设计，跟这次的问题无关。
+
+    **测试**：`perceiver.test.ts` 重写/新增锚点相关用例（"切到另一个 RELEVANT 页面依然归零""isAnchor:true 但不 RELEVANT 时不归零"），`detector.test.ts` 新增黑名单快速通道 4 条（含"sessionWhitelist 纠正后不会绕过"这条边界）+ 通用阈值调整 2 条。202/202 全绿，`npm run typecheck`/`npm run build` 干净。
 
 
 ### Joy
@@ -676,5 +751,6 @@ J7 走通之后开始真机连测，抓出并修掉了一串「收尾 → 新会
 6. **两条记下来待议的（今天没做）**
     - **起步教练的"第一步物理动作"有胡诌问题**：输入 `review computer network for the exam`，它给的是 `Open the network textbook, flip to chapter 4.`——**哪本书、哪一章都是编的**。而且 **B12 那版 prompt 让它更严重了**：里面写着 *"If you cannot name the thing, you are being too vague"*，等于**在要求一个不知道你有哪本书的模型必须说出具体书名**。demo 风险比功能缺失更大——评委第一反应是"它怎么知道我有这本书"，**这个破绽出现在整场 demo 的第一屏**。三个方向：①直接删掉 firstAction（违背 B6 定义）；②**改成用户自己填第一步**（准确性问题消失，而且 implementation intention 研究里自己生成的比被指派的更容易执行）；③放宽 prompt（会退化成跟兜底文案差不多的废话）。**我倾向 ②，等 J10 demo 走查时再定**——那时会更清楚这一屏该演成什么样。
     - **check-in 在面板之外没有任何提醒机制**：grep 确认 `manifest` 权限里没有 `notifications`，代码里也没有 `setBadgeText`/`chrome.action` 的任何用法。用户飘到 YouTube 时侧边栏很可能根本没开——**check-in 弹了他看不见**。但这条**对 demo 不影响**（演示时侧边栏一定开着），而且如果 B16（悬浮桌宠）做了就自然解决。**等 B16 开工时一起决定**：B16 表单上写的是 `documentPictureInPicture`（独立置顶小窗），跟"直接悬浮在网页上"（content script 注入）**不是一回事**，选哪个会决定还要不要 badge 兜底。
+
 
 

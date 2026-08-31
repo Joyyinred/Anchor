@@ -23,11 +23,14 @@ function toPanelState(
     // domain 记的是"就是这个域名把我判成走神了"（触发那一刻的 frame.currentDomain）——
     // 答 FALSE_POSITIVE 时要用它写回 sessionWhitelist，不是用户点按钮那一刻恰好在哪个域名
     // （sticky 面板允许气泡还没消失时用户已经切走，见 pushPanelState 上面的注释）。
+    // anchorUrl 记的是 frame.lastAnchorSnapshot.url——check-in 文案就是拿它拼的
+    // （"Last I saw you on X"），答 DRIFTED 时 pull-back 要去同一个地方，两者必须一致。
     return {
       state: 'checkin',
       channel: 'DRIFT',
       message: buildCheckInMessage('DRIFT', frame, now),
       domain: frame.currentDomain,
+      anchorUrl: frame.lastAnchorSnapshot.url,
     };
   }
   if (result.action === 'CHECK_IN_STUCK') {

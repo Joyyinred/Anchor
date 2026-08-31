@@ -11,7 +11,7 @@
 // 读写 chrome.storage.local。
 import type { SessionContext } from '../../engine/types';
 import { defaultSessionContext } from '../../engine/types';
-import { domainOf } from './domain';
+import { domainOf, isInternalBrowserUrl } from './domain';
 import { getDemoMode } from './state';
 
 const SESSION_KEY = 'anchor_default_session';
@@ -22,7 +22,9 @@ export async function getOrInitSessionContext(): Promise<SessionContext> {
   if (existing) return existing;
 
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const url = activeTab?.url ?? '';
+  const rawUrl = activeTab?.url ?? '';
+  // 08-30：同 onboarding.ts 的注释——chrome://extensions/ 这类内部页面不该被锁成锚点。
+  const url = isInternalBrowserUrl(rawUrl) ? '' : rawUrl;
   const isDemoMode = await getDemoMode();
 
   const ctx = defaultSessionContext(Date.now(), { domain: domainOf(url), url }, 'default', isDemoMode);

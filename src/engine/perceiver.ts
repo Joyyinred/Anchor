@@ -124,8 +124,14 @@ export function resolveContextRelevance(
 }
 
 // ── 信号 2：锚点脱离时长 + lastAnchorSnapshot ──
-// isAnchor 由上游信号采集（A4）依据 SessionContext.anchor.matchMode 判定后直接标记在 SignalEvent 上；
-// 感知半在此只消费该标记，不重复做 URL/前缀匹配。
+// 08-30 真机测试后改的语义：不再要求"必须是起步教练最初声明的那一个固定锚点"（`isAnchor`
+// 字段，按 `SessionContext.anchor.matchMode` 精确/前缀匹配）。真实专注场景里锚点是会变的——
+// 从 GitHub 仓库切到 Jupyter Notebook 再切到 Notion 笔记，只要都是任务相关资源，都该算"还在
+// 干正事"，不该因为不是最初那一个 URL 就被记成"脱离"。现在的标准改成"这一刻的页面判定是
+// 不是 RELEVANT"（信号1已经算好的 `resolveContextRelevance`），不再看 `isAnchor`。
+// `isAnchor` 字段本身没有从 schema 里删——jumpPattern 的 segment 判断（§1信号4）、
+// 平台层 signals.ts 的 `isAnchorMatch` 还在用它，这里只是信号2改了口径（pull-back.ts
+// 08-30 也跟着改成按 lastAnchorSnapshot 找目标 tab，不再依赖 isAnchorMatch）。
 const MEANINGFUL_ANCHOR_INTERACTIONS = new Set<SignalEvent['interactionType']>([
   'ACTIVE_INPUT',
   'PASSIVE_SCROLL',
@@ -135,12 +141,20 @@ const MEANINGFUL_ANCHOR_INTERACTIONS = new Set<SignalEvent['interactionType']>([
 
 function computeAnchorSignal(
   events: SignalEvent[],
+  ctx: SessionContext,
+  cache: ClassificationCache,
   now: number
 ): { anchorDetachedMs: number; lastAnchorSnapshot: FeatureFrame['lastAnchorSnapshot'] } {
-  let lastTs = 0; // 会话开始尚无锚点交互时，从 sessionStart(0) 起累计
+  // 08-30：会话开始尚无"相关页面上的有意义交互"时，从这份历史里最早一条事件的时间戳算起
+  // （不是字面量 0/Unix epoch——那样 anchorDetachedMs 会从第一帧起就是个天文数字，是之前
+  // 修过的一个真 bug）。events 为空（真正的会话第一帧）时退回 now，正确从 0 起算。
+  let lastTs = events[0]?.timestamp ?? now;
   let snapshot: FeatureFrame['lastAnchorSnapshot'] = { title: '', url: '', ts: 0 };
   for (const e of events) {
-    if (e.isAnchor && MEANINGFUL_ANCHOR_INTERACTIONS.has(e.interactionType)) {
+    if (
+      MEANINGFUL_ANCHOR_INTERACTIONS.has(e.interactionType) &&
+      resolveContextRelevance(e, ctx, cache) === 'RELEVANT'
+    ) {
       lastTs = e.timestamp;
       snapshot = { title: e.title, url: e.url, ts: e.timestamp };
     }
@@ -328,7 +342,7 @@ export function computeFeatureFrame(
   const current = visible[visible.length - 1];
 
   const contextRelevance = current ? resolveContextRelevance(current, ctx, cache) : 'UNKNOWN';
-  const { anchorDetachedMs, lastAnchorSnapshot } = computeAnchorSignal(visible, now);
+  const { anchorDetachedMs, lastAnchorSnapshot } = computeAnchorSignal(visible, ctx, cache, now);
   const texture = computeTexture(visible, now, contextRelevance, previousTexture, isDemoMode);
   const jumpPattern = computeJumpPattern(visible, ctx, cache, now, isDemoMode);
   const stillnessMs = computeStillnessMs(visible, now);
