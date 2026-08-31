@@ -56,5 +56,16 @@ const RECHECK_MS = 8000;
 setInterval(() => {
   if (document.hidden) return;
   const message: RecheckMessage = { type: 'RECHECK', timestamp: Date.now() };
-  chrome.runtime.sendMessage(message).catch(() => {});
+  // 08-31 排查补：真机反馈 SW 侧完全看不到 RECHECK——最常见的原因是扩展重新加载后，已经
+  // 打开的标签页还在跑旧版 content script，它的扩展上下文（extension context）已经失效，
+  // chrome.runtime.sendMessage 会同步抛错（不是走 promise reject），try/catch 兜住并打到
+  // *这个标签页自己的* devtools 控制台（不是 SW 的 inspect 窗口）——两边控制台是分开的，
+  // 排查时要分别看。
+  try {
+    chrome.runtime.sendMessage(message).catch((err) => {
+      console.warn('[Anchor content script] RECHECK send rejected', err);
+    });
+  } catch (err) {
+    console.warn('[Anchor content script] RECHECK send threw (extension context likely invalidated — reload this page)', err);
+  }
 }, RECHECK_MS);

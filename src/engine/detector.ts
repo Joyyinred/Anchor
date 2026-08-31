@@ -1,4 +1,13 @@
-import { FeatureFrame, SignalPolicy, SessionContext, CheckInFeedback, DEFAULT_STUCK_LADDER, scaled } from './types';
+import {
+  FeatureFrame,
+  SignalPolicy,
+  SessionContext,
+  CheckInFeedback,
+  DEFAULT_STUCK_LADDER,
+  CHECKIN_COOLDOWN_MS,
+  DRIFTED_CHECKIN_COOLDOWN_MS,
+  scaled,
+} from './types';
 // 08-28：scaled() 的规范实现搬到 types.ts（唯一不会产生循环依赖的叶子模块，
 // defaultSessionContext 的 graceUntil 压缩也要用它）。这里重新导出，pet-state.ts（B9）
 // 现有的 `import { scaled } from './detector'` 不用跟着改。
@@ -16,6 +25,9 @@ export interface BState {
   lastAnswerTs: number;
   restUntil: number;
   restStartTs: number;
+  // 08-31：下一次冷却该用多久，applyCheckInFeedback() 按上一次回答写入——见 types.ts
+  // BStatePersistable.checkinCooldownMs 顶部注释。
+  checkinCooldownMs: number;
   driftSustainer: { since: number | null };
   stuckSustainer: { since: number | null };
   passiveSince: number | null;
@@ -105,14 +117,17 @@ export function isDrifting(
   now: number,
   isDemoMode?: boolean
 ): boolean {
-  const CHECKIN_COOLDOWN_MS = scaled(300_000, isDemoMode); // 5分钟冷却
+  // 08-31：冷却时长不再是写死的常量——按上一次回答变（DRIFTED 短、FOCUSED/FALSE_POSITIVE
+  // 长，见 applyCheckInFeedback()/types.ts 顶部注释），从没回答过时 state.checkinCooldownMs
+  // 就是 createInitialBState() 给的长冷却默认值。
+  const cooldownMs = scaled(state.checkinCooldownMs, isDemoMode);
   const SUSTAINED_EVIDENCE_MS = scaled(30_000, isDemoMode); // 30s 持续窗口
 
   // 公共闸口
   if (state.restUntil > now) return false;
-  if (now - state.lastCheckInTs < CHECKIN_COOLDOWN_MS) return false;
+  if (now - state.lastCheckInTs < cooldownMs) return false;
   // 走到这里说明冷却已经过了——把 check-in 之前攒的旧证据作废（契约v4 §3.7），
-  // 否则下面的持续器会拿着 5 分钟前的 since 立刻判定"已持续足够久"。
+  // 否则下面的持续器会拿着冷却前的 since 立刻判定"已持续足够久"。
   discardEvidenceFromBeforeCheckIn(state);
   if (now < ctx.graceUntil) return false;
 
@@ -179,14 +194,14 @@ export function isStuck(
   now: number,
   isDemoMode?: boolean
 ): boolean {
-  const CHECKIN_COOLDOWN_MS = scaled(300_000, isDemoMode);
+  const cooldownMs = scaled(state.checkinCooldownMs, isDemoMode);
   const SUSTAINED_EVIDENCE_MS = scaled(30_000, isDemoMode);
 
   // 公共闸口
   if (state.restUntil > now) return false;
-  if (now - state.lastCheckInTs < CHECKIN_COOLDOWN_MS) return false;
+  if (now - state.lastCheckInTs < cooldownMs) return false;
   // 走到这里说明冷却已经过了——把 check-in 之前攒的旧证据作废（契约v4 §3.7），
-  // 否则下面的持续器会拿着 5 分钟前的 since 立刻判定"已持续足够久"。
+  // 否则下面的持续器会拿着冷却前的 since 立刻判定"已持续足够久"。
   discardEvidenceFromBeforeCheckIn(state);
   if (now < ctx.graceUntil) return false;
 
@@ -308,6 +323,13 @@ export function applyCheckInFeedback(
   now: number
 ): BState {
   state.lastAnswerTs = now;
+
+  // 08-31 真机反馈后的产品决定：DRIFTED（"飘了"/"带我回去"）意味着用户刚承认自己走神——
+  // 如果拉回去没多久又飘了，这次专注确实吃力，下一次该更快介入，不能跟"在专注"/"我在查
+  // 资料"（用户主动确认没问题，值得给的信任）用同一档 5 分钟长冷却。两个通道都适用：
+  // STUCK+DRIFTED 是微重启，DRIFT+DRIFTED 是真的被拉走，都算"承认走神"。
+  state.checkinCooldownMs =
+    feedback.answer === 'DRIFTED' ? DRIFTED_CHECKIN_COOLDOWN_MS : CHECKIN_COOLDOWN_MS;
 
   if (feedback.channel === 'STUCK') {
     const ladderLen = policy.stuckLadderMs.length;

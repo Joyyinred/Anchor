@@ -816,6 +816,20 @@ J7 走通之后开始真机连测，抓出并修掉了一串「收尾 → 新会
 
     效果：把"下一次评估机会"的等待上限从"心跳周期（60s）"统一压到"8s"——不管是安静阅读、安静看视频、还是任何没预料到的安静场景，只要标签页可见，评估空档都不会超过 8 秒。黑名单心跳粒度问题严格说也被这个改动顺带缓解了（`booking.com` 场景现在最多等 8s 而不是心跳的 60s）。
 
+7. **真机反馈：`chrome://extensions` 里把插件关掉再打开，UI 停在上次关闭前的页面（桌宠/check-in），没有重新走一遍起步教练**：把"关掉再打开"当成一次会话结束，强制重新声明任务（附带影响：浏览器整个重启也会一样重置，不会接着上一场任务继续）。
+
+    **难点**：MV3 没给扩展"我刚被重新启用"这件事一个专门的订阅口——`onInstalled` 只在首次安装/版本更新/浏览器版本更新时触发，`onStartup` 只在浏览器进程启动时触发，两个都不认"用户在 `chrome://extensions` 里手动关了再开"这个动作；而 SW 因为 MV3 常规回收（空闲 ~30s 后被终止，下次事件来了再重新跑一遍顶层代码）也会重新执行同一段顶层代码——光看"顶层代码又跑了一次"分不清这次是"日常回收重启"还是"真的被关过又重新启用"。
+
+    **方案**：`chrome.storage.session` 正好卡在这两者中间——查了官方文档，它在"扩展被禁用/重新加载/更新/浏览器重启"时会被清空，但不会因为单次 SW 实例被 MV3 常规回收而清空（回收只终止这一个 SW 实例，不影响同一个浏览器会话里的 `storage.session` 数据）。`index.ts` 新增 `resetIfFreshStart()`：顶层代码每次执行都查一遍 `chrome.storage.session` 里的一个"活着"标记——标记还在，说明只是常规回收重启，什么都不做；标记没了（第一次装/刚被关闭再启用过/浏览器刚重启），一律当"上一场会话已经结束"处理：`taskDeclaration` 打回默认值、`sessionWhitelist` 清空（跟 `session-summary.ts` 的 `endSession()` 同一套清法，会话结束的两个入口该清同一批东西）、`REST_STATE_KEY`/`PANEL_STATE_KEY`/收尾统计/收尾快照四个 UI 状态一并清掉、`resetSessionState()` 清引擎侧的 `eventHistory`/`BState`/分类缓存，最后 `pushOnboardingStatus()` 推回 `PENDING`，side panel 重新打开时就会落在起步输入框。
+
+    这个模式（`chrome.storage.session` 当"是不是真的第一次启动"标记）是社区公认的 MV3 已知解法。226/226 测试、typecheck、build 全干净——这次改动是 chrome API 强相关的 SW 生命周期代码，没法用单测覆盖，仓库沿用一贯的"平台层生命周期代码不建测试基建"的边界，需要真机装一遍验证：①关再开插件确认弹出起步输入框；②正常使用中途 SW 被 MV3 回收重启（等几分钟不操作）确认**不会**误触发重置、能接着原任务继续。
+
+8. **真机测试引出的新决定：check-in 冷却期不该对所有回答一视同仁**——排查过程中发现5分钟冷却期太长，**如果用户被拉回去（DRIFT+DRIFTED）没多久又飘了，5 分钟长冷却会让下一次提醒太迟**。方案：**冷却时长按上一次回答区分，不再是写死的常量**——`DRIFT+DRIFTED`/`STUCK+DRIFTED`（用户承认走神，不管是被拉回去还是微重启）用短冷却 **2 分钟**；`STUCK+FOCUSED`/`DRIFT+FALSE_POSITIVE`（用户主动确认没问题）仍用原来的 **5 分钟**。理由：DRIFTED 是"这次专注确实吃力"的信号，该更快介入；FOCUSED/FALSE_POSITIVE 是用户主动确认没事，给长冷却是合理的信任，不算过度打扰。
+
+    **实现**（`types.ts` + `detector.ts`）：`BStatePersistable` 新增 `checkinCooldownMs` 字段（从写死的局部常量改成跟着 state 走的值），`createInitialBState()` 初始化成长冷却默认值（没回答过时的兜底）；`applyCheckInFeedback()` 每次回答后按 `feedback.answer === 'DRIFTED'` 写回短/长冷却；`isDrifting()`/`isStuck()` 的冷却闸门从读写死的 `CHECKIN_COOLDOWN_MS` 改成读 `state.checkinCooldownMs`。顺带在 `frame-pipeline.ts` 的 `ensureBStateLoaded()` 水合处补了 `?? CHECKIN_COOLDOWN_MS` 兜底——老版本存进 `chrome.storage.local` 的 `BStatePersistable` 没有这个新字段，水合回来会是 `undefined`，冷却算出 `NaN` 会让冷却当场失效，兜底只影响这次升级后的第一次水合。
+
+    测试：`b2.test.ts` 新增一组 `checkinCooldownMs` 相关用例（默认长冷却、DRIFT+DRIFTED/STUCK+DRIFTED 短冷却、STUCK+FOCUSED/DRIFT+FALSE_POSITIVE 长冷却、短冷却后再答长冷却答案能恢复），`cooldown.test.ts` 新增端到端行为用例（答 DRIFTED 后 2 分钟内不该再触发、2 分钟一过该正常触发且明显快于旧的 5 分钟；对照组验证 FALSE_POSITIVE 仍是长冷却不受影响）。234/234 测试、typecheck、build 全干净。
+
 
 
 

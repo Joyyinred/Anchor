@@ -5,7 +5,7 @@
 // 不是裸 FeatureFrame——B 的纯函数本身不碰 chrome.storage，BState 的持久化/水合仍然是
 // A（平台层）的职责，跟 eventHistory/currentTab 是同一套"SW 回收后重新水合"模式。
 import type { SignalEvent, SessionContext, FeatureFrame, DetectionResult, BState, BStatePersistable, CheckInFeedback } from '../../engine/types';
-import { createInitialBState } from '../../engine/types';
+import { createInitialBState, CHECKIN_COOLDOWN_MS } from '../../engine/types';
 import { computeFeatureFrame, cacheKey, type ClassificationCache } from '../../engine/perceiver';
 import { evaluateFrame, applyCheckInFeedback } from '../../engine/detector';
 import { createPetStateMachine, advancePetState } from '../../engine/pet-state';
@@ -85,7 +85,16 @@ async function ensureBStateLoaded(sessionId: string, archetype: Archetype): Prom
   // 持续器不是持久化的一部分（见 toPersistable 的注释）——不管是全新会话还是从存盘的
   // BStatePersistable 水合回来，持续器都给一份全新初值，不沿用任何"上一次 SW 实例"留下的状态。
   bState = persisted
-    ? { ...persisted, driftSustainer: { since: null }, stuckSustainer: { since: null }, passiveSince: null }
+    ? {
+        ...persisted,
+        // 08-31 新增字段——老版本存进 storage 的 BStatePersistable 没有这个字段，水合回来
+        // 会是 undefined，冷却闸门算出 NaN 会让冷却形同虚设；退回长冷却默认值兜底，只影响
+        // 这次升级后的第一次水合，用户下次真正走一遍 check-in 就会被正确覆盖。
+        checkinCooldownMs: persisted.checkinCooldownMs ?? CHECKIN_COOLDOWN_MS,
+        driftSustainer: { since: null },
+        stuckSustainer: { since: null },
+        passiveSince: null,
+      }
     : createInitialBState(archetype);
   bStateLoadedForSession = sessionId;
   return bState;

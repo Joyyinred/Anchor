@@ -79,10 +79,20 @@ async function emitSignalEvent(reason: string): Promise<void> {
   console.log(`[Anchor SW] SignalEvent (${reason})`, event);
   console.log('[Anchor SW] FeatureFrame', frame);
   console.log('[Anchor SW] DetectionResult', result);
+  // 08-31 排查补：graceUntil（起步后 2 分钟宽限期，detector.ts isDrifting()/isStuck() 排在
+  // 黑名单快速通道之前的公共闸门）之前完全没有日志可查，只能靠时间戳反推，排查效率很低——
+  // 直接打出来，下次一眼能看出是不是撞在这道闸上。
+  console.log('[Anchor SW] graceUntil', ctx.graceUntil, 'stillInGrace', event.timestamp < ctx.graceUntil);
 }
 
 export function isTrackedTab(tabId: number): boolean {
   return currentTab?.tabId === tabId;
+}
+
+// 08-31 排查用：RECHECK 消息被 isTrackedTab 挡掉时，光打"没过校验"看不出是"没有任何 tab
+// 被追踪"还是"追踪的是另一个 tab"——暴露这个只读值方便日志里对比两个 tabId。
+export function getTrackedTabId(): number | null {
+  return currentTab?.tabId ?? null;
 }
 
 // 契约v4 §3.1：SW 被 MV3 回收后 currentTab 这个内存变量会归零；如果用户正安安静静待在同一个

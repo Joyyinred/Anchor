@@ -1,18 +1,69 @@
 // Anchor · Service Worker 入口
 // 契约v4 §3.1：alarms 心跳兼职 SW 保活/唤醒源；SW 启动/唤醒后从 chrome.storage.local 恢复状态
 import type { RuntimeMessage } from '../messages';
+import type { SessionContext } from '../../engine/types';
+import { DEFAULT_TASK_DECLARATION } from '../../engine/types';
 import { getDemoMode, setDemoMode } from './state';
-import { getOrInitSessionContext } from './session';
-import { ensureCurrentTab, handleInteractionMessage, isTrackedTab, registerSignalListeners } from './signals';
-import { applyCheckInAnswer, recomputeOnHeartbeat, getBStateForSession, persistBState } from './frame-pipeline';
+import { getOrInitSessionContext, saveSessionContext } from './session';
+import { ensureCurrentTab, getTrackedTabId, handleInteractionMessage, isTrackedTab, registerSignalListeners } from './signals';
+import {
+  applyCheckInAnswer,
+  recomputeOnHeartbeat,
+  resetSessionState,
+  getBStateForSession,
+  persistBState,
+} from './frame-pipeline';
 import { pushPanelState, pushMicroRestartToast } from './panel';
 import { pushOnboardingStatus, handleOnboardingSubmit } from './onboarding';
 import { beginRest, endRest, refreshRestReminder } from './rest';
 import { pullBackToAnchor } from './pull-back';
 import { recordCheckInAnswer, recordRestStart, endSession, restartSession } from './session-summary';
+import { REST_STATE_KEY } from '../rest-state';
+import { PANEL_STATE_KEY } from '../panel-state';
+import { SESSION_SUMMARY_KEY, SESSION_STATS_KEY } from '../session-summary-state';
 
 const HEARTBEAT_ALARM_NAME = 'anchor-heartbeat';
 const HEARTBEAT_PERIOD_MINUTES = 1;
+
+const ALIVE_MARKER_KEY = 'anchor_sw_alive_marker';
+
+/**
+ * 08-31 真机反馈：chrome://extensions 里把插件关掉再打开，UI 停在上次关闭前的页面（桌宠/
+ * check-in），没有重新走一遍起步教练，修改：把"关掉再打开"当成
+ * 一次会话结束，强制重新声明任务（附带影响：浏览器整个重启后也会一样重置，不会接着上一次
+ * 的任务继续）。
+ *
+ * 难点：MV3 没给扩展"我刚被重新启用"这件事一个专门的订阅口——`onInstalled` 只在首次安装/
+ * 版本更新/浏览器版本更新时触发，`onStartup` 只在浏览器进程启动时触发，两个都不认"用户在
+ * chrome://extensions 里手动关了再开"这个动作；而 SW 因为 MV3 常规回收（空闲 ~30s 后被
+ * 终止，下次事件来了再重新跑一遍这个文件的顶层代码）也会重新执行这段顶层代码——光看"顶层
+ * 代码又跑了一次"，分不清这次是"日常回收重启"还是"真的被关过又重新启用"。
+ *
+ * `chrome.storage.session` 正好卡在这两者中间：官方文档明确写着它在"扩展被禁用/重新加载/
+ * 更新/浏览器重启"时会被清空，但不会因为单次 SW 实例被 MV3 常规回收而清空（回收只影响这个
+ * SW 实例本身，不影响它，数据仍在同一个"浏览器会话"里存活）。用它放一个"活着"标记：标记
+ * 还在 → 只是常规回收重启，什么都不做；标记没了 → 要么第一次装、要么刚被关闭再启用过、
+ * 要么浏览器刚重启，一律当成"上一场会话已经结束"处理。
+ */
+async function resetIfFreshStart(): Promise<void> {
+  const stored = await chrome.storage.session.get(ALIVE_MARKER_KEY);
+  const isFreshStart = !stored[ALIVE_MARKER_KEY];
+  await chrome.storage.session.set({ [ALIVE_MARKER_KEY]: true });
+  if (!isFreshStart) return;
+
+  console.log('[Anchor SW] fresh start detected (installed / re-enabled / browser restarted) — ending previous session');
+  const ctx = await getOrInitSessionContext();
+  // 跟 session-summary.ts 的 endSession() 同一套清法（会话结束的两个入口，理应清同一批东西）：
+  // taskDeclaration 打回默认值（onboarding.ts 的 pushOnboardingStatus() 就是拿它判断该不该
+  // 显示起步输入框）、sessionWhitelist 清空（针对上一个任务的申诉不该带进下一场）、
+  // REST/PANEL/收尾统计/收尾快照四个 UI 状态一并清（不清的话残留的休息态/气泡文案/上一场
+  // 摘要会在新会话里冒出来）、resetSessionState 清掉引擎侧的 eventHistory/BState/分类缓存。
+  const freshCtx: SessionContext = { ...ctx, taskDeclaration: DEFAULT_TASK_DECLARATION, sessionWhitelist: [] };
+  await saveSessionContext(freshCtx);
+  await chrome.storage.local.remove([REST_STATE_KEY, PANEL_STATE_KEY, SESSION_SUMMARY_KEY, SESSION_STATS_KEY]);
+  resetSessionState(freshCtx.sessionId);
+  await pushOnboardingStatus(freshCtx);
+}
 
 async function rehydrate(): Promise<void> {
   const isDemoMode = await getDemoMode();
@@ -67,6 +118,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       await pushPanelState(outcome.frame, outcome.result, outcome.petState, now);
       console.log('[Anchor SW] heartbeat FeatureFrame', outcome.frame);
       console.log('[Anchor SW] heartbeat DetectionResult', outcome.result);
+      console.log('[Anchor SW] graceUntil', ctx.graceUntil, 'stillInGrace', now < ctx.graceUntil);
     })();
   }
 });
@@ -74,6 +126,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 registerSignalListeners();
 // SW 刚被（重新）启动执行到这里时，currentTab 也是空的——不要等第一个 tabs 事件，主动查一次。
 void ensureCurrentTab();
+// 见上面 resetIfFreshStart() 顶部注释——每次这个文件的顶层代码执行都要查一遍"活着"标记，
+// 不止 onInstalled/onStartup 那两个事件覆盖的场景（两者都不认"手动关再开"）。
+void resetIfFreshStart();
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
   if (message.type === 'INTERACTION') {
@@ -92,14 +147,27 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
     // 同一条 recomputeOnHeartbeat 路径（见 messages.ts 顶部 RecheckMessage 注释）。跟
     // INTERACTION 一样只信任当前被追踪的锚点 tab 发来的——不然开着一堆无关标签页也会各自
     // 定时发 tick，白白跑一堆没有意义的计算。
+    // 08-31 排查补：真机反馈完全看不到任何 recheck 日志，怀疑是下面 isTrackedTab 校验或
+    // recomputeOnHeartbeat 提前 return 把它在到达底部日志之前就悄悄吞掉了——先打一条"收到了"
+    // 的日志，跟最终结果日志分开两处，才能分清是"content script 压根没发"还是"发了但被过滤"。
+    console.log('[Anchor SW] received RECHECK from tab', sender.tab?.id, sender.tab?.url);
     void ensureCurrentTab().then(async () => {
-      if (sender.tab?.id === undefined || !isTrackedTab(sender.tab.id)) return;
+      if (sender.tab?.id === undefined || !isTrackedTab(sender.tab.id)) {
+        console.log('[Anchor SW] recheck ignored — not the tracked tab (tracked =', getTrackedTabId(), ')');
+        return;
+      }
       const now = Date.now();
       const isDemoMode = await getDemoMode();
       const ctx = await getOrInitSessionContext();
       const outcome = await recomputeOnHeartbeat(ctx, now, isDemoMode);
-      if (!outcome) return;
+      if (!outcome) {
+        console.log('[Anchor SW] recheck skipped — no eventHistory yet');
+        return;
+      }
       await pushPanelState(outcome.frame, outcome.result, outcome.petState, now);
+      console.log('[Anchor SW] recheck FeatureFrame', outcome.frame);
+      console.log('[Anchor SW] recheck DetectionResult', outcome.result);
+      console.log('[Anchor SW] graceUntil', ctx.graceUntil, 'stillInGrace', now < ctx.graceUntil);
     });
     return;
   }

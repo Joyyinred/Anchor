@@ -110,6 +110,14 @@ export interface CheckInFeedback {
   answer: CheckInAnswer;
 }
 
+// 08-31 真机反馈后的产品决定：check-in 冷却不该对所有回答一视同仁——"飘了"（DRIFTED）
+// 恰恰是"用户刚承认自己走神/被拉回去了"的信号，如果拉回去没多久又飘了，说明这次专注确实
+// 吃力，更需要及时提醒，不该被跟"在专注"/"我在查资料"同一档的 5 分钟长冷却摁住；后两种
+// 回答是用户主动确认"没问题"，给长冷却是合理的信任，不算过度打扰。所以冷却时长本身要跟着
+// 上一次回答变，不能再是写死的常量——见下面 BStatePersistable.checkinCooldownMs。
+export const CHECKIN_COOLDOWN_MS = 5 * 60_000; // FOCUSED/FALSE_POSITIVE 后：5 分钟
+export const DRIFTED_CHECKIN_COOLDOWN_MS = 2 * 60_000; // DRIFTED 后：2 分钟
+
 // ── B 内部持久化状态（契约v4 §3.1）──
 export interface BStatePersistable {
   stuckThresholdMs: number;
@@ -121,6 +129,10 @@ export interface BStatePersistable {
   // detector.ts 的 startRest() 写入，不再是一个 evaluateFrame() 之外单独游离、容易被忘记
   // 接线的返回值。
   restStartTs: number;
+  // 08-31 新增：下一次 check-in 冷却该用多久，由上一次 applyCheckInFeedback() 的回答决定
+  // （DRIFTED 短冷却，FOCUSED/FALSE_POSITIVE 长冷却）；从没回答过时用 CHECKIN_COOLDOWN_MS
+  // 这个长的默认值（createInitialBState 初始化）。
+  checkinCooldownMs: number;
 }
 
 // ── B 内部运行时状态（不持久化的部分：持续器）──
@@ -175,6 +187,7 @@ export function createInitialBState(profile: 'CREATOR' | 'READER' | 'VIEWER'): B
     lastAnswerTs: -Infinity,
     restUntil: -Infinity,
     restStartTs: -Infinity,
+    checkinCooldownMs: CHECKIN_COOLDOWN_MS,
     driftSustainer: { since: null },
     stuckSustainer: { since: null },
     passiveSince: null,
