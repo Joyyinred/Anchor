@@ -30,8 +30,30 @@ export interface StarterCoachLLMOutput {
   firstAction: string;
 }
 
+/**
+ * 用户声明任务那一刻正开着的页面（09-01 新增，B12）。
+ *
+ * 为什么要这个：起步教练前四版全部败在同一件事上——**模型只有一句任务字符串，
+ * 它不知道用户手边有什么**。于是 v2 编造章节号、v3 假设"你的笔记"、v4 被约束逼到
+ * 只会说"去搜索"（09-01 评测集实测 SEARCH 占 83%）。
+ * 而那一批 12 条里唯一一条好答案，恰好是任务自己给了真实文件名的那条
+ * （`fix the failing tests in detector.test.ts` → `Open detector.test.ts in your editor`）——
+ * **给它一个可信的真实对象，它立刻就不搜了。** 当前 tab 就是这样一个对象。
+ *
+ * ★ 这是 StarterCoachLLMCall 的内部输入，**不走 FeatureFrame 那条缝**
+ *   （分工v2.md §5 红线4 说的是 FeatureFrame 两侧要同步，这里不涉及）。
+ */
+export interface AnchorContext {
+  /** tab 标题。信息量通常比 url 大——"3Blue1Brown - Neural Networks" 一眼就知道是什么。 */
+  title: string;
+  /** tab url。域名本身也是信号（youtube.com 意味着"按播放"是合理的第一步）。 */
+  url: string;
+}
+
 export type StarterCoachLLMCall = (input: {
   taskDeclaration: string;
+  /** 拿不到当前 tab（内部页面被过滤掉、查询失败）时不传，prompt 会退回无上下文那一版。 */
+  anchorContext?: AnchorContext;
 }) => Promise<StarterCoachLLMOutput>;
 
 // LLM 调用失败/超时时的兜底文案（用户可见，英文）——跟分工v2.md §5 红线2（必有本地兜底，
@@ -73,6 +95,9 @@ export type StarterCoachResult =
  * @param sessionId           会话 id，不传则按 now 生成
  * @param inferredAnchor      A 侧推断出的锚点（前两次 tab 切换后活跃最久的 tab），还没推断出时可不传
  * @param isDemoMode         08-28 新增：透传给 defaultSessionContext 压缩 graceUntil，不传则按真实时间算
+ * @param anchorContext      09-01 新增：用户声明任务那一刻开着的页面，原样透传给 llmCall。
+ *                           这一层不解读、不判断相关性——"这个页面跟任务有没有关系"是语义判断，
+ *                           交给 prompt 里的模型去做（它同时看得到任务和标题，判据比这里全）。
  */
 export async function runStarterCoach(
   rawTaskDeclaration: string,
@@ -81,7 +106,8 @@ export async function runStarterCoach(
   now: number,
   sessionId?: string,
   inferredAnchor?: InferredAnchor,
-  isDemoMode?: boolean
+  isDemoMode?: boolean,
+  anchorContext?: AnchorContext
 ): Promise<StarterCoachResult> {
   const taskDeclaration = rawTaskDeclaration.trim();
 
@@ -98,7 +124,7 @@ export async function runStarterCoach(
   // 不管长度多短都往下走，不能因为用户嫌烦不肯细化就把起步卡死。
   let firstAction: string;
   try {
-    const output = await llmCall({ taskDeclaration });
+    const output = await llmCall({ taskDeclaration, anchorContext });
     firstAction = output.firstAction;
   } catch {
     firstAction = FIRST_ACTION_FALLBACK;

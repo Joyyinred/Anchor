@@ -48,6 +48,13 @@ export async function handleOnboardingSubmit(
   // 08-30：chrome://extensions/ 这类浏览器内部页面不该被锁成锚点——真机复现过：调试时
   // 开着这个 tab 提交任务，会把它当成锚点，后面 YouTube 上发生的事全部判不出"在锚点上"。
   const url = isInternalBrowserUrl(rawUrl) ? '' : rawUrl;
+  // 09-01 B12 v5：把用户声明任务这一刻正开着的页面透传给起步教练的 LLM 调用。
+  // 这是整条链路上唯一一份"不用猜"的真实信息——前四版 prompt 全部败在"模型只有一句
+  // 任务字符串"（评测集实测：无上下文时 83% 的产出都是"去搜索"，见 evals/）。
+  // ★ 复用上面那个 url 而不是 rawUrl：内部页面（chrome://extensions/ 之类）被过滤成空串，
+  //   这里跟着不传 anchorContext，prompt 自动退回无上下文那一版——调试时开着扩展管理页
+  //   提交任务，不会得到"打开你的扩展管理页"这种荒唐建议。
+  const anchorContext = url ? { title: activeTab?.title ?? '', url } : undefined;
   const result = await runStarterCoach(
     text,
     roundsUsed,
@@ -57,7 +64,8 @@ export async function handleOnboardingSubmit(
     // 每次起步都生成一个新 id 的话，旧 key 会永远留在 chrome.storage.local 里没人清。
     'default',
     { domain: domainOf(url), url },
-    isDemoMode
+    isDemoMode,
+    anchorContext
   );
 
   if (result.status === 'NEEDS_FOLLOWUP') {

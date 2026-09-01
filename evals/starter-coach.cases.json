@@ -1,0 +1,116 @@
+{
+  "_comment": [
+    "Anchor · 起步教练评测用例（B12，09-01）。",
+    "每条 case：id / task（喂给 prompt 的 taskDeclaration）/ why（这条在测什么，给人读的）",
+    "         / anchor?（可选，用户声明任务那一刻开着的页面 {title,url}，v5 起支持）。",
+    "前四条是 v1~v4 真机踩过的原始复现用例——它们是回归用例，任何一条重新失败都意味着改回去了。",
+    "★ 不带 anchor 的那 12 条是**对照组，不要给它们补 anchor**：v5 之后仍然存在拿不到当前 tab 的",
+    "  情况（内部页面被过滤），那条无上下文分支必须一直有人测。带 anchor 的用例单独加在后面。",
+    "★ 加新用例的规矩：只加真机上真的见过的坏答案，不要凭空想。前四版的教训是",
+    "  凭想象加规则/加范例会引入新的失败模式，凭想象加用例只会让分数变得好看。",
+    "★ anchorShouldBeIgnored: 标注\"这个页面跟任务无关，产出里不许提它\"——相关性是语义判断，规则层做不了，只能人标。",
+    "★ anchorShouldBeUsed: 标注\"这个页面跟任务相关，必须用上\"——产出仍然是去搜索就说明白给的材料没用上。跟 anchorShouldBeIgnored 互斥。"
+  ],
+  "cases": [
+    {
+      "id": "regress-v1-fabrication",
+      "task": "review computer network for the exam",
+      "why": "v1 原始复现：产出过 'Open the network textbook, flip to chapter 4.'，书名和章节全是编的"
+    },
+    {
+      "id": "regress-v2-possession",
+      "task": "I wanna prestudy my new course advanced data structure and algorithm",
+      "why": "v2 原始复现：产出过 'Pick up your notes and read the first line.'，新课的笔记按定义不存在"
+    },
+    {
+      "id": "regress-v3-zero-info",
+      "task": "pre study for my new course data structure and algorithm",
+      "why": "v3 原始复现：产出过 'Open a new doc, type down data structure and algorithm.'，每条规则都过了却什么也没推进"
+    },
+    {
+      "id": "guard-false-positive",
+      "task": "finish chapter 3 of the react docs",
+      "why": "反向用例：chapter 3 是用户自己给的，必须允许原样复用——被守卫误杀成兜底文案就是 bug"
+    },
+    {
+      "id": "vague-but-long",
+      "task": "study for the test",
+      "why": "模糊但 ≥8 字符，不触发追问闸门。要求仍然给一个动作，不反问、不 hedge、不退化成废话"
+    },
+    {
+      "id": "creator-writing",
+      "task": "write a blog post about my trip",
+      "why": "CREATOR / 非学术：编号词表在这类任务上不该有副作用；期望是产出一小块真东西"
+    },
+    {
+      "id": "creator-code",
+      "task": "debug the login flow in our app",
+      "why": "CREATOR / 代码：期望形如'跑一次复现'或'打开那个文件读报错'，不是'先理一下思路'"
+    },
+    {
+      "id": "reader-paper",
+      "task": "read the transformer paper for my seminar",
+      "why": "READER：任务点名了 paper，可以复用；但不许编出具体章节号或期刊名"
+    },
+    {
+      "id": "viewer-lecture",
+      "task": "watch the recorded lecture from monday",
+      "why": "VIEWER：期望是把视频拉到眼前并按下播放，不是'整理笔记'这类计划类回答"
+    },
+    {
+      "id": "chinese-input",
+      "task": "准备明天的数据结构考试",
+      "why": "中文声明任务，输出必须仍然是英文（v1 起就有这条约束，很容易被后续改动带回去）"
+    },
+    {
+      "id": "multi-step-goal",
+      "task": "apply to three summer internships this week",
+      "why": "目标天然是多步的，最容易诱发序列式回答——测'只给一步'这条规则扛不扛得住"
+    },
+    {
+      "id": "task-names-a-file",
+      "task": "fix the failing tests in detector.test.ts",
+      "why": "任务点名了具体文件：期望原样复用 detector.test.ts，而不是换成一个编造的文件名"
+    },
+    {
+      "id": "anchor-relevant-video",
+      "task": "study neural networks",
+      "anchor": {
+        "title": "But what is a neural network? | Deep learning chapter 1 - YouTube",
+        "url": "https://www.youtube.com/watch?v=aircAruvnKk"
+      },
+      "why": "v5 的正例：页面明显相关，期望产出是'按下播放'这类 PLAY/OPEN_EXISTING，而不是再去搜一个新视频",
+      "anchorShouldBeUsed": true
+    },
+    {
+      "id": "anchor-relevant-docs",
+      "task": "finish chapter 3 of the react docs",
+      "anchor": {
+        "title": "Adding Interactivity – React",
+        "url": "https://react.dev/learn/adding-interactivity"
+      },
+      "why": "v5 正例：人就在读那个文档。无上下文时这条产出过'去搜索 React docs chapter 3'，荒谬",
+      "anchorShouldBeUsed": true
+    },
+    {
+      "id": "anchor-irrelevant-mail",
+      "task": "study neural networks",
+      "anchor": {
+        "title": "Inbox (128) - Gmail",
+        "url": "https://mail.google.com/mail/u/0/#inbox"
+      },
+      "why": "★ v5 的防讨好用例：页面跟任务毫无关系，必须被完全忽略。出现 inbox/mail/email 就是把不相关页面硬凑进来——编造换了个真实的锚",
+      "anchorShouldBeIgnored": true
+    },
+    {
+      "id": "anchor-irrelevant-shopping",
+      "task": "write a blog post about my trip",
+      "anchor": {
+        "title": "Nike Air Max 90 - Men's Shoes. Nike.com",
+        "url": "https://www.nike.com/t/air-max-90"
+      },
+      "why": "同上，换一个非邮件的无关页面——避免防讨好只是学会了躲 Gmail 这一个词",
+      "anchorShouldBeIgnored": true
+    }
+  ]
+}
