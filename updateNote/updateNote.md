@@ -752,5 +752,84 @@ J7 走通之后开始真机连测，抓出并修掉了一串「收尾 → 新会
     - **起步教练的"第一步物理动作"有胡诌问题**：输入 `review computer network for the exam`，它给的是 `Open the network textbook, flip to chapter 4.`——**哪本书、哪一章都是编的**。而且 **B12 那版 prompt 让它更严重了**：里面写着 *"If you cannot name the thing, you are being too vague"*，等于**在要求一个不知道你有哪本书的模型必须说出具体书名**。demo 风险比功能缺失更大——评委第一反应是"它怎么知道我有这本书"，**这个破绽出现在整场 demo 的第一屏**。三个方向：①直接删掉 firstAction（违背 B6 定义）；②**改成用户自己填第一步**（准确性问题消失，而且 implementation intention 研究里自己生成的比被指派的更容易执行）；③放宽 prompt（会退化成跟兜底文案差不多的废话）。**我倾向 ②，等 J10 demo 走查时再定**——那时会更清楚这一屏该演成什么样。
     - **check-in 在面板之外没有任何提醒机制**：grep 确认 `manifest` 权限里没有 `notifications`，代码里也没有 `setBadgeText`/`chrome.action` 的任何用法。用户飘到 YouTube 时侧边栏很可能根本没开——**check-in 弹了他看不见**。但这条**对 demo 不影响**（演示时侧边栏一定开着），而且如果 B16（悬浮桌宠）做了就自然解决。**等 B16 开工时一起决定**：B16 表单上写的是 `documentPictureInPicture`（独立置顶小窗），跟"直接悬浮在网页上"（content script 注入）**不是一回事**，选哪个会决定还要不要 badge 兜底。
 
+## 0831
+
+### Jay
+1. 关于三态ui：同意checkin不改，observing 我觉得v2好看一点。
+
+2. **起步教练问题**：我昨天pull request里更新的版本写了一版参考prompt，但我觉得那一版生成的first step 也不会很具体很精准，但起码避免了编造。我认为现在的问题出在 ：
+    i. 现在的LLM只收到 taskDeclaration，收不到用户当下的上下文，也就无法根据用户现在所在的页面提出精准的行动建议。比如：：用户声明 "study neural network"，且他已经开着 3b1b 的视频页——精准的第一步应该是 "Press play on the 3Blue1Brown video you already have open"，但 LLM 看不见这个页面，只能给出泛化的 "Open a neural network tutorial video"。
+    ii. 追问是固定文案，没有针对性: 契约 §5.5 规定追问不占用 LLM 调用（纯本地长度判断）。所以用户输入 "study"，追问永远是同一句 "Can you be a bit more specific?..."——它不问"学什么""为了考试还是作业"。模糊任务的信息缺口没有被定向补掉，后面的拆解自然泛。契约设计时候没有考虑这么细，现在可以重新讨论：我认为追问可以走 LLM ，最多 3 次调用（2 轮追问 + 1 次拆解），现在我们用的groq模型应该够用的。
+    iii. (kimi给的建议) 没有评测集：现在判断"prompt 好不好"的唯一依据是 demo 时肉眼看一眼。没有一组固定任务 + 期望标准，就无法回答"v2 比 v1 好多少"，也无法防止修一个失败模式引入另一个。、
+    iv. archetype 没进 prompt：阶段一统一 CREATOR 近似（这是当时拍板的简化）。但"读论文"的第一步和"debug"的第一步形态完全不同，画像不进 prompt，输出就会很宽泛。
+
+    **建议**：
+    第一步
+    1. 给 StarterCoachLLMCall 加 anchorContext?: { title, url }：runStarterCoach 把 inferredAnchor 透传进 LLM 调用，prompt 里加一段 "They currently have this page open: ... If it's related to the task, the first action should use it."——签名是内部接口（不走 FeatureFrame 缝），改动可控，单测好写。
+    2. 建评测集 evals/starter-coach.cases.json：手写 20 条任务声明（覆盖三类画像、中英文、具体/模糊各档），每条标注 rubric 检查点（物理性/无计划伪装/无目标复述/≤12 词/用了锚点上下文）。
+    3. 写 evals/run-starter-coach.ts 脚本：批量打 Groq，输出每条 pass/fail + 失败原因归类。规则类检查（长度、序列、复述）用代码断言；语义类（是否真的"具体到能命名东西"）用 LLM-as-judge 二次打分。以后每次改 prompt 先跑这个，让通过率数字代替感觉。
+
+    第二步（阶段二 B12 范围）
+    4. 追问 LLM 化：针对性追问（需要改契约 §5.5 的"追问不调 LLM"约束）。
+        - 起步教练产出中，`taskDeclaration.length >= 8`（"学习"不满足）
+        - 若 < 8 且追问未满 2 轮 → 调用一次 LLM 生成针对性追问（根据用户输入推断缺口：学什么/目标/截止）
+        - 追问最多 2 轮，之后接受用户输入（避免僵住）
+        - ★ v4.1：追问走 LLM，最多 3 次调用（2 轮追问 + 1 次拆解）
+
+        - 追问prompt 例子：
+        ```
+        The user wants to start a task but gave a vague answer: "{userInput}"
+
+        Ask ONE follow-up question to help them be more specific. The question should:
+        - Ask about ONE of: what exactly to study/do, what the goal is, or what the deadline is
+        - Be natural and warm, not interrogative
+        - Be at most 15 words
+        - Not repeat the user's words back
+
+        Good: "What subject are you studying, and is it for an exam or homework?"
+        Good: "What's the deadline for this task?"
+        Bad: "Can you be more specific?" (too generic, doesn't help)
+        Bad: "Tell me more about your task." (sounds like a form)
+
+        Output JSON only:
+        {"followupQuestion": string}
+        ```
+    5. archetype 合并进同一次调用：输出 { firstAction, archetype }，一次调用两个产出，不增加延迟。
+    6. few-shot 示例按画像分组：CREATOR/READER/VIEWER 各配 2 条 good 例子。
+
+
+3. check-in 在面板之外没有任何提醒机制：我的想法是直接悬浮在网页上，等功能实现的差不多之后直接完全变成悬浮态，彻底抛弃side panel。
+
+4. **08-30 加的黑名单 15s 快速通道，真机测的实际延迟接近 2 分钟，不是 15s**——真机复现：进 `booking.com`（黑名单域）安静阅读、不滚动不打字，`SignalEvent`/`FeatureFrame` 日志显示从进页面到真正弹出 `CHECK_IN_DRIFT` 用了约 131 秒：
+    - t≈10.6s（tab-activate 那帧）：`anchorDetachedMs=10647` < 15000，条件还没成立，`DO_NOTHING` 正确。
+    - t≈70s（第2次心跳，60s 后）：`anchorDetachedMs=70785` > 15000，条件**第一次**成立，`sustainedWithWindow` 记下 `since=now`，但要满 30s 持续窗口才返回 true，这一帧只能 `DO_NOTHING`。
+    - t≈131s（第3次心跳，又是 60s 后）：距上次 `since` 已经过了 ~60s（≥30s 窗口），才判定"已持续足够久"，触发 `CHECK_IN_DRIFT`。
+
+    **根因**：`booking.com` 这类"安静阅读、不滚动不打字"的场景压根不产生新 `SignalEvent`（content-script 只在 keydown/scroll/video 时才发），`isDrifting()` 只能靠 `chrome.alarms` 心跳（`index.ts` 的 `HEARTBEAT_PERIOD_MINUTES = 1`）重新评估。15s 阈值 + 30s 持续窗口这个设计隐含假设了"评估频率比窗口更细"，但实际评估频率（60s）比窗口本身（30s）还粗——"确认持续"这一步天然要等到下一次心跳，最坏情况堆两次心跳粒度，逼近 2 分钟。
+
+     **同一天真机又测出一个关联场景：刷 Instagram Reels 也等了 66s 才 check-in**——`instagram.com` 本就在域名黑名单里，`contextRelevance` 从第一帧起就是 `IRRELEVANT`（这部分没问题）。日志逐帧对下来：`anchorDetachedMs` 在 t≈15168ms 第一次 >15000，`sustainedWithWindow` 记下 `since`；接着一串划 reel 产生的 `nav-history-state` 事件密集打到 `since+24549ms`，还差一点到 30s；然后出现一个**约 26.5 秒的事件真空**（用户在安静看一条播放中的 reel，没有划走，content-script 不产生任何新事件——心跳这时也还没到点），真空结束后下一条划走事件落在 `since+51101ms`，这才第一次满足 `≥30000` 判定，触发。
+
+
+6. **设计通用方案解决以上两个问题**（虽然属于B侧代码，但这几天测试都看到类似问题，所以我顺便来解决）：以上问题拆开看是两个成因（心跳周期 vs `MEDIA_PLAY` 只发一次），但共同点是同一句话：`sustainedWithWindow()`（`detector.ts`）本身只是"记一个 `since`，问 `now-since` 够不够"，从不会自己醒来检查，必须靠"新事件到达"或"心跳打到"这两条外部触发路径去按一下"现在几点了"——用户在两者之间空档里越安静，判定就越晚发现，晚多少纯看运气。
+
+    **通用修复**：新增 `RecheckMessage`（`messages.ts`）。`content-script.ts` 只要页面可见（`!document.hidden`），固定每 **8s** 发一个不落库的轻量 tick（不是伪造交互，不追加 `SignalEvent`，不影响 `anchorDetachedMs`/`texture` 的判定输入）——content script 活在标签页渲染进程里，不受 SW/`chrome.alarms` 的 MV3 平台下限限制，想多久发一次都行。`index.ts` 收到 `RECHECK` 后，跟 `INTERACTION` 同一道 `isTrackedTab` 校验（只信任当前被追踪的锚点 tab，避免开一堆无关标签页各自定时空转），复用心跳已有的 `recomputeOnHeartbeat` 路径重新算一遍 `FeatureFrame`/`DetectionResult` 并 `pushPanelState`。
+
+    效果：把"下一次评估机会"的等待上限从"心跳周期（60s）"统一压到"8s"——不管是安静阅读、安静看视频、还是任何没预料到的安静场景，只要标签页可见，评估空档都不会超过 8 秒。黑名单心跳粒度问题严格说也被这个改动顺带缓解了（`booking.com` 场景现在最多等 8s 而不是心跳的 60s）。
+
+7. **真机反馈：`chrome://extensions` 里把插件关掉再打开，UI 停在上次关闭前的页面（桌宠/check-in），没有重新走一遍起步教练**：把"关掉再打开"当成一次会话结束，强制重新声明任务（附带影响：浏览器整个重启也会一样重置，不会接着上一场任务继续）。
+
+    **难点**：MV3 没给扩展"我刚被重新启用"这件事一个专门的订阅口——`onInstalled` 只在首次安装/版本更新/浏览器版本更新时触发，`onStartup` 只在浏览器进程启动时触发，两个都不认"用户在 `chrome://extensions` 里手动关了再开"这个动作；而 SW 因为 MV3 常规回收（空闲 ~30s 后被终止，下次事件来了再重新跑一遍顶层代码）也会重新执行同一段顶层代码——光看"顶层代码又跑了一次"分不清这次是"日常回收重启"还是"真的被关过又重新启用"。
+
+    **方案**：`chrome.storage.session` 正好卡在这两者中间——查了官方文档，它在"扩展被禁用/重新加载/更新/浏览器重启"时会被清空，但不会因为单次 SW 实例被 MV3 常规回收而清空（回收只终止这一个 SW 实例，不影响同一个浏览器会话里的 `storage.session` 数据）。`index.ts` 新增 `resetIfFreshStart()`：顶层代码每次执行都查一遍 `chrome.storage.session` 里的一个"活着"标记——标记还在，说明只是常规回收重启，什么都不做；标记没了（第一次装/刚被关闭再启用过/浏览器刚重启），一律当"上一场会话已经结束"处理：`taskDeclaration` 打回默认值、`sessionWhitelist` 清空（跟 `session-summary.ts` 的 `endSession()` 同一套清法，会话结束的两个入口该清同一批东西）、`REST_STATE_KEY`/`PANEL_STATE_KEY`/收尾统计/收尾快照四个 UI 状态一并清掉、`resetSessionState()` 清引擎侧的 `eventHistory`/`BState`/分类缓存，最后 `pushOnboardingStatus()` 推回 `PENDING`，side panel 重新打开时就会落在起步输入框。
+
+    这个模式（`chrome.storage.session` 当"是不是真的第一次启动"标记）是社区公认的 MV3 已知解法。226/226 测试、typecheck、build 全干净——这次改动是 chrome API 强相关的 SW 生命周期代码，没法用单测覆盖，仓库沿用一贯的"平台层生命周期代码不建测试基建"的边界，需要真机装一遍验证：①关再开插件确认弹出起步输入框；②正常使用中途 SW 被 MV3 回收重启（等几分钟不操作）确认**不会**误触发重置、能接着原任务继续。
+
+8. **真机测试引出的新决定：check-in 冷却期不该对所有回答一视同仁**——排查过程中发现5分钟冷却期太长，**如果用户被拉回去（DRIFT+DRIFTED）没多久又飘了，5 分钟长冷却会让下一次提醒太迟**。方案：**冷却时长按上一次回答区分，不再是写死的常量**——`DRIFT+DRIFTED`/`STUCK+DRIFTED`（用户承认走神，不管是被拉回去还是微重启）用短冷却 **2 分钟**；`STUCK+FOCUSED`/`DRIFT+FALSE_POSITIVE`（用户主动确认没问题）仍用原来的 **5 分钟**。理由：DRIFTED 是"这次专注确实吃力"的信号，该更快介入；FOCUSED/FALSE_POSITIVE 是用户主动确认没事，给长冷却是合理的信任，不算过度打扰。
+
+    **实现**（`types.ts` + `detector.ts`）：`BStatePersistable` 新增 `checkinCooldownMs` 字段（从写死的局部常量改成跟着 state 走的值），`createInitialBState()` 初始化成长冷却默认值（没回答过时的兜底）；`applyCheckInFeedback()` 每次回答后按 `feedback.answer === 'DRIFTED'` 写回短/长冷却；`isDrifting()`/`isStuck()` 的冷却闸门从读写死的 `CHECKIN_COOLDOWN_MS` 改成读 `state.checkinCooldownMs`。顺带在 `frame-pipeline.ts` 的 `ensureBStateLoaded()` 水合处补了 `?? CHECKIN_COOLDOWN_MS` 兜底——老版本存进 `chrome.storage.local` 的 `BStatePersistable` 没有这个新字段，水合回来会是 `undefined`，冷却算出 `NaN` 会让冷却当场失效，兜底只影响这次升级后的第一次水合。
+
+    测试：`b2.test.ts` 新增一组 `checkinCooldownMs` 相关用例（默认长冷却、DRIFT+DRIFTED/STUCK+DRIFTED 短冷却、STUCK+FOCUSED/DRIFT+FALSE_POSITIVE 长冷却、短冷却后再答长冷却答案能恢复），`cooldown.test.ts` 新增端到端行为用例（答 DRIFTED 后 2 分钟内不该再触发、2 分钟一过该正常触发且明显快于旧的 5 分钟；对照组验证 FALSE_POSITIVE 仍是长冷却不受影响）。234/234 测试、typecheck、build 全干净。
+
+
 
 

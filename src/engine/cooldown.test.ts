@@ -8,15 +8,17 @@
 //
 // 注意这跟 applyCheckInFeedback（B2）清持续器是两条独立路径：那条只在用户**回答了**时才走。
 import { describe, it, expect } from 'vitest';
-import { evaluateFrame, type BState } from './detector';
+import { evaluateFrame, applyCheckInFeedback, type BState } from './detector';
 import {
   createInitialBState,
   PROFILE_PRESETS,
+  DRIFTED_CHECKIN_COOLDOWN_MS,
+  type CheckInFeedback,
   type FeatureFrame,
   type SessionContext,
 } from './types';
 
-const COOLDOWN_MS = 300_000; // 契约v4 §3.4/§3.5：5 分钟
+const COOLDOWN_MS = 300_000; // 契约v4 §3.4/§3.5：5 分钟（FOCUSED/FALSE_POSITIVE 后仍是这个值）
 const SUSTAIN_MS = 30_000; // 30s 持续窗口
 
 function ctxOf(): SessionContext {
@@ -123,6 +125,68 @@ describe('B10 / 契约v4 §3.7：冷却结束后不能立刻用旧证据重复�
         break;
       }
     }
+    for (let t = firstFire + 10_000; t < firstFire + COOLDOWN_MS; t += 10_000) {
+      expect(evaluateFrame(driftFrame(t), 'CREATOR', ctx.profile.policy, ctx, state, t)).toBe('DO_NOTHING');
+    }
+  });
+});
+
+describe('08-31：DRIFTED 答案用短冷却，不用陪 FOCUSED/FALSE_POSITIVE 那档 5 分钟长冷却', () => {
+  const T0 = 20_000_000;
+
+  it('答"飘了"（DRIFTED）之后，冷却不到 2 分钟不该再触发；过了 2 分钟该正常触发，不用等 5 分钟', () => {
+    const state = createInitialBState('CREATOR');
+    const ctx = ctxOf();
+
+    // 喂到第一次触发
+    let firstFire = -1;
+    for (let t = T0; t < T0 + 5 * 60_000; t += 10_000) {
+      if (evaluateFrame(driftFrame(t), 'CREATOR', ctx.profile.policy, ctx, state, t) !== 'DO_NOTHING') {
+        firstFire = t;
+        break;
+      }
+    }
+    expect(firstFire).toBeGreaterThan(0);
+
+    // 用户答"飘了"——拉回锚点、但立刻又飘回了同一个走神页面（真机复现场景）
+    const feedback: CheckInFeedback = { channel: 'DRIFT', answer: 'DRIFTED' };
+    applyCheckInFeedback(state, ctx.profile.policy, feedback, firstFire);
+    expect(state.checkinCooldownMs).toBe(DRIFTED_CHECKIN_COOLDOWN_MS);
+
+    // 短冷却（2min）结束前，不该再触发——即使已经远超旧的长冷却假设之前的检查点
+    for (let t = firstFire + 10_000; t < firstFire + DRIFTED_CHECKIN_COOLDOWN_MS; t += 10_000) {
+      expect(evaluateFrame(driftFrame(t), 'CREATOR', ctx.profile.policy, ctx, state, t)).toBe('DO_NOTHING');
+    }
+
+    // 短冷却结束后，正常重新累积证据、正常触发——不用像 FOCUSED/FALSE_POSITIVE 那样等满 5 分钟
+    let secondFire = -1;
+    for (let t = firstFire + DRIFTED_CHECKIN_COOLDOWN_MS; t < firstFire + COOLDOWN_MS; t += 10_000) {
+      if (evaluateFrame(driftFrame(t), 'CREATOR', ctx.profile.policy, ctx, state, t) !== 'DO_NOTHING') {
+        secondFire = t;
+        break;
+      }
+    }
+    expect(secondFire).toBeGreaterThan(0); // 5 分钟长冷却的旧行为会让这段区间全是 DO_NOTHING，断言会挂
+    expect(secondFire - firstFire).toBeLessThan(COOLDOWN_MS); // 明确快于旧的 5 分钟长冷却
+  });
+
+  it('对照组：答"我在查资料"（FALSE_POSITIVE）之后仍然是长冷却，不受这次改动影响', () => {
+    const state = createInitialBState('CREATOR');
+    const ctx = ctxOf();
+
+    let firstFire = -1;
+    for (let t = T0; t < T0 + 5 * 60_000; t += 10_000) {
+      if (evaluateFrame(driftFrame(t), 'CREATOR', ctx.profile.policy, ctx, state, t) !== 'DO_NOTHING') {
+        firstFire = t;
+        break;
+      }
+    }
+    expect(firstFire).toBeGreaterThan(0);
+
+    const feedback: CheckInFeedback = { channel: 'DRIFT', answer: 'FALSE_POSITIVE' };
+    applyCheckInFeedback(state, ctx.profile.policy, feedback, firstFire);
+    expect(state.checkinCooldownMs).toBe(COOLDOWN_MS);
+
     for (let t = firstFire + 10_000; t < firstFire + COOLDOWN_MS; t += 10_000) {
       expect(evaluateFrame(driftFrame(t), 'CREATOR', ctx.profile.policy, ctx, state, t)).toBe('DO_NOTHING');
     }

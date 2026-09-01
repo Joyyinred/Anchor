@@ -17,6 +17,22 @@ export interface InteractionMessage {
   timestamp: number;
 }
 
+// 08-31：真机测试发现 DRIFT 判定的"持续证据"检查只在事件到达/心跳打到的那几个离散时刻才会
+// 重新算一次（sustainedWithWindow 本身没错，但没人喊它就不会自己醒）——safari安静阅读、
+// 安静看视频不划走都会撞上这个评估空档，空档大小取决于"下一次真实事件/心跳什么时候来"，
+// 从几秒到 chrome.alarms 的 ≥1min 平台下限都有可能（见 updateNote 0831 条目4/5，那两条各自
+// 打了个补丁：黑名单接受现状、视频先加了个后来撤掉的专属 ping）。这条消息是收拢成的通用方案：
+// content script 活在标签页渲染进程里，不受 SW/chrome.alarms 生命周期限制，只要标签页可见就
+// 能自己按固定节奏发一个"到点了，重新算一下"的轻量 tick——SW 收到后只用当前 eventHistory
+// 重新跑一遍 computeFeatureFrame/evaluateFrame（跟心跳复用同一条 recomputeOnHeartbeat 路径），
+// 不追加任何 SignalEvent，不影响 anchorDetachedMs/texture 的判定输入，纯粹是缩短"下一次评估
+// 机会"的等待时间。只有当前被追踪的锚点 tab 发的 RECHECK 才有意义（同 INTERACTION 的
+// isTrackedTab 校验），SW 侧据此过滤，不会因为用户开着一堆无关标签页而白跑一堆计算。
+export interface RecheckMessage {
+  type: 'RECHECK';
+  timestamp: number;
+}
+
 // side panel 里点了 check-in 气泡按钮之后发给 SW 的回答——channel/answer 复用
 // src/pet/types.ts 已经声明的那份字面量（CuteAnchorPet.onAnswer 本来就是这个类型）。
 export interface CheckInAnswerMessage {
@@ -87,6 +103,7 @@ export interface SessionRestartMessage {
 export type RuntimeMessage =
   | ContentScriptReadyMessage
   | InteractionMessage
+  | RecheckMessage
   | CheckInAnswerMessage
   | OnboardingStatusRequestMessage
   | OnboardingSubmitMessage

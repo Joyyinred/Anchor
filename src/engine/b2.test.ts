@@ -3,7 +3,14 @@
 // 那两个 override 就是"用户已经答过一次『在专注』之后"的状态快照，用它反推函数行为是否正确。
 import { describe, it, expect } from 'vitest';
 import { applyCheckInFeedback } from './detector';
-import { createInitialBState, PROFILE_PRESETS, CheckInFeedback, DEFAULT_STUCK_LADDER } from './types';
+import {
+  createInitialBState,
+  PROFILE_PRESETS,
+  CheckInFeedback,
+  DEFAULT_STUCK_LADDER,
+  CHECKIN_COOLDOWN_MS,
+  DRIFTED_CHECKIN_COOLDOWN_MS,
+} from './types';
 
 describe('B2: applyCheckInFeedback', () => {
   it('STUCK+FOCUSED：READER 从第0格推进到第1格，阈值变 20min（对照场景7 override）', () => {
@@ -71,5 +78,46 @@ describe('B2: applyCheckInFeedback', () => {
     applyCheckInFeedback(state, PROFILE_PRESETS.CREATOR, feedback, 200_000);
     expect(state.stuckSustainer.since).toBeNull();
     expect(state.driftSustainer.since).toBe(60_000); // 未变
+  });
+
+  // 08-31 真机反馈：拉回去没多久又飘了，5 分钟长冷却让下一次提醒太晚——DRIFTED 答案该用
+  // 更短的冷却，FOCUSED/FALSE_POSITIVE（用户主动确认没问题）仍用长冷却。
+  describe('checkinCooldownMs：按回答区分冷却长短', () => {
+    it('从没回答过时默认长冷却', () => {
+      const state = createInitialBState('CREATOR');
+      expect(state.checkinCooldownMs).toBe(CHECKIN_COOLDOWN_MS);
+    });
+
+    it('DRIFT+DRIFTED（被拉回去）→ 短冷却', () => {
+      const state = createInitialBState('CREATOR');
+      applyCheckInFeedback(state, PROFILE_PRESETS.CREATOR, { channel: 'DRIFT', answer: 'DRIFTED' }, 100_000);
+      expect(state.checkinCooldownMs).toBe(DRIFTED_CHECKIN_COOLDOWN_MS);
+    });
+
+    it('STUCK+DRIFTED（微重启）→ 短冷却', () => {
+      const state = createInitialBState('CREATOR');
+      applyCheckInFeedback(state, PROFILE_PRESETS.CREATOR, { channel: 'STUCK', answer: 'DRIFTED' }, 100_000);
+      expect(state.checkinCooldownMs).toBe(DRIFTED_CHECKIN_COOLDOWN_MS);
+    });
+
+    it('STUCK+FOCUSED（用户确认在专注）→ 长冷却', () => {
+      const state = createInitialBState('CREATOR');
+      applyCheckInFeedback(state, PROFILE_PRESETS.CREATOR, { channel: 'STUCK', answer: 'FOCUSED' }, 100_000);
+      expect(state.checkinCooldownMs).toBe(CHECKIN_COOLDOWN_MS);
+    });
+
+    it('DRIFT+FALSE_POSITIVE（用户确认在查资料）→ 长冷却', () => {
+      const state = createInitialBState('CREATOR');
+      applyCheckInFeedback(state, PROFILE_PRESETS.CREATOR, { channel: 'DRIFT', answer: 'FALSE_POSITIVE' }, 100_000);
+      expect(state.checkinCooldownMs).toBe(CHECKIN_COOLDOWN_MS);
+    });
+
+    it('短冷却答过之后再答一次长冷却答案，恢复长冷却（不会卡在短冷却）', () => {
+      const state = createInitialBState('CREATOR');
+      applyCheckInFeedback(state, PROFILE_PRESETS.CREATOR, { channel: 'DRIFT', answer: 'DRIFTED' }, 100_000);
+      expect(state.checkinCooldownMs).toBe(DRIFTED_CHECKIN_COOLDOWN_MS);
+      applyCheckInFeedback(state, PROFILE_PRESETS.CREATOR, { channel: 'STUCK', answer: 'FOCUSED' }, 200_000);
+      expect(state.checkinCooldownMs).toBe(CHECKIN_COOLDOWN_MS);
+    });
   });
 });
