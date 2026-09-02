@@ -9,6 +9,7 @@ import { DEFAULT_TASK_DECLARATION, type SessionContext } from '../../engine/type
 import { groqStarterCoachCall } from './starter-coach';
 import { saveSessionContext } from './session';
 import { resetSessionState } from './frame-pipeline';
+import { startSessionStats } from './session-summary';
 import { domainOf, isInternalBrowserUrl } from './domain';
 import { ONBOARDING_STATE_KEY, type OnboardingState } from '../onboarding-state';
 
@@ -83,5 +84,10 @@ export async function handleOnboardingSubmit(
   // 再推 UI 状态——两步顺序不能反，不然 UI 已经显示"完成"了，但下一次心跳/事件读到的
   // ctx 还是旧的默认占位值。
   await saveSessionContext(result.sessionContext);
+  // 09-02：这一刻才是"这一场专注"真正的起点，把它记下来。不记的话，一场没有任何 check-in、
+  // 也没点过休息的专注（= 最理想的那条路径）到结算时读不到统计，会被现造一份 startedTs=now，
+  // 收尾视图于是说"That was less than a minute of work."——详见 session-summary.ts
+  // 的 startSessionStats 注释。同时这也是桌宠"Focused N min"那个角标的数据源。
+  await startSessionStats(now);
   await pushOnboardingState({ status: 'READY', firstAction: result.firstAction });
 }

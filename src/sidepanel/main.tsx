@@ -9,11 +9,17 @@
 import { createRoot } from 'react-dom/client';
 import { useEffect, useState } from 'react';
 import { CuteAnchorPet } from '../pet/cat';
+import { useFocusedMinutes } from '../pet/useFocusedMinutes';
 import type { CheckInAnswer, CheckInChannel } from '../pet/types';
 import { PANEL_STATE_KEY, type PanelState } from '../platform/panel-state';
 import { ONBOARDING_STATE_KEY, type OnboardingState } from '../platform/onboarding-state';
 import { REST_STATE_KEY, DEFAULT_REST_STATE, type RestState } from '../platform/rest-state';
-import { SESSION_SUMMARY_KEY, type SessionSummary } from '../platform/session-summary-state';
+import {
+  SESSION_STATS_KEY,
+  SESSION_SUMMARY_KEY,
+  type SessionStats,
+  type SessionSummary,
+} from '../platform/session-summary-state';
 import { SummaryPanel } from './SummaryPanel';
 import { buildRestReminderMessage } from '../engine/wording';
 import { OnboardingPanel } from './OnboardingPanel';
@@ -30,10 +36,14 @@ function SidePanelApp() {
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [restState, setRestState] = useState<RestState>(DEFAULT_REST_STATE);
   const [summary, setSummary] = useState<SessionSummary | null>(null);
+  // 这一场的起点（SessionStats.startedTs）。★ 这几行是唯一会跟着 side panel 一起被扔掉的
+  // 部分——B16 换成悬浮桌宠时，只需要在新宿主里重新读一次这个 key；算分钟数的 useFocusedMinutes
+  // 和 CuteAnchorPet 都在 src/pet/ 下，原样搬走即可。
+  const [startedTs, setStartedTs] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     void chrome.storage.local
-      .get([PANEL_STATE_KEY, ONBOARDING_STATE_KEY, REST_STATE_KEY, SESSION_SUMMARY_KEY])
+      .get([PANEL_STATE_KEY, ONBOARDING_STATE_KEY, REST_STATE_KEY, SESSION_SUMMARY_KEY, SESSION_STATS_KEY])
       .then((stored) => {
       const existingPanel = stored[PANEL_STATE_KEY] as PanelState | undefined;
       if (existingPanel) setPanelState(existingPanel);
@@ -43,6 +53,8 @@ function SidePanelApp() {
       if (existingRest) setRestState(existingRest);
       const existingSummary = stored[SESSION_SUMMARY_KEY] as SessionSummary | undefined;
       if (existingSummary) setSummary(existingSummary);
+      const existingStats = stored[SESSION_STATS_KEY] as SessionStats | undefined;
+      setStartedTs(existingStats?.startedTs);
     });
 
     // 面板挂载时主动问一次现在该显示起步输入框还是直接显示桌宠——不能只信任上面读到的
@@ -71,6 +83,11 @@ function SidePanelApp() {
       if (changes[REST_STATE_KEY]) {
         setRestState((changes[REST_STATE_KEY].newValue as RestState | undefined) ?? DEFAULT_REST_STATE);
       }
+      if (changes[SESSION_STATS_KEY]) {
+        // 起步教练完成时 SW 会写一次（startSessionStats），结算时会 remove——
+        // remove 那一下 newValue 是 undefined，必须处理，否则上一场的时长会挂在新会话上。
+        setStartedTs((changes[SESSION_STATS_KEY].newValue as SessionStats | undefined)?.startedTs);
+      }
       if (changes[SESSION_SUMMARY_KEY]) {
         // newValue 为 undefined 就是 SW 那边 remove 掉了（用户点了"Start something new"）
         setSummary((changes[SESSION_SUMMARY_KEY].newValue as SessionSummary | undefined) ?? null);
@@ -88,6 +105,11 @@ function SidePanelApp() {
   useEffect(() => {
     if (onboardingState.status === 'PENDING') setOnboardingDismissed(false);
   }, [onboardingState.status]);
+
+  // ★ 必须在任何早退（收尾视图 / 起步教练那两个 return）之前调用——hook 的调用顺序
+  //   在每次渲染里必须一致，放在 return 后面会在切换视图时崩掉。
+  //   这个数字只在桌宠那一屏用得到，但"在哪用"和"在哪调"是两回事。
+  const focusedMinutes = useFocusedMinutes(startedTs);
 
   function handleAnswer(answer: CheckInAnswer, channel?: CheckInChannel) {
     // channel 理论上 state==='checkin' 时才会被点到，此时 panelState.channel 必然有值——
@@ -142,6 +164,7 @@ function SidePanelApp() {
   return (
     <CuteAnchorPet
       state={panelState.state}
+      focusedMinutes={focusedMinutes}
       message={restReminderText ?? panelState.message}
       channel={panelState.channel}
       onAnswer={handleAnswer}
