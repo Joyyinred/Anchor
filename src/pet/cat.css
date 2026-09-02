@@ -120,10 +120,38 @@
   cursor: pointer;
   transition: transform 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
-.anchor-pet-chips button:hover {
+/* ★ :not(:disabled) 不能省：CSS 的 :hover 对 disabled 元素照样匹配，不排除的话
+   已回答的灰按钮鼠标移上去还会变色，读起来像"还能点"。 */
+.anchor-pet-chips button:hover:not(:disabled) {
   border-color: var(--ap-checkin);
   color: var(--ap-checkin);
   transform: translateY(-1px);
+}
+/* B14（09-02）：键盘焦点。08-29 修过"不该 tab 到隐藏的按钮上"，但修完让人能 tab 到了，
+   落点却只有浏览器默认那圈细虚线——在圆角 + 浅色的 chip 上几乎看不见，键盘用户不知道
+   自己选中的是"Still focused"还是"Drifted"，只能盲按。半截工程，这里补上另一半。
+   ★ 用 :focus-visible 而不是 :focus：鼠标点击也会触发 :focus，那样每次点完按钮都会留一圈
+     焦点环挂在那里，是噪音。:focus-visible 只在浏览器判断"用户在用键盘"时才亮。 */
+.anchor-pet-chips button:focus-visible {
+  outline: none;
+  border-color: var(--ap-checkin);
+  color: var(--ap-checkin);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ap-checkin) 28%, transparent);
+}
+/* B14（09-02）：按下态。点击到气泡消失之间要绕 SW + storage 走一圈（答 DRIFTED 还要切
+   标签页），几十到两百毫秒里按钮原来毫无变化——用户会以为没点上，然后再点一次。
+   这一条让手指按下去立刻有反馈，不等任何往返；真正堵住重复提交的是 cat.tsx 的 answered。 */
+.anchor-pet-chips button:active:not(:disabled) {
+  transform: translateY(0) scale(0.96);
+  border-color: var(--ap-checkin);
+  color: var(--ap-checkin);
+}
+/* 已回答：整组变灰、不再响应 hover。disabled 本身只挡交互不改外观，
+   但用户需要看得出"我点到了，正在处理"，否则跟"卡住了"分不清。 */
+.anchor-pet-chips button:disabled {
+  cursor: default;
+  opacity: 0.45;
+  transform: none;
 }
 /* check-in 气泡里的"结束专注"出口——视觉上要弱于上面三个真正在回答问题的按钮，
    不能让它看起来像第四个判定选项（08-29：契约要求随时可结束专注，check-in 也不例外）。 */
@@ -134,7 +162,7 @@
   font-weight: 600;
   padding: 5px 4px;
 }
-.anchor-pet-chips button.anchor-pet-chip-quiet:hover {
+.anchor-pet-chips button.anchor-pet-chip-quiet:hover:not(:disabled) {
   border-color: transparent;
   color: var(--ap-ink-soft);
   background: transparent;
