@@ -164,11 +164,23 @@
   transition: transform 0.4s cubic-bezier(.34,1.56,.64,1), filter 0.4s ease, opacity 0.4s ease;
 }
 
-/* observing：轻微上浮 + 一层很淡的暖色外发光（跟徽章 --ap-observing 同色系）。
-   读起来像"竖起耳朵了"，而不是"变了个样子"。 */
+/* observing：轻微上浮 + 暖色外发光（跟徽章 --ap-observing 同色系）。
+   读起来像"竖起耳朵了"，而不是"变了个样子"。
+
+   ── 09-02：定稿为四档对照里的 v2（Jay 拍板）──
+   08-30 做了四档预览（devpreview 里的 obs-v1~v4）：v1 淡发光、v2 强发光不变色、
+   v3 整只猫转橙、v4 变橙+发光。真机反馈是 v1「太不明显、用户观察不到」，所以往上加了一档。
+   ★ 变色那两档（v3/v4）被否掉的技术原因，不是不好看，是**代价绕不开**：
+     素材实测主色是猫身 hue≈191°（青）、电线 hue≈345°（粉红），而 CSS filter 作用于整个 SVG——
+     `hue-rotate(200deg)` 把猫转成橙色的同时，**电线会从粉红变成青绿**。要只转猫身就得改
+     cat.json 的颜色数据，那样 assets/LICENSE.md 里"我们未修改原文件"那句声明也得跟着改
+     （授权本身允许修改，只是声明要准确）。
+   ★ 双层 drop-shadow 是刻意的：内层 10px/0.85 给出清晰的轮廓光，外层 20px/0.45 做柔和扩散。
+     只用一层的话，要么近处不够亮，要么远处糊成一团。
+   ★ 保留 translateY(-3px)：发光负责"被看见"，上浮负责"读起来像竖起耳朵"，两者管的不是一件事。 */
 .anchor-pet-stage[data-state="observing"]:not([data-resting="true"]) .anchor-pet-lottie {
   transform: translateY(-3px);
-  filter: drop-shadow(0 0 6px hsl(43 71% 46% / 0.35));
+  filter: drop-shadow(0 0 10px hsl(43 85% 50% / 0.85)) drop-shadow(0 0 20px hsl(43 85% 50% / 0.45));
 }
 
 /* checkin：一次性的注意力弹跳，跟徽章的 ap-badge-pop 同拍（0.4s、同一条缓动曲线），

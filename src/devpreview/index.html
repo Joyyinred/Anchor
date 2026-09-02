@@ -28,10 +28,12 @@
       /* ── observing 三档强度对照（08-30，只在预览里，还没进 cat.css）──
          素材实测主色：猫身 hue≈191°（青）、电线 hue≈345°（粉红）。
          hue-rotate 会作用到整只猫，电线也会跟着转——这是变色方案绕不开的代价。 */
-      /* v1 = 现在 cat.css 里那版（轻微上浮 + 淡发光）——什么都不加就是它 */
-      /* v2：只加强发光，不动猫本身的颜色 */
-      .obs-v2 .anchor-pet-lottie {
-        filter: drop-shadow(0 0 10px hsl(43 85% 50% / 0.85)) drop-shadow(0 0 20px hsl(43 85% 50% / 0.45)) !important;
+      /* ★ 09-02 已定稿 v2（Jay 拍板），cat.css 里现在就是 v2——所以 .obs-v2 那格
+         不加任何覆盖，看到的就是线上效果。v1/v3/v4 保留成"被否掉的方案"，
+         各自用 !important 覆盖回去，方便以后有人想重新评估时一眼看到差别和代价。 */
+      /* v1：08-30 的旧版（淡发光）。真机反馈"太不明显、用户观察不到"，已弃用 */
+      .obs-v1 .anchor-pet-lottie {
+        filter: drop-shadow(0 0 6px hsl(43 71% 46% / 0.35)) !important;
       }
       /* v3：整只猫转成橙色（hue 191°→31°，即 +200deg），电线随之变青绿 */
       .obs-v3 .anchor-pet-lottie {
@@ -71,16 +73,18 @@
       <div class="cell b13-off"><div class="label">check-in · 原样</div><div id="q3"></div></div>
     </div>
 
-    <h2 style="margin-top:28px">observing 强度四档 · 挑一个</h2>
+    <h2 style="margin-top:28px">observing 强度四档 · <b>已定稿 v2</b></h2>
     <p style="font-size:12px;color:#8b9995;margin:-6px 0 14px;">
-      v1 是现在 cat.css 里那版。v3/v4 会把整只猫转成橙色——注意电线也会从粉红变成青绿，
-      这是 CSS filter 作用于整个 SVG 的必然结果，除非改素材本身。
+      <b>09-02 已定稿 v2</b>（Jay 拍板），cat.css 里现在就是这一档，v2 那格没有任何覆盖 = 线上效果。
+      其余三档保留成记录：v1 是 08-30 旧版（真机反馈太不明显）；v3/v4 会把整只猫转成橙色——
+      注意<b>电线也会从粉红变成青绿</b>，这是 CSS filter 作用于整个 SVG 的必然结果，
+      除非改 cat.json 素材本身（那样 assets/LICENSE.md 里"我们未修改原文件"那句声明也要跟着改）。
     </p>
     <div class="grid">
-      <div class="cell"><div class="label">v1 · 现状（淡发光）</div><div id="o1"></div></div>
-      <div class="cell obs-v2"><div class="label">v2 · 强发光，不变色</div><div id="o2"></div></div>
-      <div class="cell obs-v3"><div class="label">v3 · 变橙，不发光</div><div id="o3"></div></div>
-      <div class="cell obs-v4"><div class="label">v4 · 变橙 + 发光</div><div id="o4"></div></div>
+      <div class="cell obs-v1"><div class="label">v1 · 旧版淡发光（已弃用）</div><div id="o1"></div></div>
+      <div class="cell obs-v2"><div class="label">★ v2 · 强发光，不变色（线上）</div><div id="o2"></div></div>
+      <div class="cell obs-v3"><div class="label">v3 · 变橙，不发光（否决）</div><div id="o3"></div></div>
+      <div class="cell obs-v4"><div class="label">v4 · 变橙 + 发光（否决）</div><div id="o4"></div></div>
     </div>
 
     <hr />
