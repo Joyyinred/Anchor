@@ -325,9 +325,16 @@
 }
 
 /* 角落专注时长标签：常态不显示，鼠标悬停在锚徽章上才弹出（配角数据，别喧宾夺主，见 types.ts 注释） */
+/* 09-02：从"徽章正上方"改到"徽章正下方"。
+   原来是 bottom: calc(100% + 14px)，也就是整块挂在 .anchor-pet-lottie-wrap 顶边之外——
+   而舞台顶部只有 16px padding，再往上就是面板边缘，**真机上直接被标题栏裁掉一半**。
+   跟气泡当初那个 padding-top: 320px 是同一类错误：靠"往上溢出"定位，迟早撞到容器边界。
+   往下挂就不会：下方是猫的身体，空间由 118px 高的 wrap 保证，跟面板高度无关。
+   ★ 徽章是 top:-8px 的 30×30，底边落在 y=22；这里取 26px = 底边 + 4px 间隙，
+     right 跟徽章同为 -8px，读起来是"从徽章里掉出来的"而不是另一个独立元素。 */
 .anchor-pet-focus-tag {
   position: absolute;
-  bottom: calc(100% + 14px);   /* 悬浮在徽章正上方，不再常驻在舞台右上角 */
+  top: 26px;
   right: -8px;                 /* 跟徽章自己的 right 偏移对齐 */
   font-size: 11px;
   font-weight: 700;
@@ -339,7 +346,8 @@
   white-space: nowrap;
   box-shadow: 0 4px 10px -4px hsl(var(--ap-shadow) / 0.35);
   opacity: 0;
-  transform: translateY(4px) scale(0.9);
+  /* 现在挂在徽章下方，入场方向跟着翻：向下落而不是向上升，才读得出"从徽章里掉出来" */
+  transform: translateY(-4px) scale(0.9);
   pointer-events: none;
   transition: opacity 0.2s ease, transform 0.2s ease;
   z-index: 6;
