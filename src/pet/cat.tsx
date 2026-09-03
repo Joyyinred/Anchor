@@ -10,7 +10,7 @@
 // ★ 那个文件是分发义务不是可选文档，别删（license 要求 Files 随附同一份条款）。
 //   —— 原注释写的是"素材来源见 assets/cat.json 顶部注释"，但 JSON 不支持注释、
 //      那个文件里一个来源信息都没有，是句指向空处的话，08-28 一并改掉。
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 // lottie-web 的默认打包（'lottie-web'）带 AE expressions 功能，内部用 eval() 实现——
 // MV3 扩展页面的 CSP 硬性禁止 unsafe-eval（跟普通网站不同，这条不能靠 manifest 放开），
 // 用不到 expressions 这个功能，改用不含 eval 的 "light" 构建（同一套 SVG 渲染器/类型）。
@@ -61,6 +61,39 @@ export function CuteAnchorPet({
 }: CuteAnchorPetProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const animRef = useRef<AnimationItem | null>(null);
+  // B14（09-02）：这一次 check-in 是否已经被回答过。
+  //
+  // 修的是一个真实的重复计数 bug：点击 → 消息发给 SW → SW 记录/切标签页/写 storage →
+  // 面板收到 storage.onChanged → 气泡才消失。这中间几十到两百毫秒（答 DRIFTED 要切标签页
+  // 时更久）**按钮长得跟没点之前一模一样**，用户很自然会再点一下，而两下都会被真的处理：
+  //   · recordCheckInAnswer 加两次 → 收尾统计说答了 2 次，其实只答了 1 次
+  //   · applyCheckInFeedback 走两次 → 退让阶梯多跳一级，桌宠比设计的更沉默
+  // index.ts 里那句"立刻 pushMicroRestartToast 把 checkin 态摘掉"防的就是这个，但那个
+  // "立刻"要绕 SW + storage 走一圈——**窗口只是变窄了，没关上**。真正关上它只能在组件本地，
+  // 不依赖任何往返。
+  const [answered, setAnswered] = useState(false);
+
+  // 新的 check-in 到来时必须解锁。两次 check-in 之间面板一定会经过非 checkin 态
+  // （pushMicroRestartToast 先推一句反馈、再摘回空白 companion），所以"离开 checkin 就复位"
+  // 是可靠的；不这么做的话，第一次回答之后所有后续 check-in 都会是灰的，比原 bug 更糟。
+  useEffect(() => {
+    if (state !== 'checkin') setAnswered(false);
+  }, [state]);
+
+  // 点第一下就锁住整组按钮。`disabled` 属性已经挡住了绝大多数情况，这里再拦一次是因为
+  // React 的状态更新是异步的：同一批事件里连着两次点击有可能都读到 answered === false。
+  const answerOnce = (answer: Parameters<NonNullable<typeof onAnswer>>[0]): void => {
+    if (answered) return;
+    setAnswered(true);
+    onAnswer?.(answer, channel);
+  };
+
+  // "Done for today" 也是一次性动作（结算一次会话），同样只允许触发一次。
+  const endSessionOnce = (): void => {
+    if (answered) return;
+    setAnswered(true);
+    onSessionEnd?.();
+  };
 
   // 只在挂载时创建一次动画实例，state 变化不重新加载，只影响徽章/气泡（见下方 JSX）。
   useEffect(() => {
@@ -120,21 +153,29 @@ export function CuteAnchorPet({
                 之前这里只判断 onAnswer 是否传了值，state==="companion"/"observing" 时按钮
                 仍然渲染在 DOM 里，键盘用户能 tab 到看不见的按钮上按回车触发 onAnswer。
                 这里额外判断 state === 'checkin'，不在 checkin 态时按钮压根不进 DOM。 */}
+            {/* data-answered 让 CSS 知道整组已经锁住了（变灰、不再响应 hover）：
+                disabled 本身只挡交互、不改外观，用户需要看得出"我点到了、正在处理"，
+                否则跟"卡住了"分不清。 */}
             {state === 'checkin' && onAnswer && (
-              <div className="anchor-pet-chips">
-                <button type="button" onClick={() => onAnswer('FOCUSED', channel)}>
+              <div className="anchor-pet-chips" data-answered={answered}>
+                <button type="button" disabled={answered} onClick={() => answerOnce('FOCUSED')}>
                   Still focused
                 </button>
-                <button type="button" onClick={() => onAnswer('FALSE_POSITIVE', channel)}>
+                <button type="button" disabled={answered} onClick={() => answerOnce('FALSE_POSITIVE')}>
                   Just researching
                 </button>
-                <button type="button" onClick={() => onAnswer('DRIFTED', channel)}>
+                <button type="button" disabled={answered} onClick={() => answerOnce('DRIFTED')}>
                   Drifted - pull me back
                 </button>
                 {/* 契约要求"结束专注"随时可点，check-in 那一刻也不例外——但视觉上要弱于
                     上面三个真正在回答问题的按钮，不能让它看起来像第四个判定选项。 */}
                 {onSessionEnd && (
-                  <button type="button" className="anchor-pet-chip-quiet" onClick={onSessionEnd}>
+                  <button
+                    type="button"
+                    className="anchor-pet-chip-quiet"
+                    disabled={answered}
+                    onClick={endSessionOnce}
+                  >
                     Done for today
                   </button>
                 )}

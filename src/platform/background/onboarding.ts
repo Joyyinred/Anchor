@@ -9,6 +9,7 @@ import { DEFAULT_TASK_DECLARATION, type SessionContext } from '../../engine/type
 import { groqStarterCoachCall } from './starter-coach';
 import { saveSessionContext } from './session';
 import { resetSessionState } from './frame-pipeline';
+import { startSessionStats } from './session-summary';
 import { domainOf, isInternalBrowserUrl } from './domain';
 import { ONBOARDING_STATE_KEY, type OnboardingState } from '../onboarding-state';
 
@@ -48,6 +49,13 @@ export async function handleOnboardingSubmit(
   // 08-30：chrome://extensions/ 这类浏览器内部页面不该被锁成锚点——真机复现过：调试时
   // 开着这个 tab 提交任务，会把它当成锚点，后面 YouTube 上发生的事全部判不出"在锚点上"。
   const url = isInternalBrowserUrl(rawUrl) ? '' : rawUrl;
+  // 09-01 B12 v5：把用户声明任务这一刻正开着的页面透传给起步教练的 LLM 调用。
+  // 这是整条链路上唯一一份"不用猜"的真实信息——前四版 prompt 全部败在"模型只有一句
+  // 任务字符串"（评测集实测：无上下文时 83% 的产出都是"去搜索"，见 evals/）。
+  // ★ 复用上面那个 url 而不是 rawUrl：内部页面（chrome://extensions/ 之类）被过滤成空串，
+  //   这里跟着不传 anchorContext，prompt 自动退回无上下文那一版——调试时开着扩展管理页
+  //   提交任务，不会得到"打开你的扩展管理页"这种荒唐建议。
+  const anchorContext = url ? { title: activeTab?.title ?? '', url } : undefined;
   const result = await runStarterCoach(
     text,
     roundsUsed,
@@ -57,7 +65,8 @@ export async function handleOnboardingSubmit(
     // 每次起步都生成一个新 id 的话，旧 key 会永远留在 chrome.storage.local 里没人清。
     'default',
     { domain: domainOf(url), url },
-    isDemoMode
+    isDemoMode,
+    anchorContext
   );
 
   if (result.status === 'NEEDS_FOLLOWUP') {
@@ -75,5 +84,10 @@ export async function handleOnboardingSubmit(
   // 再推 UI 状态——两步顺序不能反，不然 UI 已经显示"完成"了，但下一次心跳/事件读到的
   // ctx 还是旧的默认占位值。
   await saveSessionContext(result.sessionContext);
+  // 09-02：这一刻才是"这一场专注"真正的起点，把它记下来。不记的话，一场没有任何 check-in、
+  // 也没点过休息的专注（= 最理想的那条路径）到结算时读不到统计，会被现造一份 startedTs=now，
+  // 收尾视图于是说"That was less than a minute of work."——详见 session-summary.ts
+  // 的 startSessionStats 注释。同时这也是桌宠"Focused N min"那个角标的数据源。
+  await startSessionStats(now);
   await pushOnboardingState({ status: 'READY', firstAction: result.firstAction });
 }

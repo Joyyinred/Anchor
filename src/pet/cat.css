@@ -120,10 +120,38 @@
   cursor: pointer;
   transition: transform 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
-.anchor-pet-chips button:hover {
+/* ★ :not(:disabled) 不能省：CSS 的 :hover 对 disabled 元素照样匹配，不排除的话
+   已回答的灰按钮鼠标移上去还会变色，读起来像"还能点"。 */
+.anchor-pet-chips button:hover:not(:disabled) {
   border-color: var(--ap-checkin);
   color: var(--ap-checkin);
   transform: translateY(-1px);
+}
+/* B14（09-02）：键盘焦点。08-29 修过"不该 tab 到隐藏的按钮上"，但修完让人能 tab 到了，
+   落点却只有浏览器默认那圈细虚线——在圆角 + 浅色的 chip 上几乎看不见，键盘用户不知道
+   自己选中的是"Still focused"还是"Drifted"，只能盲按。半截工程，这里补上另一半。
+   ★ 用 :focus-visible 而不是 :focus：鼠标点击也会触发 :focus，那样每次点完按钮都会留一圈
+     焦点环挂在那里，是噪音。:focus-visible 只在浏览器判断"用户在用键盘"时才亮。 */
+.anchor-pet-chips button:focus-visible {
+  outline: none;
+  border-color: var(--ap-checkin);
+  color: var(--ap-checkin);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ap-checkin) 28%, transparent);
+}
+/* B14（09-02）：按下态。点击到气泡消失之间要绕 SW + storage 走一圈（答 DRIFTED 还要切
+   标签页），几十到两百毫秒里按钮原来毫无变化——用户会以为没点上，然后再点一次。
+   这一条让手指按下去立刻有反馈，不等任何往返；真正堵住重复提交的是 cat.tsx 的 answered。 */
+.anchor-pet-chips button:active:not(:disabled) {
+  transform: translateY(0) scale(0.96);
+  border-color: var(--ap-checkin);
+  color: var(--ap-checkin);
+}
+/* 已回答：整组变灰、不再响应 hover。disabled 本身只挡交互不改外观，
+   但用户需要看得出"我点到了，正在处理"，否则跟"卡住了"分不清。 */
+.anchor-pet-chips button:disabled {
+  cursor: default;
+  opacity: 0.45;
+  transform: none;
 }
 /* check-in 气泡里的"结束专注"出口——视觉上要弱于上面三个真正在回答问题的按钮，
    不能让它看起来像第四个判定选项（08-29：契约要求随时可结束专注，check-in 也不例外）。 */
@@ -134,7 +162,7 @@
   font-weight: 600;
   padding: 5px 4px;
 }
-.anchor-pet-chips button.anchor-pet-chip-quiet:hover {
+.anchor-pet-chips button.anchor-pet-chip-quiet:hover:not(:disabled) {
   border-color: transparent;
   color: var(--ap-ink-soft);
   background: transparent;
@@ -164,11 +192,23 @@
   transition: transform 0.4s cubic-bezier(.34,1.56,.64,1), filter 0.4s ease, opacity 0.4s ease;
 }
 
-/* observing：轻微上浮 + 一层很淡的暖色外发光（跟徽章 --ap-observing 同色系）。
-   读起来像"竖起耳朵了"，而不是"变了个样子"。 */
+/* observing：轻微上浮 + 暖色外发光（跟徽章 --ap-observing 同色系）。
+   读起来像"竖起耳朵了"，而不是"变了个样子"。
+
+   ── 09-02：定稿为四档对照里的 v2（Jay 拍板）──
+   08-30 做了四档预览（devpreview 里的 obs-v1~v4）：v1 淡发光、v2 强发光不变色、
+   v3 整只猫转橙、v4 变橙+发光。真机反馈是 v1「太不明显、用户观察不到」，所以往上加了一档。
+   ★ 变色那两档（v3/v4）被否掉的技术原因，不是不好看，是**代价绕不开**：
+     素材实测主色是猫身 hue≈191°（青）、电线 hue≈345°（粉红），而 CSS filter 作用于整个 SVG——
+     `hue-rotate(200deg)` 把猫转成橙色的同时，**电线会从粉红变成青绿**。要只转猫身就得改
+     cat.json 的颜色数据，那样 assets/LICENSE.md 里"我们未修改原文件"那句声明也得跟着改
+     （授权本身允许修改，只是声明要准确）。
+   ★ 双层 drop-shadow 是刻意的：内层 10px/0.85 给出清晰的轮廓光，外层 20px/0.45 做柔和扩散。
+     只用一层的话，要么近处不够亮，要么远处糊成一团。
+   ★ 保留 translateY(-3px)：发光负责"被看见"，上浮负责"读起来像竖起耳朵"，两者管的不是一件事。 */
 .anchor-pet-stage[data-state="observing"]:not([data-resting="true"]) .anchor-pet-lottie {
   transform: translateY(-3px);
-  filter: drop-shadow(0 0 6px hsl(43 71% 46% / 0.35));
+  filter: drop-shadow(0 0 10px hsl(43 85% 50% / 0.85)) drop-shadow(0 0 20px hsl(43 85% 50% / 0.45));
 }
 
 /* checkin：一次性的注意力弹跳，跟徽章的 ap-badge-pop 同拍（0.4s、同一条缓动曲线），
@@ -285,9 +325,16 @@
 }
 
 /* 角落专注时长标签：常态不显示，鼠标悬停在锚徽章上才弹出（配角数据，别喧宾夺主，见 types.ts 注释） */
+/* 09-02：从"徽章正上方"改到"徽章正下方"。
+   原来是 bottom: calc(100% + 14px)，也就是整块挂在 .anchor-pet-lottie-wrap 顶边之外——
+   而舞台顶部只有 16px padding，再往上就是面板边缘，**真机上直接被标题栏裁掉一半**。
+   跟气泡当初那个 padding-top: 320px 是同一类错误：靠"往上溢出"定位，迟早撞到容器边界。
+   往下挂就不会：下方是猫的身体，空间由 118px 高的 wrap 保证，跟面板高度无关。
+   ★ 徽章是 top:-8px 的 30×30，底边落在 y=22；这里取 26px = 底边 + 4px 间隙，
+     right 跟徽章同为 -8px，读起来是"从徽章里掉出来的"而不是另一个独立元素。 */
 .anchor-pet-focus-tag {
   position: absolute;
-  bottom: calc(100% + 14px);   /* 悬浮在徽章正上方，不再常驻在舞台右上角 */
+  top: 26px;
   right: -8px;                 /* 跟徽章自己的 right 偏移对齐 */
   font-size: 11px;
   font-weight: 700;
@@ -299,7 +346,8 @@
   white-space: nowrap;
   box-shadow: 0 4px 10px -4px hsl(var(--ap-shadow) / 0.35);
   opacity: 0;
-  transform: translateY(4px) scale(0.9);
+  /* 现在挂在徽章下方，入场方向跟着翻：向下落而不是向上升，才读得出"从徽章里掉出来" */
+  transform: translateY(-4px) scale(0.9);
   pointer-events: none;
   transition: opacity 0.2s ease, transform 0.2s ease;
   z-index: 6;

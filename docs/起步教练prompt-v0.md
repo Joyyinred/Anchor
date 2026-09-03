@@ -1,6 +1,6 @@
-# Anchor · 起步教练 Prompt v3（B6 产出 / B12 打磨）
+# Anchor · 起步教练 Prompt v5.1（B6 产出 / B12 打磨）
 
-> 对应表单任务：B6（Day 9–10 · v0）+ B12（阶段二 prompt 打磨 · v1 → v2 → v3）· 下游使用方：`src/engine/coach.ts` 的 `StarterCoachLLMCall` 注入点
+> 对应表单任务：B6（Day 9–10 · v0）+ B12（阶段二 prompt 打磨 · v1 → v2 → v3 → v4 → v5 → v5.1）· 下游使用方：`src/engine/coach.ts` 的 `StarterCoachLLMCall` 注入点
 > 上游契约：`docs/契约v4.md` §5.5 taskDeclaration 质量要求
 > 本项目是英文项目：本文档里凡是用户会看到的文案（追问话术、LLM 输出、兜底文案、prompt 示例）一律英文，文档本身的说明性文字保持中文（跟团队其它内部文档一致）。
 
@@ -11,11 +11,11 @@
 `runStarterCoach()` 只在 `taskDeclaration` 已经够格（≥8 字符，或追问已满 2 轮按契约兜底接受）之后，
 调用**一次** LLM——追问本身是纯本地的长度判断，不占用这次调用。
 
-## 2. Prompt v3（拆解第一步物理动作）
+## 2. Prompt v5.1（拆解第一步物理动作）
 
 > ★ 以 `src/platform/background/starter-coach.ts` 的 `buildPrompt()` 为准。
 > **08-29 发现本文档 v0 记的 prompt 跟代码里实际那版并不一致**（文档一份、代码一份，各写各的）——
-> 以后改 prompt 请两边一起改，不然下次没人知道哪份是真的在跑。（09-01 v2/v3 同步均已照做。）
+> 以后改 prompt 请两边一起改，不然下次没人知道哪份是真的在跑。（09-01~09-02 v2~v5.1 同步均已照做。）
 
 ```text
 You are a warm, practical friend helping someone begin a work session.
@@ -23,22 +23,39 @@ Not a coach and not a manager — a friend who knows that starting is the hard p
 
 Their task: "{taskDeclaration}"
 
+Right now they have this page open: "{tab title}" ({tab url})
+
 Name ONE physical first action: something their hands can do in the next 10 seconds,
 on their screen or on their desk. It should be small enough that refusing feels silly.
 
-You know nothing about this person except the sentence above. You do not know what files,
-books, notes, or apps they have. Every object you name must be one of:
+You know almost nothing about this person. You do not know what files, books, notes, or
+apps they have. Every object you name must be one of:
   (a) named in their task above — reuse it exactly, or
   (b) something they create on the spot: a blank doc, a new tab, a blank page, a search.
+  (c) the page they already have open, named above — but ONLY if it clearly fits the task.
+      If it fits, prefer it over (b): using what is already in front of them always beats
+      sending them off to search for something new.
 Anything else is a guess about their life, and guessing wrong is worse than being plain.
 
 Rules:
 - One action only. Never a sequence, never "first... then...".
 - Never invent a detail. A chapter number, page number, book title, or file name you made
   up is a lie, not a detail. Name one ONLY if their task named it.
+- If they already named the material — a file, a doc, a paper, a lecture, a video — assume
+  they can already reach it. OPEN it, do not send them searching for it. Searching for
+  something they just told you they have is a wasted step, and some of it (a private
+  course recording, their own file) cannot be found by searching at all.
 - Never assume they already own or prepared something. "Your notes", "your textbook",
   "your slides", "your outline" may not exist — for a new course or a fresh project they
   usually don't. Have them MAKE something or LOOK something up instead.
+- An open page is not automatically relevant. If the page above has nothing to do with the
+  task, ignore it completely and never mention it. Forcing an unrelated page into the action
+  is the same lie as inventing a chapter number — you just borrowed a real name for it.
+- It must move the task forward. Ten seconds later they should HAVE something or KNOW
+  something they did not before. Typing a title, writing down the name of the task, or
+  opening an empty file gives them nothing — they already knew the name. Either pull real
+  material in front of them (search it, open it, read one line of it) or make them produce
+  one real piece of the work (one sentence, one line of code, one solved step).
 - Planning is not starting. Reject "outline your approach", "think about the structure",
   "make a list of what to do" — that is procrastination wearing a productive costume.
 - Do not restate the goal. "Start writing the essay" is the goal, not an action.
@@ -51,9 +68,13 @@ Rules:
 - Write in English regardless of the language of the task. Plain and warm; no exclamation
   marks, no cheerleading, no praise.
 
-Good: "Open a blank doc and type just the title."
-Good: "Open a new tab and search for the course syllabus."
-Good: "Write the topic name at the top of a blank page."
+Good: "Press play on the video you already have open."      (their open page fits the task)
+Good: "Open a blank doc and write one rough sentence of the intro."
+Good: "Open a new tab and search for the course syllabus."  (nothing relevant is open)
+Bad:  "Search for the React docs chapter 3."         (they named it — open it, don't hunt)
+Bad:  "Search for the Monday recorded lecture."      (a private recording is not searchable)
+Bad:  "Search your inbox for the course email."      (forced an unrelated open page in)
+Bad:  "Open a new doc and type the course name."     (gives them nothing they lacked)
 Bad:  "Start writing the essay."                     (restates the goal)
 Bad:  "Plan your essay structure."                   (planning, not starting)
 Bad:  "Open your laptop."                            (a precondition, not an action)
@@ -65,6 +86,10 @@ Bad:  "Pick up your notes and read the first line."  (assumes notes they may not
 Output JSON only, no extra text:
 {"firstAction": string}
 ```
+
+> ↑ 这是**拿得到当前 tab 时**的形态（v5 新增）。拿不到时（浏览器内部页面被过滤、tab 查询失败），
+> `Right now they have this page open:` 那一行和可用对象 `(c)` 两处一起消失，其余一字不差——
+> 也就是 v4 那一版。**规则和范例两条分支共用，不存在"两套 prompt"**，`evals/` 里两条分支都有用例覆盖。
 
 ### v1 相比 v0 改了什么（B12，08-29）
 
@@ -149,6 +174,119 @@ v3 的三处改动：
 3. **三条 Good 范例全换**——原来那三条里有两条自己就在假设拥有（`"your slides"`、
    `"your textbook"`）；新增反例用这次真机复现的原句。**又是范例在带头犯规**，跟 v2 那次一样。
 
+### v4 相比 v3 改了什么（B12，09-01 还是同一天）— 前三版都在管"真不真实"，没人管"有没有用"
+
+**真机复现（Joy 09-01）**：输入 `pre study for my new course data structure and algorithm`，
+产出 `"Open a new doc, type down data structure and algorithm."`
+
+**这个产出没有任何毛病**——不编造、不假设拥有、物理、一步、12 词内，**v3 的每条规则都过了**。
+唯一的问题是它**什么也没推进**：把早就知道的课程名打进空文档，得到的东西跟十秒前一模一样。
+
+**又是范例教的（第四次）**：v3 的 `Good #1` 就是 `"Open a blank doc and type just the title."`，
+产出跟它是同一个句式模板；`Good #3` `"Write the topic name at the top of a blank page."` 得的是
+同一种病。**当时只检查了范例"真不真实"，没检查它"有没有用"。**
+
+**根因：前三版全在优化"真实性"这一个轴，没有任何一条规则要求"有用性"。**
+
+| 动作 | 十秒后多了什么 |
+|---|---|
+| 搜大纲 / 打开课程页 / 读一行 | ✅ 真实材料被拉到眼前 |
+| 写一句粗糙的开头 / 一行代码 | ✅ 产出了一小块真东西 |
+| 把课名打一遍 / 给空文档起标题 | ❌ 信息量为零 |
+
+v4 的两处改动：
+
+1. **新增一条"必须推进任务"的规则**：`Ten seconds later they should HAVE something or KNOW
+   something they did not before.`，并点名"打标题/写任务名/开空文件"是零信息量，给出两条
+   合格路径（把真实材料拉到眼前 / 产出一小块真东西）。
+   ★ **前三版都在收紧"不许说什么"，这条是第一次规定"必须做到什么"**——纯禁令改不出好答案，
+   只能改出"安全的废话"。
+2. **两条"起标题/写名字"型的 Good 换成会产出或揭示东西的**，新增反例用这次的原句。
+
+**★ 值得记下来的模式**：v1→v4 每一版都修好了上一版的病、又引入一个新的。四次的直接原因
+**全部是 few-shot 范例**（编号范例 → 假设拥有的范例 → 零信息量的范例）。结论不是"再改一版
+范例就好了"，而是：**改 prompt 时必须把每条范例按当前所有维度重新过一遍，而不只是按这次
+要修的那一维**。
+
+### v5 相比 v4 改了什么（B12，09-01）— 不再改措辞，改成给它补信息
+
+**这一版的触发不是手测，是第一次跑评测集的数字**（`evals/`，12 条用例）：
+
+> **通过率 12/12（100%），但 SEARCH 形态占 83%。**
+
+每一条都合规、每一条都过了全部规则，**而且十条里九条是同一个动作**：
+
+| 任务 | 产出 | 问题 |
+|---|---|---|
+| `finish chapter 3 of the react docs` | "search for React docs chapter 3" | 人就在读那个文档 |
+| `watch the recorded lecture from monday` | "search for recorded lecture Monday" | **公网根本搜不到私有课程录播** |
+| `debug the login flow in our app` | "search for login flow debugging steps" | 搜"怎么做"不是做 |
+
+**根因不是范例又选歪了，是四版约束叠起来把解空间挤到只剩一个点：**
+
+| 版本 | 加的约束 | 砍掉了什么 |
+|---|---|---|
+| v2 | 不许编造细节 | 所有具体命名 |
+| v3 | 只能用任务里给过的 / 当场能造的 | **所有已有材料** |
+| v4 | 必须揭示或产出新东西 | "打开某物看一眼" |
+
+交集里"去搜"几乎是唯一活口。**一个只知道任务字符串的模型，确实只能这么答。**
+
+**决定性的一条证据**：那 12 条里唯一一条不搜索的好答案，是
+`fix the failing tests in detector.test.ts` → `"Open detector.test.ts in your editor"`
+——**唯一一条任务自己给了真实对象的用例**。给它可信的真实对象，它立刻就不搜了。
+
+v5 的改动：
+
+1. **新增 `anchorContext`（当前 tab 的 title + url）**，从 `handleOnboardingSubmit` →
+   `runStarterCoach` → `StarterCoachLLMCall` 一路透传。这是整条链路上**唯一一份"不用猜"的
+   真实信息**，它让 `OPEN_EXISTING` / `PLAY` / `READ` 这几种形态重新变成合法选项。
+   - 接口是 `coach.ts` 内部的，**不走 FeatureFrame 那条缝**（红线4 不涉及）。
+   - `runStarterCoach` **不判断相关性**——"这个页面跟任务有没有关系"是语义判断，交给
+     prompt 里的模型（它同时看得到任务和标题，判据比平台层全）。
+   - 内部页面（`chrome://extensions/` 之类）被 `isInternalBrowserUrl` 过滤成空 url 时**不传**，
+     prompt 自动退回 v4 那条无上下文分支。
+2. **★ 必配的防讨好补丁**：模型有强烈的"把给它的东西用上"倾向。只写"相关就用它"的话，
+   `study neural networks` + 用户正开着 Gmail，很可能得到 `"Search your inbox for the course
+   email."`——**那是编造换了个真实的锚，比凭空编章节号更难识破，因为对象确实存在**。
+   所以同时写死了反向指令（`An open page is not automatically relevant… ignore it completely`）
+   **和一条对应反例**。前四版的经验很清楚：**光有规则没有反例压不住，两者必须成对出现。**
+3. **评测集配套加了 4 条用例**：2 条相关页面（期望不再搜索）、2 条无关页面（期望被完全忽略），
+   并新增 `BORROWED_IRRELEVANT_PAGE` 规则自动检测"把无关页面硬凑进来"。
+   形态分布现在**按有无当前页面分两组打印**——两组的差值就是 anchorContext 到底值不值。
+
+**★ 原来那 12 条不带 anchor 的用例是对照组，不要给它们补 anchor**：拿不到当前 tab 的情况
+一直存在，那条分支必须一直有人测。
+
+### v5.1 相比 v5 改了什么（B12，09-02）— v5 跑分后补的一条窄缺口
+
+**v5 首跑成绩（16 条用例）**：
+
+| 分组 | 结果 | 判定 |
+|---|---|---|
+| 无当前页面（对照组，n=12） | SEARCH 83% | 跟基线一致——v5 对这组本来就不改，对照组正常 |
+| **页面无关 · 期望忽略**（n=2） | Gmail→SEARCH、Nike→WRITE，`BORROWED_IRRELEVANT_PAGE` **零命中** | ✅ **2/2，防讨好补丁完全有效** |
+| **页面相关 · 期望用上**（n=2） | 3b1b 视频→**PLAY**、react.dev→SEARCH | ⚠️ **1/2** |
+
+两点值得记：
+
+1. **`PLAY` 这个形态在 v1~v4 从来没出现过**——没有页面信息时它根本说不出口。anchorContext 确实打开了新的解空间。
+2. **失败那条是 react.dev**：任务 `finish chapter 3 of the react docs` + 页面正开着 react.dev
+   → `"Open a new tab and search for React docs chapter 3"`。**材料就在眼前，却被支去重新找一遍。**
+
+**根因：规则 (a) 只说了半句。** `named in their task above — reuse it exactly` 要求了"复用这个名字"，
+**没要求"直接打开它、别去搜它"**——模型老实复用了名字，然后套进它最熟的搜索模板。
+
+对照组里那三条（react docs / transformer paper / Monday 录播）是同一个病，所以这一条补下去**同时打两组**。
+其中 Monday 录播那条尤其要紧：**私有课程录播在公网上根本搜不到，那个动作执行下去必然失败**——不只是平淡，是错的。
+
+v5.1 的改动（只动一处，便于下一轮跑分归因）：新增规则「任务已经点名的材料，直接 OPEN 不要 SEARCH」+ 两条对应反例。
+
+**★ 同时修了指标本身**：v5 首跑我把"有当前页面"当成一组看，得出"50% SEARCH"——**这个读法是错的**，
+因为无关页面那两条**本来就该退回搜索**。形态分布现在按 `none` / `use` / `ignore` 三组分开打印，
+并新增 `IGNORED_OPEN_PAGE` 规则（标了 `anchorShouldBeUsed` 的用例产出仍是 SEARCH 就判失败）。
+**指标设计错了比 prompt 写错更隐蔽——它会让你把成功读成失败，或者反过来。**
+
 **为什么不加"追问具体章节"的二次 LLM 交互**（评估后否决，记下来免得下次重新辩论）：
 契约 §5.5 对 `taskDeclaration` 只要求长度 ≥8 字符、不够则追问最多 2 轮，**是纯长度闸门，
 不涉及语义**；`coach.ts` 的 `StarterCoachLLMCall` 是单次调用设计，`callGroq()` 单轮无历史。
@@ -167,6 +305,8 @@ v3 的三处改动：
 | 拒绝计划类回答 | v1 新增——"先规划一下"是拖延伪装成准备，不算第一步 |
 | **不得编造事实** | **v2 新增**——章节号/页码/书名/文件名只能来自 `taskDeclaration`，不许自己造 |
 | **不得假设已拥有** | **v3 新增**——可用对象只有两类：任务里点名过的，或用户当场能造出来的（空白文档/新标签页/白纸/一次搜索）。`"your notes"` 这类"泛化但假设拥有"的说法一律不行 |
+| **必须推进任务** | **v4 新增**——做完之后必须拥有或知道某样十秒前没有的东西；打标题/写任务名/开空文件属于零信息量，一律不行 |
+| **可以用当前页面** | **v5 新增**——拿得到当前 tab 时多一类可用对象 `(c)`，相关就优先用它；**不相关必须完全忽略**（防讨好，配套反例 + `BORROWED_IRRELEVANT_PAGE` 规则） |
 | **运行时守卫** | **v2 新增**——`hasFabricatedSpecific()` 见 §3.1 |
 | 失败兜底 | 调用抛错/超时/**被守卫拦下** → `coach.ts` 捕获后用固定文案 `FIRST_ACTION_FALLBACK`（`"Don't overthink it — just open whatever you need, and that counts as starting."`）兜底，起步流程不因 LLM 故障卡死（分工v2.md §5 红线2同精神） |
 
@@ -211,9 +351,14 @@ Can you be a bit more specific? Something like "review data structures for tomor
 
 **prompt 质量本身没法自动化验证**——好不好只能人读。所以分成两层：
 
-- **能自动化的部分**：`hasFabricatedSpecific()` 是纯字符串函数，`src/platform/background/starter-coach.test.ts`
-  测了 12 条（该拦的编号、该放行的用户自给细节、v2 三条 Good 范例、以及那条已知局限）。
-  **不测 `groqStarterCoachCall`/`callGroq`**，不破坏"chrome API 相关代码不做自动化测试"这条现有共识。
+- **能自动化的部分**：
+  - `hasFabricatedSpecific()` 是纯字符串函数，`src/platform/background/starter-coach.test.ts`
+    测了 12 条（该拦的编号、该放行的用户自给细节、Good 范例、以及那条已知局限）。
+  - **评测集（v5 起，`evals/`）**：16 条固定用例 + 11 条机械判据 + 形态分布，
+    `npm run eval:coach` 批量打 Groq 出通过率。规则层自己也有 27 条离线单测（进 `npm test`）。
+    **改 prompt 前后各跑一次，用数字代替感觉**——四版全靠肉眼、每次修一个坏一个就是这么来的。
+  - **不测 `groqStarterCoachCall`/`callGroq`**，不破坏"chrome API 相关代码不做自动化测试"这条现有共识；
+    跑分脚本打真实网络、结果非确定性，**永远不进 `npm test`**。
 - **只能真机手测的部分**：4 个用例走一遍起步教练，看 SW 控制台的 `[Anchor SW] starter coach` 日志：
 
   | 用例 | 输入 | 看什么 |
@@ -222,6 +367,9 @@ Can you be a bit more specific? Something like "review data structures for tomor
   | 已带真实细节 | `finish chapter 3 of the react docs` | `chapter 3` 应当被**原样复用**，不该被守卫误杀成兜底文案 |
   | 很模糊但够 8 字符 | `study for the test` | 仍然给出一个动作，不反问、不 hedge、不退化成废话 |
   | 非学术类 | `write a blog post about my trip` | 编号词表在这类任务上不该有任何副作用 |
+  | **相关页面**（v5 新增） | `study neural networks` + 开着 3b1b 视频页 | 期望"按下你已经开着的那个视频"，**不该再去搜一个新的** |
+  | **无关页面**（v5 新增） | `study neural networks` + 开着 Gmail | ★ 防讨好：必须**完全忽略**那个页面，出现 inbox/mail/email 就是把无关页面硬凑进来 |
+  | **零信息量**（v4 新增） | `pre study for my new course data structure and algorithm` | **不许出现"把课名打进空文档"这类做完等于没做的动作**——期望是把真实材料拉到眼前（搜大纲/查第一周内容）或产出一小块真东西 |
   | **全新领域**（v3 新增） | `I wanna prestudy my new course advanced data structure and algorithm` | **不许出现 `your notes` / `your textbook` 这类"假设你已经有"的对象**——一门还没开始的新课，什么都还不存在。期望形如 `"Open a new tab and search for the course syllabus."` |
 
   每一条同时回看 v1 已经修掉的 5 类失败模式（复述目标 / 伪装成计划 / 前置条件当动作 /

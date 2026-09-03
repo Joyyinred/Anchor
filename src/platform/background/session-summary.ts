@@ -34,6 +34,29 @@ async function saveStats(stats: SessionStats): Promise<void> {
   await chrome.storage.local.set({ [SESSION_STATS_KEY]: stats });
 }
 
+/**
+ * 起步教练完成那一刻记下这一场的起点。在 onboarding.ts 的 READY 分支里调一次。
+ *
+ * ★ 09-02 真机排查发现的 bug，这是修法：saveStats 之前只有 recordCheckInAnswer /
+ *   recordRestStart 两个调用方，也就是**一场专注只有在用户答过 check-in 或点过休息之后
+ *   才存在起点**。那么这条路径会发生什么：
+ *     起步教练完成 → 没人写 stats → 专注 45 分钟，一次没走神也没休息 → 仍然没人写
+ *     → 点"Done for today" → loadStats() 读不到，现造一份 startedTs = now
+ *     → duration = endedTs − startedTs = 0 → 收尾视图说 "That was less than a minute of work."
+ *   **而这恰好是最理想的那条路径**：专注得好、一次没被打扰的用户，拿到的收尾是"你干了不到
+ *   一分钟"。demo 上演顺利场景，翻车的就是这一屏。
+ *
+ * ★ loadStats 上面那句"差几秒对收尾展示没有意义"只在统计已经被提前创建过时成立——
+ *   现在真的提前创建了，那句话才第一次变成真的。
+ *
+ * ★ 无条件覆盖，不做"已存在就保留"：起步教练完成 = 新的一场，跟 resetSessionState 同一个
+ *   边界语义。上一场的残留统计绝不能带进来（endSession 已经会清，这里是双保险——
+ *   用户中途重装/清 storage 时不走 endSession 那条路）。
+ */
+export async function startSessionStats(now: number): Promise<void> {
+  await saveStats(createSessionStats(now));
+}
+
 /** 用户回答了一次 check-in。在 index.ts 的 CHECK_IN_ANSWER 分支里调一次。 */
 export async function recordCheckInAnswer(feedback: CheckInFeedback, now: number): Promise<void> {
   const stats = await loadStats(now);

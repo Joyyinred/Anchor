@@ -7,15 +7,16 @@
 //
 // 08-27 起 B6 UI（background/onboarding.ts）已经在真正调用这个函数了。
 // 08-29 B12：prompt 打磨到 v1。
-// 09-01 B12：prompt 修到 v2（v1 在教模型编造具体细节）、又修到 v3（v2 的"泛化对象"退路
-//   本身在教模型假设用户已经拥有某样东西）——两次的根因都在下方 buildPrompt 上的注释里。
+// 09-01 B12：prompt 一天内改到 v5。v2/v3/v4 每一版都在修前一版自己引入的新毛病
+//   （编造 → 假设拥有 → 没用 → 只会搜索），v5 换了个思路：不再收紧措辞，而是**给模型
+//   补上它一直缺的那份信息**（当前页面）。根因逐版记在下方 buildPrompt 上的注释里。
 //   prompt 全文同步在 docs/起步教练prompt-v0.md（那份文档写着"以代码为准，两边一起改"）。
 import { callGroq, extractJsonObject } from './groq';
-import type { StarterCoachLLMCall } from '../../engine/coach';
+import type { AnchorContext, StarterCoachLLMCall } from '../../engine/coach';
 
 const GROQ_COACH_MODEL = 'openai/gpt-oss-120b';
 
-// B12 prompt v3（09-01）。下面按 v1 → v2 → v3 的顺序记，因为后一版每次都是在修前一版
+// B12 prompt v5.1（09-02）。下面按 v1 → v2 → v3 → v4 → v5 → v5.1 的顺序记，因为后一版每次都是在修前一版
 // 自己引入的问题——只看最终结果的话，很容易把某条规则当成"多余的啰嗦"再删回去。
 //
 // ── v1 的历史（保留，因为 v2 没有推翻它，只是修掉了它引入的新问题）──
@@ -68,28 +69,115 @@ const GROQ_COACH_MODEL = 'openai/gpt-oss-120b';
 // except the sentence above"）——让模型知道自己不知道什么，比逐条禁止它说什么更省事。
 // 配套删掉 v2 那个害人的建议清单，三条 Good 范例全换（原来有两条自己就在假设拥有：
 // "your slides"、"your textbook"），新增反例用这次真机复现的原句。
-function buildPrompt(taskDeclaration: string): string {
+//
+// ── v4（09-01，还是同一天）：前三版全在管"真不真实"，没有一条在管"有没有用" ──
+// 真机复现：输入 "pre study for my new course data structure and algorithm"，产出
+// "Open a new doc, type down data structure and algorithm."
+// 这个产出**没有任何毛病**——不编造、不假设拥有、物理、一步、12 词内，v3 的每条规则都过了。
+// 唯一的问题是它**什么也没推进**：把早就知道的课程名打进空文档，得到的东西跟十秒前一样。
+//
+// 又是范例教的（第四次）：v3 的 Good #1 就是 "Open a blank doc and type just the title."，
+// 产出跟它是同一个句式模板。Good #3 "Write the topic name at the top of a blank page."
+// 得的是同一种病——**我当时只检查了范例"真不真实"，没检查它"有没有用"**。
+//
+// 缺的维度：**做完之后必须拥有或知道某样十秒前没有的东西**。
+//   · 搜大纲 / 打开课程页 / 读一行 → 有（把真实材料拉到眼前）
+//   · 写一句粗糙的开头 / 一行代码       → 有（产出了一小块真东西）
+//   · 把课名打一遍 / 给空文档起标题     → 没有（信息量为零）
+// v4 加的就是这一条规则，并且把两条"起标题/写名字"型的 Good 换成会产出或揭示东西的，
+// 新增反例直接用这次的原句。前三版都在收紧"不许说什么"，这条是第一次规定"必须做到什么"。
+//
+// ── v5（09-01）：不再改措辞，改成给它补信息 ──
+// 评测集第一次跑分（12 条用例，见 evals/）给出的数字：**通过率 12/12 (100%)，但 SEARCH 占 83%**。
+// 每一条都合规、每一条都过了全部规则，**而且十条里九条是同一个动作**：
+//   `finish chapter 3 of the react docs`  → "search for React docs chapter 3"（人就在读那文档）
+//   `watch the recorded lecture from monday` → "search for recorded lecture Monday"（公网根本搜不到）
+//
+// 根因不是范例又选歪了，是**四版约束叠起来把解空间挤到只剩一个点**：
+//   v2「不许编造细节」→ 砍掉所有具体命名
+//   v3「只能用任务里给过的 / 当场能造的」→ 砍掉所有已有材料
+//   v4「必须揭示或产出新东西」→ 砍掉"打开某物看一眼"
+// 交集里"去搜"几乎是唯一活口。**一个只知道任务字符串的模型，确实只能这么答。**
+//
+// 决定性的一条证据：那 12 条里唯一一条不搜索的好答案，是
+//   `fix the failing tests in detector.test.ts` → "Open detector.test.ts in your editor"
+// ——**唯一一条任务自己给了真实对象的用例**。给它可信的真实对象，它立刻就不搜了。
+//
+// 所以 v5 加的是 anchorContext（当前 tab 的标题+url）：整条链路上唯一一份"不用猜"的真实
+// 信息，它让 OPEN_EXISTING / PLAY / READ 这几种形态重新变成合法选项。
+//
+// ★ 必配的防讨好补丁：模型有强烈的"把给它的东西用上"倾向。只写"相关就用它"的话，
+//   "study neural network" + 用户正开着 Gmail，很可能得到 "Search your inbox for the course
+//   email."——**那是编造换了个真实的锚，比原来的编造更难识破**。所以同时写死了反向指令
+//   （"An open page is not automatically relevant… ignore it completely"）和一条对应反例。
+//   前四版的经验：光有规则没有反例压不住，两者必须成对出现。
+//
+// ── v5.1（09-02）：v5 跑分后补的一条窄缺口 ──
+// v5 首跑成绩（16 条，见 evals/）：**防讨好 2/2 全过**（Gmail / Nike 都被彻底忽略，
+// BORROWED_IRRELEVANT_PAGE 零命中），**相关页面 1/2**——3b1b 视频那条第一次给出了 PLAY
+// （这个形态 v1~v4 从来没出现过），但 react.dev 那条仍然是
+//   任务 `finish chapter 3 of the react docs` + 页面开着 react.dev
+//   → "Open a new tab and search for React docs chapter 3"
+// **材料就在眼前，却被支去重新找一遍。**
+//
+// 根因是规则 (a) 只说了半句：`named in their task above — reuse it exactly` 要求了"复用这个
+// 名字"，**没要求"直接打开它、别去搜它"**。模型老老实实复用了名字，然后套进它最熟的搜索模板。
+// 对照组里那三条（react docs / transformer paper / Monday 录播）是同一个病，所以这一条补下去
+// 同时打两组。其中 Monday 录播那条尤其要紧：**私有课程录播在公网上根本搜不到，那个动作
+// 执行下去必然失败**——不只是平淡，是错的。
+//
+// ★ export 出来只有一个原因：`evals/run-starter-coach.ts` 要用**跑在生产里的这一份**去打分。
+//   复制一份到 evals 下的话，就是 08-29 那个"文档一份代码一份、各写各的"的坑再踩一次——
+//   而且这次更糟：评测跑的是 A 版，用户看到的是 B 版，分数完全没有意义。
+/** 标题可能很长（有些站点把整段描述塞进 title），截一下免得挤占 prompt。 */
+const MAX_ANCHOR_TITLE_LENGTH = 90;
+
+export function buildPrompt(taskDeclaration: string, anchorContext?: AnchorContext): string {
+  // 有没有当前页面，prompt 的形状不一样：没有时保持 v4 原样（两类可用对象），
+  // 有时多一类 (c)，并且明确"相关就优先用它"。两条分支共用同一套规则和范例。
+  const title = anchorContext?.title.trim().slice(0, MAX_ANCHOR_TITLE_LENGTH) ?? '';
+  const openPageLine = anchorContext
+    ? `\nRight now they have this page open: "${title}" (${anchorContext.url})\n`
+    : '';
+  const optionC = anchorContext
+    ? `  (c) the page they already have open, named above — but ONLY if it clearly fits the task.
+      If it fits, prefer it over (b): using what is already in front of them always beats
+      sending them off to search for something new.\n`
+    : '';
+
   return `You are a warm, practical friend helping someone begin a work session.
 Not a coach and not a manager — a friend who knows that starting is the hard part.
 
 Their task: "${taskDeclaration}"
-
+${openPageLine}
 Name ONE physical first action: something their hands can do in the next 10 seconds,
 on their screen or on their desk. It should be small enough that refusing feels silly.
 
-You know nothing about this person except the sentence above. You do not know what files,
-books, notes, or apps they have. Every object you name must be one of:
+You know almost nothing about this person. You do not know what files, books, notes, or
+apps they have. Every object you name must be one of:
   (a) named in their task above — reuse it exactly, or
   (b) something they create on the spot: a blank doc, a new tab, a blank page, a search.
-Anything else is a guess about their life, and guessing wrong is worse than being plain.
+${optionC}Anything else is a guess about their life, and guessing wrong is worse than being plain.
 
 Rules:
 - One action only. Never a sequence, never "first... then...".
 - Never invent a detail. A chapter number, page number, book title, or file name you made
   up is a lie, not a detail. Name one ONLY if their task named it.
+- If they already named the material — a file, a doc, a paper, a lecture, a video — assume
+  they can already reach it. OPEN it, do not send them searching for it. Searching for
+  something they just told you they have is a wasted step, and some of it (a private
+  course recording, their own file) cannot be found by searching at all.
 - Never assume they already own or prepared something. "Your notes", "your textbook",
   "your slides", "your outline" may not exist — for a new course or a fresh project they
   usually don't. Have them MAKE something or LOOK something up instead.
+- An open page is not automatically relevant. If the page above has nothing to do with the
+  task, ignore it completely and never mention it. Forcing an unrelated page into the action
+  is the same lie as inventing a chapter number — you just borrowed a real name for it.
+- It must move the task forward. Ten seconds later they should HAVE something or KNOW
+  something they did not before. Typing a title, writing down the name of the task, or
+  opening an empty file gives them nothing — they already knew the name. Either pull real
+  material in front of them (search it, open it, read one line of it) or make them produce
+  one real piece of the work (one sentence, one line of code, one solved step).
 - Planning is not starting. Reject "outline your approach", "think about the structure",
   "make a list of what to do" — that is procrastination wearing a productive costume.
 - Do not restate the goal. "Start writing the essay" is the goal, not an action.
@@ -102,9 +190,13 @@ Rules:
 - Write in English regardless of the language of the task. Plain and warm; no exclamation
   marks, no cheerleading, no praise.
 
-Good: "Open a blank doc and type just the title."
-Good: "Open a new tab and search for the course syllabus."
-Good: "Write the topic name at the top of a blank page."
+Good: "Press play on the video you already have open."      (their open page fits the task)
+Good: "Open a blank doc and write one rough sentence of the intro."
+Good: "Open a new tab and search for the course syllabus."  (nothing relevant is open)
+Bad:  "Search for the React docs chapter 3."         (they named it — open it, don't hunt)
+Bad:  "Search for the Monday recorded lecture."      (a private recording is not searchable)
+Bad:  "Search your inbox for the course email."      (forced an unrelated open page in)
+Bad:  "Open a new doc and type the course name."     (gives them nothing they lacked)
 Bad:  "Start writing the essay."                     (restates the goal)
 Bad:  "Plan your essay structure."                   (planning, not starting)
 Bad:  "Open your laptop."                            (a precondition, not an action)
@@ -167,8 +259,8 @@ export function hasFabricatedSpecific(firstAction: string, taskDeclaration: stri
 // 真机实测 reasoning 就占了 182/200，content 被截断成半截 JSON。1000 是实测够用的值。
 const COACH_MAX_TOKENS = 1000;
 
-export const groqStarterCoachCall: StarterCoachLLMCall = async ({ taskDeclaration }) => {
-  const text = await callGroq(GROQ_COACH_MODEL, buildPrompt(taskDeclaration), {
+export const groqStarterCoachCall: StarterCoachLLMCall = async ({ taskDeclaration, anchorContext }) => {
+  const text = await callGroq(GROQ_COACH_MODEL, buildPrompt(taskDeclaration, anchorContext), {
     maxTokens: COACH_MAX_TOKENS,
   });
   if (text === null) {

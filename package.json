@@ -10,7 +10,8 @@
     "dev": "vite",
     "typecheck:engine": "tsc -p tsconfig.engine.json --noEmit",
     "typecheck:platform": "tsc -p tsconfig.platform.json --noEmit",
-    "typecheck": "npm run typecheck:engine && npm run typecheck:platform"
+    "typecheck": "npm run typecheck:engine && npm run typecheck:platform",
+    "eval:coach": "vite-node --config evals/vite.config.ts evals/run-starter-coach.ts"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.7.1",
