@@ -6,7 +6,20 @@ import { domainMatches } from '../../engine/perceiver';
 const CODE_DOMAINS = ['github.com', 'vscode.dev', 'gitlab.com', 'stackoverflow.com'];
 const DOCS_DOMAINS = ['react.dev', 'docs.google.com', 'developer.mozilla.org'];
 const VIDEO_DOMAINS = ['youtube.com', 'bilibili.com'];
-const AI_CHAT_DOMAINS = ['claude.ai', 'chat.openai.com'];
+// 09-05：跟 perceiver.ts 的 DEMO_PRESET_CACHE 同步扩了这批主流 AI 对话助手——两处
+// 各管各的（这里是 contentKind 元数据，那边是 contextRelevance 判定），但都该反映同一个
+// "这些是 AI 对话助手" 的事实，没有谁依赖谁，纯粹是保持信息准确、不掉进 unknown。
+const AI_CHAT_DOMAINS = [
+  'claude.ai',
+  'chat.openai.com',
+  'chatgpt.com',
+  'gemini.google.com',
+  'grok.com',
+  'perplexity.ai',
+  'copilot.microsoft.com',
+  'chat.deepseek.com',
+  'poe.com',
+];
 const MUSIC_DOMAINS = ['open.spotify.com', 'music.163.com'];
 // A16：docs/分类prompt-v0.md §3.2 明确 x.com/twitter.com/facebook.com/pinterest.com/reddit.com
 // 这类"学习+娱乐混合站"不能域级拉黑（内容形态因页面而异），只能走 LLM 内容级分类兜底——

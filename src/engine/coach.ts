@@ -56,6 +56,33 @@ export type StarterCoachLLMCall = (input: {
   anchorContext?: AnchorContext;
 }) => Promise<StarterCoachLLMOutput>;
 
+/**
+ * 09-05 新增：任务声明"够不够格"原来只看长度（>=8 字符），真机反馈发现这远远不够——
+ * "调整并测试hackathon项目作品"有十几个字符，长度闸门直接放行，但这句话完全没说清楚
+ * 项目叫什么、调整哪部分。这不只是起步教练第一步动作会写得笼统的问题：contextRelevance
+ * 的 LLM 分类器全程只拿得到这句 taskDeclaration 去跟每个页面的标题比对，声明本身空洞，
+ * 后面整场会话的相关性判定都会跟着不准——`claude.ai` 上一个明明是本项目功能讨论的对话
+ * （标题"构建起步教练的心理学方法"）就是因为声明里没提项目名/功能名，分类器判不出关联，
+ * 长期卡 UNKNOWN。
+ *
+ * 这道检查关心的是"这句话够不够具体，能撑起一整场会话的相关性判断"，不是"能不能靠它写出
+ * 一个像样的第一步动作"——后者 llmCall 本来就能借助 anchorContext 蒙混过去（当前页面给了
+ * 线索），但 anchorContext 只是起步这一刻的快照，不会被后续每一次分类复用，声明本身的
+ * 具体程度才是撑起整场会话的关键，所以这个检查故意不看 anchorContext，只看 taskDeclaration
+ * 这句话本身站不站得住。
+ */
+export interface TaskQualityCheckOutput {
+  /** false 时 followupQuestion 才有意义。 */
+  sufficient: boolean;
+  followupQuestion?: string;
+}
+
+export type TaskQualityCheckCall = (input: { taskDeclaration: string }) => Promise<TaskQualityCheckOutput>;
+
+// 默认：永远判定"够格"，直接跳过这道新增的检查——不传这个参数的调用方（现有测试、
+// 未来任何还没接上真实实现的调用方）行为跟这个功能上线前完全一样，一个字符都不差。
+const alwaysSufficient: TaskQualityCheckCall = async () => ({ sufficient: true });
+
 // LLM 调用失败/超时时的兜底文案（用户可见，英文）——跟分工v2.md §5 红线2（必有本地兜底，
 // 绝不整条链路挂死）同一个精神：起步教练是用户进来第一件事，这里断了比感知半断了观感更差，
 // 必须有话可说。
@@ -98,6 +125,8 @@ export type StarterCoachResult =
  * @param anchorContext      09-01 新增：用户声明任务那一刻开着的页面，原样透传给 llmCall。
  *                           这一层不解读、不判断相关性——"这个页面跟任务有没有关系"是语义判断，
  *                           交给 prompt 里的模型去做（它同时看得到任务和标题，判据比这里全）。
+ * @param checkTaskQuality   09-05 新增：语义级"够不够具体"检查，见上方 TaskQualityCheckCall 的
+ *                           设计说明。不传则默认永远判定够格（保持这个功能上线前的行为不变）。
  */
 export async function runStarterCoach(
   rawTaskDeclaration: string,
@@ -107,7 +136,8 @@ export async function runStarterCoach(
   sessionId?: string,
   inferredAnchor?: InferredAnchor,
   isDemoMode?: boolean,
-  anchorContext?: AnchorContext
+  anchorContext?: AnchorContext,
+  checkTaskQuality: TaskQualityCheckCall = alwaysSufficient
 ): Promise<StarterCoachResult> {
   const taskDeclaration = rawTaskDeclaration.trim();
 
@@ -120,8 +150,26 @@ export async function runStarterCoach(
     };
   }
 
-  // 走到这里：要么够格了，要么已经追问满 2 轮——按契约"之后接受用户输入（避免僵住）"，
-  // 不管长度多短都往下走，不能因为用户嫌烦不肯细化就把起步卡死。
+  // 09-05：长度过关不代表内容具体（"调整并测试hackathon项目作品"）——跟上面的长度闸门
+  // 共用同一份 roundsUsed 预算和 2 轮封顶，不是独立开一份新的追问额度：契约"最多追问 2 轮"
+  // 本来就是一个不可超支的总预算，不分是哪种原因触发的追问，问满 2 轮无论如何都要放行。
+  // 不用再额外判断 taskDeclaration 是否非空：走到这里意味着上面的长度闸门没有触发，
+  // 而它的触发条件已经覆盖了"太短（含空串）且还有追问预算"的情况——能走到这一行，
+  // 要么 roundsUsed 已经不小于 MAX_FOLLOWUP_ROUNDS（下面这个判断会挡住），要么
+  // taskDeclaration.length 已经 >= MIN_TASK_DECLARATION_LENGTH，不可能是空串。
+  if (roundsUsed < MAX_FOLLOWUP_ROUNDS) {
+    const quality = await checkTaskQuality({ taskDeclaration });
+    if (!quality.sufficient && quality.followupQuestion) {
+      return {
+        status: 'NEEDS_FOLLOWUP',
+        prompt: quality.followupQuestion,
+        roundsUsed: roundsUsed + 1,
+      };
+    }
+  }
+
+  // 走到这里：两道闸门都过了，或者已经追问满 2 轮——按契约"之后接受用户输入（避免僵住）"，
+  // 不管长度/具体程度如何都往下走，不能因为用户嫌烦不肯细化就把起步卡死。
   let firstAction: string;
   try {
     const output = await llmCall({ taskDeclaration, anchorContext });

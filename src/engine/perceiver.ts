@@ -14,14 +14,19 @@ export type ContextRelevance = FeatureFrame['contextRelevance'];
 
 
 // ── §5.2 演示域预置分类缓存表：优先级高于 LLM 和黑名单，低于 sessionWhitelist 和 Shorts 硬判 ──
+// 09-05 撤销：AI 对话助手（claude.ai/chat.openai.com 等）曾经收在这张表里，真机反馈发现是
+// 错误的收纳——这张表是域级硬判，一旦命中根本不会走到 LLM，看不到页面标题。AI 对话工具的
+// 内容形态完全因对话而异（同一个 claude.ai 网址可能在聊任务，也可能中途飘去问"中午吃什么"），
+// 这跟 youtube/reddit/x.com 这类"域名下什么内容都可能出现"的混合站是同一类站点——那些站点
+// 故意不进这张表、必须走 LLM 按标题内容级判断，AI 对话助手理应同一个待遇，之前收进来是判断
+// 失误，不是这张表的设计原则本身有问题。改用下面的 cacheKey() 带标题重新分类，AI 对话助手
+// 现在完全交给 LLM，一个域名不留。
 export const DEMO_PRESET_CACHE: Record<string, ContextRelevance> = {
   'vscode.dev': 'RELEVANT',
   'react.dev': 'RELEVANT',
   'stackoverflow.com': 'RELEVANT',
   'github.com': 'RELEVANT',
   'docs.google.com': 'RELEVANT',
-  'claude.ai': 'RELEVANT',
-  'chat.openai.com': 'RELEVANT',
   'arxiv.org': 'RELEVANT',
   'scholar.google.com': 'RELEVANT',
   'coursera.org': 'RELEVANT',
@@ -64,7 +69,7 @@ export const BUILTIN_ENTERTAINMENT_BLACKLIST = new Set<string>([
   'addictinggames.com',
 ]);
 
-// 域名分类缓存：cacheKey(domain+pathPattern) -> 分类结果
+// 域名分类缓存：cacheKey(domain+pathPattern+title) -> 分类结果
 // Day6（A8）由真实异步 LLM 写入；未命中前保守 UNKNOWN（红线1）
 export type ClassificationCache = Map<string, ContextRelevance>;
 
@@ -79,8 +84,22 @@ function pathPattern(url: string): string {
   }
 }
 
-export function cacheKey(domain: string, url: string): string {
+/** domain+path，不含标题——给"同一个页面"这个更粗的粒度用（目前只有分类节流要这个粒度）。 */
+export function pageKey(domain: string, url: string): string {
   return `${domain}${pathPattern(url)}`;
+}
+
+// 09-05：分类要跟着标题变，不能只跟着 URL 变。AI 对话类页面（claude.ai/chat/xxx 这种）
+// 整场对话 URL 从不变化，但话题可以从"神经网络入门"飘到"中午吃什么"——只用 domain+path
+// 当 key 会把第一次（可能是标题还是"New chat"、信息量为零时）算出的判定冻结一辈子，
+// 后面话题怎么飘都读不到。加标题进 key 后，标题一变就是全新的 key，resolveContextRelevance()
+// 命中不到旧缓存会自然退回 UNKNOWN，triggerLazyClassification()（frame-pipeline.ts）
+// 就会对着新标题重新分类一次——不用额外写"标题变了要不要重新分类"的判断逻辑，直接白拿。
+// 标题做归一化（大小写/多余空白）：同一句标题因为多个空格被判成"变了"会白白重新分类一次，
+// 只会误伤性能、不会影响正确性，但没必要。
+export function cacheKey(domain: string, url: string, title: string): string {
+  const normalizedTitle = title.trim().toLowerCase().replace(/\s+/g, ' ');
+  return `${pageKey(domain, url)}::${normalizedTitle}`;
 }
 
 // 真实 SignalEvent.domain 来自 URL.hostname（见 src/platform/background/domain.ts 的 domainOf()），
@@ -107,7 +126,7 @@ export function resolveContextRelevance(
   );
   if (presetMatch) return presetMatch[1];
 
-  const key = cacheKey(event.domain, event.url);
+  const key = cacheKey(event.domain, event.url, event.title);
   const domainWhitelisted = ctx.sessionWhitelist.some((w) => domainMatches(event.domain, w));
   if (domainWhitelisted || ctx.sessionWhitelist.includes(key)) {
     return 'RELEVANT';

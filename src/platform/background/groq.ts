@@ -26,7 +26,7 @@ export async function getGroqApiKey(): Promise<string | undefined> {
 export async function callGroq(
   model: string,
   userPrompt: string,
-  options: { maxTokens?: number } = {}
+  options: { maxTokens?: number; temperature?: number } = {}
 ): Promise<string | null> {
   const apiKey = await getGroqApiKey();
   // 08-28 真机测试：contextRelevance 长期卡 UNKNOWN，排查了很久才发现是 storage.local.clear()
@@ -50,6 +50,12 @@ export async function callGroq(
         model,
         messages: [{ role: 'user', content: userPrompt }],
         max_tokens: options.maxTokens ?? 200,
+        // 09-05：只在调用方显式传的时候才带这个字段——不像 maxTokens 那样给全局默认值。
+        // classifier.ts 会显式传 0（真机反馈：没有这个参数时同一段输入两次调用给出过不同
+        // 判定，同一个标题一次 UNKNOWN 一次 IRRELEVANT，分类这种"是/否"判断一致性比多样性
+        // 重要）；starter-coach.ts 不传，维持它一直以来的行为不变，不因为这次改动被连带
+        // 影响——它要的是措辞质量，不是判断一致性，两个调用方的需求方向不一样。
+        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
       }),
       signal: controller.signal,
     });

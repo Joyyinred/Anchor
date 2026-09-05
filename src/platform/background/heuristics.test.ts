@@ -25,6 +25,21 @@ describe('guessContentKind', () => {
     expect(guessContentKind('https://claude.ai/chat/abc', 'claude.ai')).toBe('ai_chat');
   });
 
+  it('09-05 新收录的主流 AI 对话助手都判 ai_chat', () => {
+    const domains = [
+      'chatgpt.com',
+      'gemini.google.com',
+      'grok.com',
+      'perplexity.ai',
+      'copilot.microsoft.com',
+      'chat.deepseek.com',
+      'poe.com',
+    ];
+    for (const domain of domains) {
+      expect(guessContentKind(`https://${domain}/`, domain)).toBe('ai_chat');
+    }
+  });
+
   it('music 域判 music', () => {
     expect(guessContentKind('https://open.spotify.com/track/1', 'open.spotify.com')).toBe('music');
   });

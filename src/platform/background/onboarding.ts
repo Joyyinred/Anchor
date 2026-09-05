@@ -6,7 +6,7 @@
 // storage 里的值不会，下次打开读一次当前值就有）。
 import { runStarterCoach } from '../../engine/coach';
 import { DEFAULT_TASK_DECLARATION, type SessionContext } from '../../engine/types';
-import { groqStarterCoachCall } from './starter-coach';
+import { groqStarterCoachCall, groqTaskQualityCheckCall } from './starter-coach';
 import { saveSessionContext } from './session';
 import { resetSessionState } from './frame-pipeline';
 import { startSessionStats } from './session-summary';
@@ -66,7 +66,10 @@ export async function handleOnboardingSubmit(
     'default',
     { domain: domainOf(url), url },
     isDemoMode,
-    anchorContext
+    anchorContext,
+    // 09-05：长度够但内容空洞（"调整并测试hackathon项目作品"）时主动追问缺的那部分，
+    // 见 coach.ts TaskQualityCheckCall/starter-coach.ts groqTaskQualityCheckCall 顶部注释。
+    groqTaskQualityCheckCall
   );
 
   if (result.status === 'NEEDS_FOLLOWUP') {

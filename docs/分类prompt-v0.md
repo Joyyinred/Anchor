@@ -36,7 +36,7 @@ Output format (JSON only, no extra text):
 |---|---|
 | 三态输出 | `RELEVANT` / `IRRELEVANT` / `UNKNOWN`，无其他值 |
 | **低置信回 UNKNOWN** | LLM 返回 `confidence < 0.7` 时，A 侧强制覆盖为 `UNKNOWN`（契约红线1：判出前一律保守） |
-| 缓存键 | `domain + pathname + search`（perceiver.ts `cacheKey()` 已实现） |
+| 缓存键 | `domain + pathname + search + 标题`（perceiver.ts `cacheKey()` 已实现，09-05 加了标题——AI 对话类页面 URL 全程不变但话题会飘，只按 URL 缓存会把第一次判定冻结一辈子；标题变了自然是全新的 key，未命中会自动回落 `UNKNOWN` 触发重新分类，不用额外写"标题变了要不要重判"的逻辑） |
 | 调用时机 | 惰性：每页每会话最多一次，结果写入 `ClassificationCache` |
 | 短路优先于 LLM | 演示域预置缓存表 > sessionWhitelist > short_feed 硬判 > 内置娱乐黑名单 > LLM |
 
@@ -53,9 +53,10 @@ Output format (JSON only, no extra text):
 |---|---|---|
 | vscode.dev / github.com / stackoverflow.com | RELEVANT | CREATOR 档常驻工具站 |
 | react.dev / docs.google.com | RELEVANT | 文档/协作类工具站 |
-| claude.ai / chat.openai.com | RELEVANT | AI 对话辅助任务，判为任务相关 |
 | arxiv.org / scholar.google.com / coursera.org | RELEVANT | READER/VIEWER 档常见学习资源站 |
 | weibo.com | IRRELEVANT | 纯娱乐/信息流站点，demo 用来演示"飘走"场景 |
+
+**⚠️ AI 对话助手（claude.ai/chat.openai.com/gemini.google.com/grok.com 等）不进这张表**（09-05 先收进来过，真机反馈后撤销）：这张表是域级硬判，命中就不会走到 LLM，看不到标题。AI 对话工具的内容形态完全因对话而异——同一个 claude.ai 网址可能在聊任务，也可能中途飘去问"中午吃什么"，这跟 youtube/reddit/x.com 这类"域名下什么内容都可能出现"的混合站是同一类站点，必须走 LLM 按标题内容级判断，域级写死会让这种话题漂移永远检测不出来。
 
 ### 3.2 内置纯娱乐/购物/票务/网页游戏域黑名单 `BUILTIN_ENTERTAINMENT_BLACKLIST`
 

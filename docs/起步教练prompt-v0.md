@@ -297,7 +297,8 @@ v5.1 的改动（只动一处，便于下一轮跑分归因）：新增规则「
 
 | 规则 | 实现 |
 |---|---|
-| 单次调用 | 每次起步教练流程最多 1 次 LLM 调用；追问轮次不触发调用 |
+| 单次调用（拆解本身） | 拆解第一步物理动作这一步，每次起步教练流程最多 1 次 LLM 调用 |
+| **总调用上限**（09-05 新增质量检查后） | 最多 3 次：任务质量检查最多触发 2 次（≤`MAX_FOLLOWUP_ROUNDS`）+ 拆解 1 次；长度闸门（<8 字符）不触发任何调用，见 §4.1 |
 | 输出形状 | `{ firstAction: string }`，`coach.ts` 的 `StarterCoachLLMOutput` |
 | 语言 | 英文项目，输出统一用英文 |
 | 粒度 | "手能动"的具体动作，不是任务复述、不是多步计划 |
@@ -337,6 +338,63 @@ Can you be a bit more specific? Something like "review data structures for tomor
 
 - `taskDeclaration.length < 8` 且追问轮次 `< 2` → 弹出上面这句，不调用 LLM。
 - 追问满 2 轮后，不管用户说得够不够具体，都接受输入往下走（契约原文："追问最多 2 轮，之后接受用户输入，避免僵住"）。
+
+### 4.1 任务质量检查 `groqTaskQualityCheckCall`（09-05 新增，语义级"够不够具体"）
+
+**为什么要加**：长度闸门只挡"太短"，挡不住"够长但空洞"——真机复现：`taskDeclaration`
+`"adjust and test my hackathon project"`（够 8 字符）放行了，但完全没说项目叫什么、调哪部分。
+后果不止是拆解出来的第一步动作会写得笼统：`classifier.ts` 的 `classifyDomainRelevance()`
+全程只拿这一句话去跟每个页面的标题比对，声明本身空洞，会拖累**整场会话**的相关性判定
+（真机上一个明明是本项目功能讨论的对话，标题"构建起步教练的心理学方法"，就是判不出关联，
+长期卡 `UNKNOWN`）。
+
+★ 这道检查关心"这句话撑不撑得起一整场会话的相关性判断"，**不是**"能不能靠它写出一个像样的
+第一步动作"——后者拆解 prompt 能借助 `anchorContext`（当前页面）蒙混过去，但 `anchorContext`
+只是起步那一刻的快照，不会被后续每一次分类复用；声明本身站不站得住才是关键，所以这个检查
+**故意不传 `anchorContext`**，只看 `taskDeclaration`这句话本身。
+
+```
+You judge whether a task description is specific enough to be used for an entire
+work session to decide whether ANY webpage the person visits later is relevant to their work —
+not just to write one first step for right now.
+
+Their task: "{taskDeclaration}"
+
+A vague description names only a category or an entire project without saying which specific
+part: "adjust and test my hackathon project", "work on my presentation", "study for the exam".
+Someone who only reads this sentence could not tell whether a random webpage — say, one about
+"neural networks" or about "marketing slides" — is actually part of this work, because the
+sentence never named a concrete target.
+
+A specific description names an identifiable target: "fix the login bug in auth.ts", "write
+the intro section of my thesis", "review chapter 4 on sorting algorithms". Short is fine as
+long as it points at one real file, feature, topic, or section — do not demand extra length,
+only extra specificity.
+
+If it is vague, ask ONE natural, warm follow-up question that would surface the missing
+concrete target (usually: which specific part/feature/topic). Under 15 words, do not repeat
+their sentence back, do not sound like a form field.
+
+Output JSON only, no extra text:
+{"sufficient": boolean, "followupQuestion": string | null}
+```
+
+**接线**（`coach.ts` `runStarterCoach()`）：长度闸门之后、拆解调用之前插一道新闸门，共用
+同一份 `roundsUsed` 预算和 `MAX_FOLLOWUP_ROUNDS=2` 封顶——不是给"语义不够具体"单独开一份
+新的追问额度，契约"最多追问 2 轮"本来就是一个不可超支的总预算，不分是哪种原因触发的追问。
+`sufficient:false` 且带了 `followupQuestion` 才会追问，展示的是模型给的针对性问题（比如
+"Which part of the project are you adjusting?"），不是 §4 那句通用固定文案。
+
+**Fail open**：这道检查是锦上添花，不是关键路径——`callGroq` 失败、解析不出来、或者
+`sufficient:false` 却没给 `followupQuestion`（半成品结果），一律当成"够格"直接放行到拆解
+那一步，绝不能让这道新加的检查本身出问题就把起步教练卡住（分工v2.md §5 红线2同精神）。
+`groqTaskQualityCheckCall` 因此从不 `throw`，跟 `groqStarterCoachCall`（失败靠抛错、外层
+`try/catch` 兜底）是两种不同的失败处理方式——前者失败了还有后半段拆解流程要走，不能拖累它；
+后者本身就是流程的最后一步，抛错交给 `coach.ts` 统一兜底更简单。
+
+`temperature: 0`（`groq.ts` `callGroq()` 09-05 新增的可选参数）：判"够不够具体"是个二选一
+判断，一致性比多样性重要——跟 `classifier.ts` 同一个理由（真机复现过同一个标题两次分类
+给出不同结果）。这个默认值只在显式传的时候生效，不影响拆解那次调用一直以来的行为。
 
 ## 5. 阶段一范围声明
 

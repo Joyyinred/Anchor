@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeFeatureFrame, resolveContextRelevance, ClassificationCache } from './perceiver';
+import { computeFeatureFrame, resolveContextRelevance, cacheKey, ClassificationCache } from './perceiver';
 import { SignalEvent, SessionContext, PROFILE_PRESETS } from './types';
 
 function mkCtx(overrides: Partial<SessionContext> = {}): SessionContext {
@@ -55,6 +55,36 @@ describe('resolveContextRelevance (signal 1)', () => {
     const ctx = mkCtx();
     const event: SignalEvent = { ...anchorEvent, domain: 'douyin.com', url: 'https://www.douyin.com/video/123', contentKind: 'video', isAnchor: false };
     expect(resolveContextRelevance(event, ctx, new Map())).toBe('IRRELEVANT');
+  });
+
+  // 09-05 撤销：AI 对话助手曾经短暂进过 DEMO_PRESET_CACHE（秒判 RELEVANT，不看标题），
+  // 真机反馈发现这是错的——一个 claude.ai 对话可以中途从任务相关聊到"中午吃什么"，域级硬判
+  // 会让 SW 永远看不到这种漂移。现在跟 youtube.com/reddit.com 一样，一个域名都不留，
+  // 全部走下面的"标题级分类缓存"。
+  it('AI 对话助手（grok/gemini/claude/chatgpt 等）不再域级硬判 RELEVANT，未分类时保守判 UNKNOWN', () => {
+    const ctx = mkCtx();
+    const domains = ['grok.com', 'gemini.google.com', 'perplexity.ai', 'claude.ai', 'chatgpt.com'];
+    for (const domain of domains) {
+      const event: SignalEvent = { ...anchorEvent, domain, url: `https://${domain}/chat/abc`, title: 'New chat', contentKind: 'ai_chat', isAnchor: false };
+      expect(resolveContextRelevance(event, ctx, new Map())).toBe('UNKNOWN');
+    }
+  });
+
+  it('分类缓存按"域名+路径+标题"命中——同一个 URL 换一个标题就是全新的、还没分类过的页面', () => {
+    const ctx = mkCtx();
+    const url = 'https://claude.ai/chat/06e4afd9';
+    const onTopicTitle = '神经网络入门教学 - Claude';
+    const cache = new Map([[cacheKey('claude.ai', url, onTopicTitle), 'RELEVANT' as const]]);
+
+    // 标题跟缓存里的一致 → 命中，判 RELEVANT
+    const onTopicEvent: SignalEvent = { ...anchorEvent, domain: 'claude.ai', url, title: onTopicTitle, contentKind: 'ai_chat', isAnchor: false };
+    expect(resolveContextRelevance(onTopicEvent, ctx, cache)).toBe('RELEVANT');
+
+    // 同一个 URL（对话没换），但话题飘了、标题变了 → 缓存命不中，退回 UNKNOWN（不是继续沿用
+    // 旧标题算出的 RELEVANT）——这正是 09-05 真机反馈要修的那个漏洞：不能因为对话开始时
+    // 判过一次相关，就让它对之后飘到哪里都免检。
+    const driftedEvent: SignalEvent = { ...anchorEvent, domain: 'claude.ai', url, title: '今天中午推荐我吃什么 - Claude', contentKind: 'ai_chat', isAnchor: false };
+    expect(resolveContextRelevance(driftedEvent, ctx, cache)).toBe('UNKNOWN');
   });
 
   it('newly added blacklist domains (netflix/hulu/disneyplus) resolve IRRELEVANT', () => {
@@ -141,8 +171,11 @@ describe('resolveContextRelevance (signal 1)', () => {
 
   it('LLM classification cache resolves once populated (Day6 hook point)', () => {
     const ctx = mkCtx();
-    const event: SignalEvent = { ...anchorEvent, domain: 'youtube.com', url: 'https://www.youtube.com/watch?v=fun123', isAnchor: false };
-    const cache: ClassificationCache = new Map([['youtube.com/watch?v=fun123', 'IRRELEVANT']]);
+    const title = 'Top 10 Funny Cats';
+    const event: SignalEvent = { ...anchorEvent, domain: 'youtube.com', url: 'https://www.youtube.com/watch?v=fun123', title, isAnchor: false };
+    // 09-05：key 带标题，手写字符串容易跟归一化规则（trim/小写/合并空白）对不上，
+    // 直接调用 cacheKey() 现算，保证跟 resolveContextRelevance() 内部用的是同一套逻辑。
+    const cache: ClassificationCache = new Map([[cacheKey('youtube.com', event.url, title), 'IRRELEVANT']]);
     expect(resolveContextRelevance(event, ctx, cache)).toBe('IRRELEVANT');
   });
 });
@@ -357,8 +390,12 @@ describe('computeFeatureFrame: jumpPattern', () => {
       { timestamp: 200000, domain: 'react.dev', url: 'https://react.dev/reference/hooks', title: 'Hooks Reference', contentKind: 'docs', isAnchor: false, interactionType: 'ACTIVE_INPUT', entryIntent: 'search', systemIdle: false },
       { timestamp: 260000, domain: 'claude.ai', url: 'https://claude.ai/chat/abc', title: 'debug login flow', contentKind: 'ai_chat', isAnchor: false, interactionType: 'ACTIVE_INPUT', entryIntent: 'direct_link', systemIdle: false },
     ];
-    // 最近5段（react/claude/SO/react/claude）都未落在锚点域上，且全部 RELEVANT（演示预置缓存）
-    expect(computeFeatureFrame(events, ctx, 260000).jumpPattern).toBe('task_orbit');
+    // 09-05：claude.ai 已经从 DEMO_PRESET_CACHE 里撤了（AI 对话助手要走 LLM 按标题判，
+    // 不能域级硬判——见 perceiver.ts 顶部注释），这里手工模拟"LLM 已经判过这个标题"，
+    // 跟真实链路的惰性分类是同一个机制，不是走后门抄近道。
+    const cache = new Map([[cacheKey('claude.ai', 'https://claude.ai/chat/abc', 'debug login flow'), 'RELEVANT' as const]]);
+    // 最近5段（react/claude/SO/react/claude）都未落在锚点域上，且全部 RELEVANT（react.dev/stackoverflow.com 演示预置缓存 + claude.ai 上面模拟的分类缓存）
+    expect(computeFeatureFrame(events, ctx, 260000, cache).jumpPattern).toBe('task_orbit');
   });
 
   it('最近5段窗口内命中锚点段 → stable（当前正处在锚点上，不是"在跳"）', () => {

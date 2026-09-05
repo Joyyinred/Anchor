@@ -57,7 +57,10 @@ function isValidVerdict(v: unknown): v is ContextRelevance {
  * 调用方不需要关心具体是哪一种。
  */
 export async function classifyDomainRelevance(input: ClassifyInput): Promise<ContextRelevance> {
-  const text = await callGroq(GROQ_CLASSIFY_MODEL, buildPrompt(input));
+  // 09-05 真机反馈：同一个标题两次分类给出过不同判定（UNKNOWN 一次、IRRELEVANT 一次）——
+  // 分类是"是/否"判断，一致性比多样性重要，temperature=0 让同样的输入尽量给出同样的答案
+  // （见 groq.ts callGroq 顶部注释；这个默认值只影响这里，不影响 starter-coach.ts）。
+  const text = await callGroq(GROQ_CLASSIFY_MODEL, buildPrompt(input), { temperature: 0 });
   if (!text) return 'UNKNOWN'; // callGroq 已经打过日志说明具体是没配 key / 请求失败 / 超时中的哪一种
 
   const parsed = extractJsonObject(text) as { verdict?: unknown; confidence?: unknown } | null;

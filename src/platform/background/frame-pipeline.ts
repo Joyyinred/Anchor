@@ -6,7 +6,7 @@
 // A（平台层）的职责，跟 eventHistory/currentTab 是同一套"SW 回收后重新水合"模式。
 import type { SignalEvent, SessionContext, FeatureFrame, DetectionResult, BState, BStatePersistable, CheckInFeedback } from '../../engine/types';
 import { createInitialBState, CHECKIN_COOLDOWN_MS } from '../../engine/types';
-import { computeFeatureFrame, cacheKey, type ClassificationCache } from '../../engine/perceiver';
+import { computeFeatureFrame, cacheKey, pageKey, type ClassificationCache } from '../../engine/perceiver';
 import { evaluateFrame, applyCheckInFeedback } from '../../engine/detector';
 import { createPetStateMachine, advancePetState } from '../../engine/pet-state';
 import type { PetState } from '../../pet/types';
@@ -38,6 +38,14 @@ let petStateMachine = createPetStateMachine();
 const classificationCache: ClassificationCache = new Map();
 // 同一个 cacheKey 在 LLM 结果回来之前，不要因为期间又来了几条事件就重复发起分类请求。
 const inFlightClassification = new Set<string>();
+// 09-05：cacheKey 带上标题后，标题一变就是全新的 key、天然会重新分类——但有些页面标题会
+// 频繁抖动却跟"任务相关性"毫无关系（未读消息数变化的 "(3) Inbox - Gmail"、带相对时间戳的
+// 页面），每次抖动都真打一次 LLM 太浪费，也容易撞 Groq 的速率限制。按"页面"（domain+path，
+// 不含标题）这个更粗的粒度节流：同一个页面在这个窗口内已经分类过，就算标题又变了也先不再
+// 触发，等窗口过了才认下一次标题变化——真正的话题漂移（比如聊天话题从"神经网络"飘到"中午
+// 吃什么"）通常要几十秒到几分钟才会发生，20s 的节流窗口挡不住这种漂移，只挡得住秒级抖动。
+const MIN_RECLASSIFY_INTERVAL_MS = 20_000;
+const lastClassifyTriggeredAt = new Map<string, number>();
 
 // evaluateFrame 需要的 BState（阶梯/冷却/持续器）跟 eventHistory 是同一个问题：只活在内存里，
 // SW 被回收就归零，得单独持久化 + 水合，不能指望调用方记得。
@@ -133,6 +141,7 @@ export function resetSessionState(sessionId: string): void {
 
   classificationCache.clear();
   inFlightClassification.clear();
+  lastClassifyTriggeredAt.clear();
 }
 
 // recordEventAndEvaluate（有新事件）和 recomputeOnHeartbeat（没有新事件，只是时间往前走了）
@@ -192,8 +201,17 @@ function triggerLazyClassification(event: SignalEvent, ctx: SessionContext, fram
   // 不该被算作"IRRELEVANT"或任何确定结论）。domain 判空即可：cacheKey 用 domain 打头，
   // url 为空但 domain 有值的情况理论上不存在（domainOf('') === ''）。
   if (!event.domain) return;
-  const key = cacheKey(event.domain, event.url);
+  // 09-05：key 带标题（见 perceiver.ts cacheKey 顶部注释）——标题一变这里就是全新的 key，
+  // 不用另外判断"标题是不是变了"，命中不到旧缓存自然会走到这里重新分类。
+  const key = cacheKey(event.domain, event.url, event.title);
   if (inFlightClassification.has(key) || classificationCache.has(key)) return;
+
+  // 节流：同一个页面（不看标题）刚分类过没多久，先别因为标题抖动又触发一次——见上面
+  // MIN_RECLASSIFY_INTERVAL_MS 的注释。
+  const page = pageKey(event.domain, event.url);
+  const lastTriggered = lastClassifyTriggeredAt.get(page);
+  if (lastTriggered !== undefined && event.timestamp - lastTriggered < MIN_RECLASSIFY_INTERVAL_MS) return;
+  lastClassifyTriggeredAt.set(page, event.timestamp);
 
   inFlightClassification.add(key);
   console.log('[Anchor SW] classifying (async)', key);

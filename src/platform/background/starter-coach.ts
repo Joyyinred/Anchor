@@ -12,7 +12,7 @@
 //   补上它一直缺的那份信息**（当前页面）。根因逐版记在下方 buildPrompt 上的注释里。
 //   prompt 全文同步在 docs/起步教练prompt-v0.md（那份文档写着"以代码为准，两边一起改"）。
 import { callGroq, extractJsonObject } from './groq';
-import type { AnchorContext, StarterCoachLLMCall } from '../../engine/coach';
+import type { AnchorContext, StarterCoachLLMCall, TaskQualityCheckCall, TaskQualityCheckOutput } from '../../engine/coach';
 
 const GROQ_COACH_MODEL = 'openai/gpt-oss-120b';
 
@@ -285,4 +285,82 @@ export const groqStarterCoachCall: StarterCoachLLMCall = async ({ taskDeclaratio
     throw new Error('groqStarterCoachCall: fabricated specific');
   }
   return { firstAction };
+};
+
+// ── 任务声明质量检查（09-05，coach.ts TaskQualityCheckCall 的真实实现）──
+// 真机复现：taskDeclaration "调整并测试hackathon项目作品"（十几个字符，长度闸门直接放行），
+// 但完全没说项目叫什么、调哪部分——contextRelevance 的分类器全程只拿这句话去跟每个页面
+// 标题比对，声明本身空洞，claude.ai 上一个明明是本项目功能讨论的对话（标题"构建起步教练的
+// 心理学方法"）愣是判不出关联，长期卡 UNKNOWN。
+//
+// ★ 这个检查关心"这句话撑不撑得起一整场会话的相关性判断"，不是"能不能靠它写出一个像样的
+//   第一步动作"——后者 buildPrompt() 能借助 anchorContext 蒙混过去（当前页面给了线索），
+//   但 anchorContext 只是起步那一刻的快照，不会被后续每一次分类复用，声明本身站不站得住
+//   才是关键，所以这里故意不传 anchorContext（跟 coach.ts 里 TaskQualityCheckCall 的类型
+//   定义一致，不是漏传）。
+function buildTaskQualityPrompt(taskDeclaration: string): string {
+  return `You judge whether a task description is specific enough to be used for an entire
+work session to decide whether ANY webpage the person visits later is relevant to their work —
+not just to write one first step for right now.
+
+Their task: "${taskDeclaration}"
+
+A vague description names only a category or an entire project without saying which specific
+part: "adjust and test my hackathon project", "work on my presentation", "study for the exam".
+Someone who only reads this sentence could not tell whether a random webpage — say, one about
+"neural networks" or about "marketing slides" — is actually part of this work, because the
+sentence never named a concrete target.
+
+A specific description names an identifiable target: "fix the login bug in auth.ts", "write
+the intro section of my thesis", "review chapter 4 on sorting algorithms". Short is fine as
+long as it points at one real file, feature, topic, or section — do not demand extra length,
+only extra specificity.
+
+If it is vague, ask ONE natural, warm follow-up question that would surface the missing
+concrete target (usually: which specific part/feature/topic). Under 15 words, do not repeat
+their sentence back, do not sound like a form field.
+
+Output JSON only, no extra text:
+{"sufficient": boolean, "followupQuestion": string | null}`;
+}
+
+function extractTaskQuality(text: string): TaskQualityCheckOutput | null {
+  const parsed = extractJsonObject(text) as { sufficient?: unknown; followupQuestion?: unknown } | null;
+  if (!parsed || typeof parsed.sufficient !== 'boolean') return null;
+  if (parsed.sufficient) return { sufficient: true };
+  // sufficient===false 时才需要一句能展示给用户的追问——解析不出可用文案就当整次判定不可用
+  // （fail open，见下面调用处），不能把 sufficient:false 但没有问题文案的半成品结果放出去。
+  if (typeof parsed.followupQuestion === 'string' && parsed.followupQuestion.trim()) {
+    return { sufficient: false, followupQuestion: parsed.followupQuestion.trim() };
+  }
+  return null;
+}
+
+// 跟 groqStarterCoachCall 用同一个模型——这是给用户看的追问文案，要措辞质量，不是纯分类，
+// 犯不着为了省钱换成 classifier.ts 那个更小的模型（Jay 的原始设想也是同一个模型，最多
+// 3 次调用：2 轮追问 + 1 次拆解，见 updateNote 08-31 记录）。
+// max_tokens 参考 COACH_MAX_TOKENS 的教训（gpt-oss 的 reasoning 计入预算，200 会截断）——
+// 这个 prompt 比完整拆解 prompt 短，但同一个模型的 reasoning 开销量级一样，不能想当然缩小。
+const TASK_QUALITY_MAX_TOKENS = 600;
+
+/**
+ * ★ 红线2同精神：这个检查是"锦上添花"，不是关键路径——失败/解析不出来时一律 fail open
+ *   （当成"够格"，直接放行到拆解那一步），绝不能因为这道新加的质量检查本身出问题就让
+ *   起步教练卡住或崩掉。也因此这个函数本身不抛错，coach.ts 那边不需要再包一层 try/catch。
+ */
+export const groqTaskQualityCheckCall: TaskQualityCheckCall = async ({ taskDeclaration }) => {
+  const text = await callGroq(GROQ_COACH_MODEL, buildTaskQualityPrompt(taskDeclaration), {
+    maxTokens: TASK_QUALITY_MAX_TOKENS,
+    temperature: 0, // 判"够不够具体"是个二选一的判断，一致性比多样性重要——跟 classifier.ts 同一个理由。
+  });
+  if (text === null) {
+    console.warn('[Anchor SW] task quality check: Groq call failed, treating as sufficient (fail open)');
+    return { sufficient: true };
+  }
+  const parsed = extractTaskQuality(text);
+  if (!parsed) {
+    console.warn('[Anchor SW] task quality check: unusable response, treating as sufficient (fail open). Raw:', text);
+    return { sufficient: true };
+  }
+  return parsed;
 };

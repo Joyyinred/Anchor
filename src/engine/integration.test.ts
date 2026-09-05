@@ -3,7 +3,7 @@
 // 因为这里是从原始 SignalEvent 真实重放，证据持续器（30s 窗口）需要真实的时间推进才会满足。
 import { describe, it, expect } from 'vitest';
 import eventsFixture from '../mock/events.json';
-import { computeFeatureFrame, ClassificationCache } from './perceiver';
+import { computeFeatureFrame, cacheKey, ClassificationCache } from './perceiver';
 import { evaluateFrame } from './detector';
 import {
   SignalEvent,
@@ -18,25 +18,29 @@ type Archetype = 'CREATOR' | 'READER' | 'VIEWER';
 
 // 模拟「LLM 已经判完」的分类结果——真实系统里这是 A8（Day6）异步调用+缓存写入的产物，
 // 这里手工预置，等价于「demo 前预热缓存」（契约v4 §5.2 最后一句）。
-const MOCK_LLM_CLASSIFICATIONS: Record<string, 'RELEVANT' | 'IRRELEVANT'> = {
-  'youtube.com/watch?v=fun123': 'IRRELEVANT', // Top 10 Funny Cats
-  'youtube.com/watch?v=reacthooks': 'RELEVANT', // React Hooks Tutorial
-  'youtube.com/watch?v=mlcourse1': 'RELEVANT', // MIT 6.006 Lecture 5（场景12 的原锚点）
-  'youtube.com/': 'IRRELEVANT', // YouTube 首页推荐流
-  'youtube.com/watch?v=rec001': 'IRRELEVANT',
-  'youtube.com/watch?v=rec002': 'IRRELEVANT',
-  'youtube.com/watch?v=rec003': 'IRRELEVANT',
-  'youtube.com/watch?v=xyz999': 'IRRELEVANT',
-  'youtube.com/watch?v=xyz998': 'IRRELEVANT',
-  'youtube.com/watch?v=lec5&list=PLcourse': 'RELEVANT',
-  'youtube.com/watch?v=lec6&list=PLcourse': 'RELEVANT',
-  'web.wechat.com/chat': 'IRRELEVANT',
-  'course.edu.cn/slides/ch3': 'RELEVANT',
+// 09-05：cacheKey 带上了标题（见 perceiver.ts 顶部注释——AI 对话类页面 URL 不变但话题会飘，
+// 只用 domain+path 当 key 会把第一次分类结果冻结一辈子），这里跟着改成用真实 title 走
+// cacheKey() 现算，不再手写 "domain+path" 字符串——手写的话，标题跟 events.json 里的原始
+// 事件对不上，缓存永远命不中，全部退回 UNKNOWN，场景不出预期结果。
+const MOCK_LLM_CLASSIFICATIONS: { domain: string; url: string; title: string; verdict: 'RELEVANT' | 'IRRELEVANT' }[] = [
+  { domain: 'youtube.com', url: 'https://youtube.com/watch?v=fun123', title: 'Top 10 Funny Cats', verdict: 'IRRELEVANT' },
+  { domain: 'youtube.com', url: 'https://youtube.com/watch?v=reacthooks', title: 'React Hooks Tutorial 2026', verdict: 'RELEVANT' },
+  { domain: 'youtube.com', url: 'https://youtube.com/watch?v=mlcourse1', title: 'MIT 6.006 Lecture 5: Sorting', verdict: 'RELEVANT' }, // 场景12 的原锚点
+  { domain: 'youtube.com', url: 'https://youtube.com/', title: 'YouTube 首页', verdict: 'IRRELEVANT' }, // 首页推荐流
+  { domain: 'youtube.com', url: 'https://youtube.com/watch?v=rec001', title: '推荐：搞笑合集', verdict: 'IRRELEVANT' },
+  { domain: 'youtube.com', url: 'https://youtube.com/watch?v=rec002', title: '自动连播：街头魔术', verdict: 'IRRELEVANT' },
+  { domain: 'youtube.com', url: 'https://youtube.com/watch?v=rec003', title: '自动连播：猫咪视频', verdict: 'IRRELEVANT' },
+  { domain: 'youtube.com', url: 'https://youtube.com/watch?v=xyz999', title: '自动连播：极限运动集锦', verdict: 'IRRELEVANT' },
+  { domain: 'youtube.com', url: 'https://youtube.com/watch?v=xyz998', title: '自动连播：美食探店', verdict: 'IRRELEVANT' },
+  { domain: 'youtube.com', url: 'https://youtube.com/watch?v=lec5&list=PLcourse', title: 'Lecture 5: Sorting', verdict: 'RELEVANT' },
+  { domain: 'youtube.com', url: 'https://youtube.com/watch?v=lec6&list=PLcourse', title: 'Lecture 6: Trees', verdict: 'RELEVANT' },
+  { domain: 'web.wechat.com', url: 'https://web.wechat.com/chat', title: '微信群聊', verdict: 'IRRELEVANT' },
+  { domain: 'course.edu.cn', url: 'https://course.edu.cn/slides/ch3', title: '第3章课件 P1-20', verdict: 'RELEVANT' },
   // zhihu.com 故意不给分类结果 → 场景19「断网/LLM失败」验证 UNKNOWN 保守兜底
-};
+];
 
 function buildCache(): ClassificationCache {
-  return new Map(Object.entries(MOCK_LLM_CLASSIFICATIONS));
+  return new Map(MOCK_LLM_CLASSIFICATIONS.map((c) => [cacheKey(c.domain, c.url, c.title), c.verdict]));
 }
 
 interface ScenarioOverride {
@@ -51,7 +55,10 @@ interface ScenarioOverride {
 // 这里走真实步进重放，不需要也不应该用。
 const SCENARIO_OVERRIDES: Record<number, ScenarioOverride> = {
   2: { stateOverrides: { stuckLadderIndex: 1, stuckThresholdMs: 1_200_000, lastAnswerTs: 900_000 } },
-  4: { sessionWhitelist: ['youtube.com/watch?v=fun123'] },
+  // 09-05：sessionWhitelist 存的是这条视频的完整 cacheKey（带标题），不是裸 "domain+path"——
+  // 跟上面 MOCK_LLM_CLASSIFICATIONS 同一个原因，标题不对会导致 resolveContextRelevance()
+  // 里 `ctx.sessionWhitelist.includes(key)` 那个分支永远命不中。
+  4: { sessionWhitelist: [cacheKey('youtube.com', 'https://www.youtube.com/watch?v=fun123', 'Top 10 Funny Cats')] },
   5: { graceUntil: 120_000 },
   7: { stateOverrides: { stuckLadderIndex: 1, stuckThresholdMs: 1_200_000, lastAnswerTs: 650_000 } },
   17: { stateOverrides: { lastCheckInTs: 60_000 } },

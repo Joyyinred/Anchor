@@ -1081,3 +1081,53 @@ J7 走通之后开始真机连测，抓出并修掉了一串「收尾 → 新会
     最后修了一个真机上才看见的样式 bug：那个标签原来是 `bottom: calc(100% + 14px)`，挂在 wrap 顶边之外，而舞台顶部只有 16px padding，**直接被面板标题栏裁掉一半**。跟气泡当初那个 `padding-top: 320px` 是同一类错误——**靠"往上溢出"定位，迟早撞到容器边界**。改成挂在徽章下方（`top: 26px` = 徽章底边 + 4px），下方空间由 118px 高的 wrap 自己保证，跟面板多高无关。
 
 4. **表单补了五行**：B10 / B11 / B13 / B14 / B15 全部标 ✅（B10继续收集真机测试数据，B12 保持 🔄——只修了幻觉/有用性这一类，archetype 推断等原本范围还没做）。B11 那条「LLM 预生成变体」和 B13 那条「checkin 不加动效」都是**评估后否决**，理由写进格子里了，免得下周再辩一次。
+
+## 0905
+
+### Jay
+
+1. **真机反馈：`claude.ai` 能秒判 RELEVANT，但 `grok.com` 不认识，要等一轮 LLM**——`DEMO_PRESET_CACHE`（`perceiver.ts`）里主流 AI 对话助手收得不全，只有 claude.ai/chat.openai.com。按 Jay 要求把常用/流行的 AI 工具收全：
+
+    新增 `grok.com`（xAI）、`gemini.google.com`（Google Gemini）、`perplexity.ai`、`copilot.microsoft.com`（微软 Copilot）、`chat.deepseek.com`（DeepSeek）、`poe.com`（多模型聚合平台）、`chatgpt.com`（OpenAI 现在的主域名，`chat.openai.com` 会重定向过去，两个都收，防止重定向前后判定不一致）。判据跟已有的 `claude.ai`/`chat.openai.com` 完全同一条：主流对话式 AI 助手基本总是在被用来辅助当前任务，域级硬判 RELEVANT 的误伤概率是同一个量级，这次只是把同一条规则应用得更完整，没有引入新的判断标准。
+
+    **刻意没收的**：Character.AI 这类以陪伴/角色扮演为主的娱乐向产品——那类内容形态因对话而异（有人拿来学外语对话练习，也有人纯聊天摸鱼），域级写死 RELEVANT 会放过真正摸鱼的场景，留给 LLM 按当次内容判断更合适，这条边界跟 `BUILTIN_ENTERTAINMENT_BLACKLIST` 排除 youtube/reddit 等"混合站"是同一个设计原则。
+
+    **查过但没收的**：Amazon Q——搜了官方文档确认它没有独立的对话网站域名，只嵌在 `aws.amazon.com`/AWS 管理控制台/IDE 插件/手机 App 里。`console.aws.amazon.com` 覆盖 AWS 全部服务（EC2/S3/账单/IAM……），域级硬判 RELEVANT 会把所有跟 Q 毫无关系的 AWS 控制台操作也判成任务相关，属于过度收录，没有加。
+
+    同步改了 `heuristics.ts` 的 `AI_CHAT_DOMAINS`（`guessContentKind()` 用的那份，让 `contentKind` 也正确标成 `ai_chat`，不掉进 `unknown`——跟 `DEMO_PRESET_CACHE` 各管各的字段，没有依赖关系，但该反映同一个事实）和 `docs/分类prompt-v0.md` §3.1 的表格（这份文档写着"以代码为准，两边一起改"）。`perceiver.test.ts`/`heuristics.test.ts` 各补一条覆盖全部新增域名的用例。278/278 测试、typecheck、build 全干净。
+
+2. **起步教练真机复现了一次编造**：任务 "study AI and neural network"，当时开着 x.com 一篇讲 CPU 的博文（跟任务无关），产出 "Open the PDF titled 'Neural Networks Basics' and scroll to page 1"——书名和 PDF 都是编的。排查发现是**环境问题，不是新的 prompt bug**：`dist/` 最后编译于 8月31日，但 `starter-coach.ts` 源码已经更新到 9月5日（这一周 Joy 做的 anchorContext 页面上下文 + 正则守卫全部还没编译进去），"关再开插件+刷新页面"只会重新加载旧的 `dist/` 产物，不会重新跑 `npm run build`。已经用最新代码重新 build 过，请 Jay 用新的 `dist/` 重新装一遍再测——如果这次还编出不存在的文件/书名，才是现有正则守卫（`hasFabricatedSpecific`，只挡数字型编号如"page 1"，挡不住非数字的书名/文件名编造，文件顶部注释里写明是已知局限）的真实缺口，需要另外交给 Joy 处理（起步教练 prompt/守卫仍然是 B12/Joy 的范围，这次只做了环境排查，没有改 `starter-coach.ts` 本身）。
+
+3. **条目1 把 AI 对话助手收进 `DEMO_PRESET_CACHE` 是个错误决定，真机反馈后当天撤销**：Jay 拿白名单里的 claude.ai 搜了一个明显跟当前任务无关的问题（"Emma S facial mist ingredients and usage guide"），`contextRelevance` 全程 `RELEVANT` 不动——因为 `DEMO_PRESET_CACHE` 是域级硬判，优先级排在 LLM **之前**，命中就直接返回，压根不会走到 LLM 去看标题。AI 对话工具的内容形态完全因对话而异，这本该是 `youtube.com`/`reddit.com`/`x.com` 那一类"域名下什么内容都可能出现、必须走 LLM 按标题判"的站点，条目1 收进这张表是判断失误，不是这张表的设计原则有问题——已经把 claude.ai/chat.openai.com（原来就在）连同这次新加的全部撤出，一个 AI 对话域名都不留在表里。
+
+    **更进一步的产品需求（Jay 提的）**：光撤回硬判还不够——即使走 LLM 按标题判，如果只按 `domain+path` 缓存分类结果，AI 对话页面的 URL 全程不变（同一个 `chat/xxx` 聊到底），只要话题一开始判过一次，后面话题从"神经网络入门"飘到"中午吃什么"也读不到，因为缓存命中、根本不会重新问 LLM。Jay 明确要的是"察觉这种会话中途跑题"的能力。
+
+    **实现**（`perceiver.ts` + `frame-pipeline.ts`）：`cacheKey()` 从 `domain+path+query` 改成再拼上标题（做了 trim/小写/合并空白的归一化）。这样标题一变就是全新的 key，`resolveContextRelevance()` 命中不到旧缓存会自然退回 `UNKNOWN`，`triggerLazyClassification()` 看到 `UNKNOWN` 就会对着新标题重新分类一次——不用另外写"标题变了要不要重判"的判断逻辑，白拿。真机日志里 Claude 的标题确实会随对话内容更新（"New chat - Claude" → "Emma S facial mist ingredients and usage guide - Claude"），这个机制建立在这个真实观察之上，不是假设。
+
+    **配套节流**：担心的副作用是有些页面标题会频繁抖动但跟任务相关性毫无关系（未读消息数变化的 "(3) Inbox - Gmail"），每次抖动都真打一次 LLM 太浪费、也容易撞 Groq 速率限制。加了 `MIN_RECLASSIFY_INTERVAL_MS = 20s` 的节流，按"页面"（domain+path，不含标题）这个更粗的粒度限流——同一个页面 20s 内已经触发过分类，标题再变也先不触发，等窗口过了才认下一次。真正的话题漂移通常要几十秒到几分钟才发生，20s 挡不住这种漂移，只挡秒级抖动。`resetSessionState()` 里新增的这个节流表跟着一起清空，不会跨会话残留。
+
+    **测试**：`perceiver.test.ts` 新增"AI 对话助手不再域级硬判，未分类时保守判 UNKNOWN"+"同一 URL 换标题就是全新 key，命中不到旧缓存会退回 UNKNOWN"两组用例（后者直接用 Jay 举的"神经网络入门"→"中午吃什么"这个真实场景当断言），另外修了一条依赖 claude.ai 域级硬判的 jumpPattern 回归用例（改成手工模拟"LLM 已经判过这个标题"，跟真实链路的惰性分类同一个机制）；`integration.test.ts` 里手写的旧格式 cacheKey 字符串（`MOCK_LLM_CLASSIFICATIONS` 那张表 + 场景4 的 `sessionWhitelist` override）全部改成调用真实的 `cacheKey()` 函数现算（手写字符串在标题归一化规则变了之后必然会跟生产代码脱节，08-29 已经在别的地方吃过一次"文档一份代码一份"的亏，这次直接从根上避免）。279/279 测试、typecheck、build 全干净。
+
+4. **条目3 上线当天就抓到一个新问题：同一个标题两次分类给出不同结果**——真机复现：任务"调整并测试hackathon项目作品"，两个不同的 claude.ai 对话，**标题完全一样**（"构建起步教练的心理学方法 - Claude"），一次判 `UNKNOWN`、一次判 `IRRELEVANT`。拆成两层看：
+
+    - **层1（代码缺陷，已修）**：`groq.ts` 的 `callGroq()` 请求体从来没传过 `temperature`，同一段输入两次调用会拿不同随机性的结果，分类这种"是/否"判断要的是一致性不是多样性。`classifier.ts` 现在显式传 `temperature: 0`；`callGroq()` 改成只在调用方显式传的时候才带这个字段（不像 `maxTokens` 那样给全局默认值），`starter-coach.ts` 不传，维持原来的行为不受影响——它要措辞质量，不是判断一致性，两个调用方的需求方向不一样，不能用同一个默认值。
+    - **层2（不是代码能解的限制）**：任务声明"调整并测试hackathon项目作品"完全没提项目叫什么、做什么，分类器看不出"构建起步教练的心理学方法"跟这个"hackathon项目"有关系——分类器唯一的输入是 `taskDeclaration + title + url`，没有关于这个项目的背景知识，任务声明越具体（比如提到"Anchor"或"起步教练"这几个字），才越可能被直接匹配上。已经告诉 Jay 了，不是这次要解的代码问题。
+
+    没有新增测试（`callGroq`/`classifyDomainRelevance` 都是真实网络调用，不在离线单测范围内，属于既有的"chrome API/网络调用不建测试基建"边界）。typecheck/build 干净，279/279 既有测试保持全绿（这次改动不影响任何离线可测的判定逻辑）。
+
+5. **条目4 层2 的"任务声明太模糊"不再只是告诉 Jay 了事——这次真机又暴露了标题方案的天花板，Jay 明确要求当场解决，且明确授权这次直接动 `coach.ts`/`starter-coach.ts`（起步教练 prompt 范围，之前一直是"只写方案进 updateNote，代码留给 Joy"，这次是 Jay 自己要求破例，不是我擅自越界）**：
+
+    继续用条目4 那个 claude.ai 案例——标题从"构建起步教练的心理学方法"变成"Junction 2026 hackathon新手参赛指南"（明确提到 hackathon，理论上该跟任务对上号），但 Jay 反馈说他在这个对话里连问了 3 个完全不相干的美妆问题，标题**始终没有更新**，`contextRelevance` 长期卡 `UNKNOWN`。这次不是节流窗口的问题（09-05 条目3 加的 20s 页面级节流早就过了），是标题方案本身的天花板：**AI 对话网站不是每次消息都会重新生成标题**，标题不更新，我们就没有任何新信号——不管怎么调重新分类的时机都没用，因为拿到的还是那句旧标题。
+
+    Jay 提了两个需求，这条是第二个（"任务声明太模糊时主动追问细节"）；第一个（读对话框实际输入内容判断跑题）是要跨站点做 DOM 抓取 + 同步隐私声明的大功能，明确要求排在这个之后，本条不动，留到下一条处理。
+
+    **实现**（`coach.ts` + `starter-coach.ts` + `onboarding.ts`）：
+    - `coach.ts` 长度闸门（`taskDeclaration.length < 8`）之后、拆解调用之前，插一道新的语义级质量闸门。新增 `TaskQualityCheckCall` 注入类型（跟 `StarterCoachLLMCall` 同一个设计取舍：真实网络调用不写死在 `coach.ts` 里），不传时默认 `alwaysSufficient`（永远判定够格），**保证不传这个参数的调用方（所有既有测试）行为跟这个功能上线前一个字符都不差**——285 个测试里除了新加的 6 条，其余全部没改一行断言就直接过了。
+    - 两道闸门（长度、语义）**共用同一份 `roundsUsed` 预算和 `MAX_FOLLOWUP_ROUNDS=2` 封顶**，不是给"语义不够具体"单独开一份新额度——契约"最多追问 2 轮"本来就是一个不可超支的总预算，不分是长度问题还是语义问题触发的追问，问满 2 轮无论如何都要放行，不能让用户被两道闸门加起来问 4 轮。
+    - `starter-coach.ts` 新增 `groqTaskQualityCheckCall` 真实实现（复用拆解调用同一个 120b 模型，`temperature: 0`——跟条目4 的理由一样，判"够不够具体"是二选一判断）。★ 这道检查**故意不传 `anchorContext`**：它关心的是"这句话撑不撑得起一整场会话的相关性判断"（`classifyDomainRelevance()` 全程只有这句话可用），不是"能不能借着当前页面蒙混出一个像样的第一步动作"——`anchorContext` 只是起步那一刻的快照，救不了后续几十分钟里其它页面的分类。Prompt 全文 + 设计理由记在 `docs/起步教练prompt-v0.md` §4.1（这份文档写着"以代码为准，两边一起改"）。
+    - **Fail open**：这道检查是锦上添花不是关键路径，`callGroq` 失败/解析不出来/`sufficient:false` 却没给 `followupQuestion`（半成品）一律当"够格"放行，绝不能让新加的检查本身出问题就把起步教练卡住（红线2同精神）。`groqTaskQualityCheckCall` 因此从不 `throw`——跟 `groqStarterCoachCall`（失败靠抛错、`coach.ts` 的 `try/catch` 兜底）刻意不同：前者失败了后面还有拆解这一大步要走，不能被拖累；后者本身就是流程最后一步，抛错交给外层统一兜底更简单，两种失败处理方式不是选漏了，是故意不同。
+    - `onboarding.ts` 接线：`runStarterCoach()` 新增第 9 个参数，传入 `groqTaskQualityCheckCall`。
+
+    **测试**：`coach.test.ts` 新增 6 条（不传该参数时行为不变、语义不够格时追问 LLM 给的针对性问题而不是通用固定文案、语义够格正常放行、`sufficient:false` 但没给 `followupQuestion` 时 fail open、长度闸门先触发时不会多打一次质量检查、追问满 2 轮后跳过质量检查直接放行）。285/285 测试、typecheck、build 全干净。
+
+    **还没解的**：Jay 的第一个需求（读对话实际输入判断话题漂移）——标题不更新这个案例正是它要解决的场景，下一条处理。
