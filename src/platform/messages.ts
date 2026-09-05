@@ -33,6 +33,18 @@ export interface RecheckMessage {
   timestamp: number;
 }
 
+// 09-05：AI 对话类网站（起步只做 claude.ai，见 src/platform/content/chat-sites.ts）标题
+// 不一定随每轮对话更新——真机复现连续问了 3 个无关问题，标题从头到尾没变，contextRelevance
+// 长期卡在旧标题算出的判定上。content script 用 MutationObserver 抓最新一条用户消息文字，
+// 变了才发这条消息（已经在 content script 侧去重/防抖，SW 不需要重复做）。SW 收到后存进
+// SignalEvent.contentSnippet，复用 09-05 当天刚建好的"cacheKey 变了就重新问 LLM"机制——
+// 不需要另外发明一套"消息变了要不要重判"的判断逻辑。
+export interface ChatSnippetMessage {
+  type: 'CHAT_SNIPPET';
+  snippet: string;
+  timestamp: number;
+}
+
 // side panel 里点了 check-in 气泡按钮之后发给 SW 的回答——channel/answer 复用
 // src/pet/types.ts 已经声明的那份字面量（CuteAnchorPet.onAnswer 本来就是这个类型）。
 export interface CheckInAnswerMessage {
@@ -63,6 +75,9 @@ export interface OnboardingSubmitMessage {
   type: 'ONBOARDING_SUBMIT';
   text: string;
   roundsUsed: number;
+  // 09-05：追问轮次原样带回上一次 NEEDS_FOLLOWUP 状态里的 priorDeclaration——SW 侧拼接用，
+  // 见 onboarding-state.ts 顶部注释。第一轮提交（roundsUsed=0）没有上一轮声明，不传。
+  priorDeclaration?: string;
   timestamp: number;
 }
 
@@ -104,6 +119,7 @@ export type RuntimeMessage =
   | ContentScriptReadyMessage
   | InteractionMessage
   | RecheckMessage
+  | ChatSnippetMessage
   | CheckInAnswerMessage
   | OnboardingStatusRequestMessage
   | OnboardingSubmitMessage

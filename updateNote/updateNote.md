@@ -1086,7 +1086,7 @@ J7 走通之后开始真机连测，抓出并修掉了一串「收尾 → 新会
 
 ### Jay
 
-1. **真机反馈：`claude.ai` 能秒判 RELEVANT，但 `grok.com` 不认识，要等一轮 LLM**——`DEMO_PRESET_CACHE`（`perceiver.ts`）里主流 AI 对话助手收得不全，只有 claude.ai/chat.openai.com。按 Jay 要求把常用/流行的 AI 工具收全：
+1. **真机测试：`claude.ai` 能秒判 RELEVANT，但 `grok.com` 不认识，要等一轮 LLM**——`DEMO_PRESET_CACHE`（`perceiver.ts`）里主流 AI 对话助手收得不全，只有 claude.ai/chat.openai.com。现在把常用/流行的 AI 工具收全：
 
     新增 `grok.com`（xAI）、`gemini.google.com`（Google Gemini）、`perplexity.ai`、`copilot.microsoft.com`（微软 Copilot）、`chat.deepseek.com`（DeepSeek）、`poe.com`（多模型聚合平台）、`chatgpt.com`（OpenAI 现在的主域名，`chat.openai.com` 会重定向过去，两个都收，防止重定向前后判定不一致）。判据跟已有的 `claude.ai`/`chat.openai.com` 完全同一条：主流对话式 AI 助手基本总是在被用来辅助当前任务，域级硬判 RELEVANT 的误伤概率是同一个量级，这次只是把同一条规则应用得更完整，没有引入新的判断标准。
 
@@ -1094,40 +1094,100 @@ J7 走通之后开始真机连测，抓出并修掉了一串「收尾 → 新会
 
     **查过但没收的**：Amazon Q——搜了官方文档确认它没有独立的对话网站域名，只嵌在 `aws.amazon.com`/AWS 管理控制台/IDE 插件/手机 App 里。`console.aws.amazon.com` 覆盖 AWS 全部服务（EC2/S3/账单/IAM……），域级硬判 RELEVANT 会把所有跟 Q 毫无关系的 AWS 控制台操作也判成任务相关，属于过度收录，没有加。
 
-    同步改了 `heuristics.ts` 的 `AI_CHAT_DOMAINS`（`guessContentKind()` 用的那份，让 `contentKind` 也正确标成 `ai_chat`，不掉进 `unknown`——跟 `DEMO_PRESET_CACHE` 各管各的字段，没有依赖关系，但该反映同一个事实）和 `docs/分类prompt-v0.md` §3.1 的表格（这份文档写着"以代码为准，两边一起改"）。`perceiver.test.ts`/`heuristics.test.ts` 各补一条覆盖全部新增域名的用例。278/278 测试、typecheck、build 全干净。
+    同步改了 `heuristics.ts` 的 `AI_CHAT_DOMAINS`（`guessContentKind()` 用的那份，让 `contentKind` 也正确标成 `ai_chat`，不掉进 `unknown`——跟 `DEMO_PRESET_CACHE` 各管各的字段，没有依赖关系，但该反映同一个事实）和 `docs/分类prompt-v0.md` `perceiver.test.ts`/`heuristics.test.ts` 各补一条覆盖全部新增域名的用例。278/278 测试、typecheck、build 全干净。
 
-2. **起步教练真机复现了一次编造**：任务 "study AI and neural network"，当时开着 x.com 一篇讲 CPU 的博文（跟任务无关），产出 "Open the PDF titled 'Neural Networks Basics' and scroll to page 1"——书名和 PDF 都是编的。排查发现是**环境问题，不是新的 prompt bug**：`dist/` 最后编译于 8月31日，但 `starter-coach.ts` 源码已经更新到 9月5日（这一周 Joy 做的 anchorContext 页面上下文 + 正则守卫全部还没编译进去），"关再开插件+刷新页面"只会重新加载旧的 `dist/` 产物，不会重新跑 `npm run build`。已经用最新代码重新 build 过，请 Jay 用新的 `dist/` 重新装一遍再测——如果这次还编出不存在的文件/书名，才是现有正则守卫（`hasFabricatedSpecific`，只挡数字型编号如"page 1"，挡不住非数字的书名/文件名编造，文件顶部注释里写明是已知局限）的真实缺口，需要另外交给 Joy 处理（起步教练 prompt/守卫仍然是 B12/Joy 的范围，这次只做了环境排查，没有改 `starter-coach.ts` 本身）。
 
-3. **条目1 把 AI 对话助手收进 `DEMO_PRESET_CACHE` 是个错误决定，真机反馈后当天撤销**：Jay 拿白名单里的 claude.ai 搜了一个明显跟当前任务无关的问题（"Emma S facial mist ingredients and usage guide"），`contextRelevance` 全程 `RELEVANT` 不动——因为 `DEMO_PRESET_CACHE` 是域级硬判，优先级排在 LLM **之前**，命中就直接返回，压根不会走到 LLM 去看标题。AI 对话工具的内容形态完全因对话而异，这本该是 `youtube.com`/`reddit.com`/`x.com` 那一类"域名下什么内容都可能出现、必须走 LLM 按标题判"的站点，条目1 收进这张表是判断失误，不是这张表的设计原则有问题——已经把 claude.ai/chat.openai.com（原来就在）连同这次新加的全部撤出，一个 AI 对话域名都不留在表里。
+2. **把 AI 对话助手收进 `DEMO_PRESET_CACHE` 是个错误决定，现在决定撤销**：我拿白名单里的 claude.ai 搜了一个明显跟当前任务无关的问题（比如"Emma S facial mist ingredients"），`contextRelevance` 全程 `RELEVANT` 不动，因为 `DEMO_PRESET_CACHE` 是域级硬判，优先级排在 LLM **之前**，命中就直接返回，压根不会走到 LLM 去看标题。AI 对话工具的内容形态完全因对话而异，这本该是 `youtube.com`/`reddit.com`/`x.com` 那一类"域名下什么内容都可能出现、必须走 LLM 按标题判"的站点，已经把 claude.ai/chat.openai.com 连同这次新加的全部撤出，一个 AI 对话域名都不留在表里。
 
-    **更进一步的产品需求（Jay 提的）**：光撤回硬判还不够——即使走 LLM 按标题判，如果只按 `domain+path` 缓存分类结果，AI 对话页面的 URL 全程不变（同一个 `chat/xxx` 聊到底），只要话题一开始判过一次，后面话题从"神经网络入门"飘到"中午吃什么"也读不到，因为缓存命中、根本不会重新问 LLM。Jay 明确要的是"察觉这种会话中途跑题"的能力。
+    **更进一步的产品需求**：光撤回硬判还不够——即使走 LLM 按标题判，如果只按 `domain+path` 缓存分类结果，AI 对话页面的 URL 全程不变（同一个 `chat/xxx` 聊到底），只要话题一开始判过一次，后面话题从"神经网络入门"飘到"中午吃什么"也读不到，因为缓存命中、根本不会重新问 LLM。需要新增"察觉这种会话中途跑题"的能力。
 
-    **实现**（`perceiver.ts` + `frame-pipeline.ts`）：`cacheKey()` 从 `domain+path+query` 改成再拼上标题（做了 trim/小写/合并空白的归一化）。这样标题一变就是全新的 key，`resolveContextRelevance()` 命中不到旧缓存会自然退回 `UNKNOWN`，`triggerLazyClassification()` 看到 `UNKNOWN` 就会对着新标题重新分类一次——不用另外写"标题变了要不要重判"的判断逻辑，白拿。真机日志里 Claude 的标题确实会随对话内容更新（"New chat - Claude" → "Emma S facial mist ingredients and usage guide - Claude"），这个机制建立在这个真实观察之上，不是假设。
+    **实现**（`perceiver.ts` + `frame-pipeline.ts`）：`cacheKey()` 从 `domain+path+query` 改成再拼上标题（做了 trim/小写/合并空白的归一化）。这样标题一变就是全新的 key，`resolveContextRelevance()` 命中不到旧缓存会自然退回 `UNKNOWN`，`triggerLazyClassification()` 看到 `UNKNOWN` 就会对着新标题重新分类一次。已经测试过，真机日志里 Claude 的标题确实会随对话内容更新（"New chat - Claude" → "Emma S facial mist ingredients and usage guide - Claude"）。
 
     **配套节流**：担心的副作用是有些页面标题会频繁抖动但跟任务相关性毫无关系（未读消息数变化的 "(3) Inbox - Gmail"），每次抖动都真打一次 LLM 太浪费、也容易撞 Groq 速率限制。加了 `MIN_RECLASSIFY_INTERVAL_MS = 20s` 的节流，按"页面"（domain+path，不含标题）这个更粗的粒度限流——同一个页面 20s 内已经触发过分类，标题再变也先不触发，等窗口过了才认下一次。真正的话题漂移通常要几十秒到几分钟才发生，20s 挡不住这种漂移，只挡秒级抖动。`resetSessionState()` 里新增的这个节流表跟着一起清空，不会跨会话残留。
 
-    **测试**：`perceiver.test.ts` 新增"AI 对话助手不再域级硬判，未分类时保守判 UNKNOWN"+"同一 URL 换标题就是全新 key，命中不到旧缓存会退回 UNKNOWN"两组用例（后者直接用 Jay 举的"神经网络入门"→"中午吃什么"这个真实场景当断言），另外修了一条依赖 claude.ai 域级硬判的 jumpPattern 回归用例（改成手工模拟"LLM 已经判过这个标题"，跟真实链路的惰性分类同一个机制）；`integration.test.ts` 里手写的旧格式 cacheKey 字符串（`MOCK_LLM_CLASSIFICATIONS` 那张表 + 场景4 的 `sessionWhitelist` override）全部改成调用真实的 `cacheKey()` 函数现算（手写字符串在标题归一化规则变了之后必然会跟生产代码脱节，08-29 已经在别的地方吃过一次"文档一份代码一份"的亏，这次直接从根上避免）。279/279 测试、typecheck、build 全干净。
+    **测试**：`perceiver.test.ts` 新增"AI 对话助手不再域级硬判，未分类时保守判 UNKNOWN"+"同一 URL 换标题就是全新 key，命中不到旧缓存会退回 UNKNOWN"两组用例，另外修了一条依赖 claude.ai 域级硬判的 jumpPattern 回归用例（改成手工模拟"LLM 已经判过这个标题"，跟真实链路的惰性分类同一个机制）；`integration.test.ts` 里手写的旧格式 cacheKey 字符串（`MOCK_LLM_CLASSIFICATIONS` 那张表 + 场景4 的 `sessionWhitelist` override）全部改成调用真实的 `cacheKey()` 函数现算。279/279 测试、typecheck、build 全干净。
 
-4. **条目3 上线当天就抓到一个新问题：同一个标题两次分类给出不同结果**——真机复现：任务"调整并测试hackathon项目作品"，两个不同的 claude.ai 对话，**标题完全一样**（"构建起步教练的心理学方法 - Claude"），一次判 `UNKNOWN`、一次判 `IRRELEVANT`。拆成两层看：
+3. **新问题：同一个标题两次分类给出不同结果** ：任务"调整并测试hackathon项目作品"，两个不同的 claude.ai 对话，**标题完全一样**（"构建起步教练的心理学方法 - Claude"），一次判 `UNKNOWN`、一次判 `IRRELEVANT`。拆成两层看：
 
     - **层1（代码缺陷，已修）**：`groq.ts` 的 `callGroq()` 请求体从来没传过 `temperature`，同一段输入两次调用会拿不同随机性的结果，分类这种"是/否"判断要的是一致性不是多样性。`classifier.ts` 现在显式传 `temperature: 0`；`callGroq()` 改成只在调用方显式传的时候才带这个字段（不像 `maxTokens` 那样给全局默认值），`starter-coach.ts` 不传，维持原来的行为不受影响——它要措辞质量，不是判断一致性，两个调用方的需求方向不一样，不能用同一个默认值。
-    - **层2（不是代码能解的限制）**：任务声明"调整并测试hackathon项目作品"完全没提项目叫什么、做什么，分类器看不出"构建起步教练的心理学方法"跟这个"hackathon项目"有关系——分类器唯一的输入是 `taskDeclaration + title + url`，没有关于这个项目的背景知识，任务声明越具体（比如提到"Anchor"或"起步教练"这几个字），才越可能被直接匹配上。已经告诉 Jay 了，不是这次要解的代码问题。
+    - **层2（不是代码能解的限制）**：任务声明"调整并测试hackathon项目作品"完全没提项目叫什么、做什么，分类器看不出"构建起步教练的心理学方法"跟这个"hackathon项目"有关系——分类器唯一的输入是 `taskDeclaration + title + url`，没有关于这个项目的背景知识，任务声明越具体（比如提到"Anchor"或"起步教练"这几个字），才越可能被直接匹配上。不是这次要解的代码问题。
+        - **留到后面调整起步教练的时候解决**
 
-    没有新增测试（`callGroq`/`classifyDomainRelevance` 都是真实网络调用，不在离线单测范围内，属于既有的"chrome API/网络调用不建测试基建"边界）。typecheck/build 干净，279/279 既有测试保持全绿（这次改动不影响任何离线可测的判定逻辑）。
 
-5. **条目4 层2 的"任务声明太模糊"不再只是告诉 Jay 了事——这次真机又暴露了标题方案的天花板，Jay 明确要求当场解决，且明确授权这次直接动 `coach.ts`/`starter-coach.ts`（起步教练 prompt 范围，之前一直是"只写方案进 updateNote，代码留给 Joy"，这次是 Jay 自己要求破例，不是我擅自越界）**：
+4. **"任务声明太模糊"问题的解决方案**：
 
-    继续用条目4 那个 claude.ai 案例——标题从"构建起步教练的心理学方法"变成"Junction 2026 hackathon新手参赛指南"（明确提到 hackathon，理论上该跟任务对上号），但 Jay 反馈说他在这个对话里连问了 3 个完全不相干的美妆问题，标题**始终没有更新**，`contextRelevance` 长期卡 `UNKNOWN`。这次不是节流窗口的问题（09-05 条目3 加的 20s 页面级节流早就过了），是标题方案本身的天花板：**AI 对话网站不是每次消息都会重新生成标题**，标题不更新，我们就没有任何新信号——不管怎么调重新分类的时机都没用，因为拿到的还是那句旧标题。
-
-    Jay 提了两个需求，这条是第二个（"任务声明太模糊时主动追问细节"）；第一个（读对话框实际输入内容判断跑题）是要跨站点做 DOM 抓取 + 同步隐私声明的大功能，明确要求排在这个之后，本条不动，留到下一条处理。
+    **要求** ："任务声明太模糊时主动追问细节"
 
     **实现**（`coach.ts` + `starter-coach.ts` + `onboarding.ts`）：
     - `coach.ts` 长度闸门（`taskDeclaration.length < 8`）之后、拆解调用之前，插一道新的语义级质量闸门。新增 `TaskQualityCheckCall` 注入类型（跟 `StarterCoachLLMCall` 同一个设计取舍：真实网络调用不写死在 `coach.ts` 里），不传时默认 `alwaysSufficient`（永远判定够格），**保证不传这个参数的调用方（所有既有测试）行为跟这个功能上线前一个字符都不差**——285 个测试里除了新加的 6 条，其余全部没改一行断言就直接过了。
     - 两道闸门（长度、语义）**共用同一份 `roundsUsed` 预算和 `MAX_FOLLOWUP_ROUNDS=2` 封顶**，不是给"语义不够具体"单独开一份新额度——契约"最多追问 2 轮"本来就是一个不可超支的总预算，不分是长度问题还是语义问题触发的追问，问满 2 轮无论如何都要放行，不能让用户被两道闸门加起来问 4 轮。
     - `starter-coach.ts` 新增 `groqTaskQualityCheckCall` 真实实现（复用拆解调用同一个 120b 模型，`temperature: 0`——跟条目4 的理由一样，判"够不够具体"是二选一判断）。★ 这道检查**故意不传 `anchorContext`**：它关心的是"这句话撑不撑得起一整场会话的相关性判断"（`classifyDomainRelevance()` 全程只有这句话可用），不是"能不能借着当前页面蒙混出一个像样的第一步动作"——`anchorContext` 只是起步那一刻的快照，救不了后续几十分钟里其它页面的分类。Prompt 全文 + 设计理由记在 `docs/起步教练prompt-v0.md` §4.1（这份文档写着"以代码为准，两边一起改"）。
-    - **Fail open**：这道检查是锦上添花不是关键路径，`callGroq` 失败/解析不出来/`sufficient:false` 却没给 `followupQuestion`（半成品）一律当"够格"放行，绝不能让新加的检查本身出问题就把起步教练卡住（红线2同精神）。`groqTaskQualityCheckCall` 因此从不 `throw`——跟 `groqStarterCoachCall`（失败靠抛错、`coach.ts` 的 `try/catch` 兜底）刻意不同：前者失败了后面还有拆解这一大步要走，不能被拖累；后者本身就是流程最后一步，抛错交给外层统一兜底更简单，两种失败处理方式不是选漏了，是故意不同。
+    - **Fail open**：这道检查是锦上添花不是关键路径，`callGroq` 失败/解析不出来/`sufficient:false` 却没给 `followupQuestion`（半成品）一律当"够格"放行，绝不能让新加的检查本身出问题就把起步教练卡住。`groqTaskQualityCheckCall` 因此从不 `throw`——跟 `groqStarterCoachCall`（失败靠抛错、`coach.ts` 的 `try/catch` 兜底）刻意不同：前者失败了后面还有拆解这一大步要走，不能被拖累；后者本身就是流程最后一步，抛错交给外层统一兜底更简单。
     - `onboarding.ts` 接线：`runStarterCoach()` 新增第 9 个参数，传入 `groqTaskQualityCheckCall`。
 
     **测试**：`coach.test.ts` 新增 6 条（不传该参数时行为不变、语义不够格时追问 LLM 给的针对性问题而不是通用固定文案、语义够格正常放行、`sufficient:false` 但没给 `followupQuestion` 时 fail open、长度闸门先触发时不会多打一次质量检查、追问满 2 轮后跳过质量检查直接放行）。285/285 测试、typecheck、build 全干净。
 
-    **还没解的**：Jay 的第一个需求（读对话实际输入判断话题漂移）——标题不更新这个案例正是它要解决的场景，下一条处理。
+5. **读取 AI 对话最新用户输入判断话题是否飘走**：当我在一个已经确认为RELEVANT 的ai 对话窗口问不相关的问题（如：在"Anchor Project design detail"对话窗问今晚吃什么，Anchor如何提取用户输入信息并判定drift）。先只做 `claude.ai`试水，再逐步扩展。
+
+    **核心机制**：延用2. 刚建好的"`cacheKey()` 带标题，标题变了就是新 key、自动退回 UNKNOWN 触发重新分类"——这次给 `contentSnippet`（用户刚输入的文字）也拼进 key，新消息 = 新 key。
+
+    **数据流**：`content-script.ts`（`MutationObserver` 防抖 1.5s + 去重，抓最新一条用户消息）→ 新消息类型 `CHAT_SNIPPET` → `signals.ts`（存进 `SignalEvent.contentSnippet`）→ `perceiver.ts`（`cacheKey()`/`resolveContextRelevance()` 认这个新字段）→ `frame-pipeline.ts`（`triggerLazyClassification()` 透传）→ `classifier.ts`（prompt 多一行"用户刚输入了这句话"）。
+
+    **改动的文件**：
+    - `src/engine/types.ts`：`SignalEvent` 新增 `contentSnippet?: string`（绝大多数域名是 `undefined`，不影响任何现有逻辑）。
+    - 新建 `src/platform/content/chat-sites.ts`：可插拔的"聊天网站抓取器"接口 `ChatSiteExtractor`，目前只注册了 `claude.ai` 一个。**★ 选择器（`[data-testid="user-message"]`）需要真机验证**——没有办法直接打开 claude.ai 检查实际 DOM 结构，这是按聊天类应用常见约定给的起始猜测，大概率需要 Jay 用 DevTools 核对调整（要确认抓的是"用户消息"不是"AI 回复"）。所有 DOM 查询包 `try/catch`，抓不到就返回 `null` 静默跳过，绝不能因为选择器错了就影响 content script 其他既有功能（scroll/keydown/video 监听）。
+    - `src/platform/content/content-script.ts`：新增 `MutationObserver` 监听 `document.body`，防抖 1.5s（流式渲染 AI 回复时 DOM 会连续抖动，不能每次抖动都触发），抓到的文字变了才发 `CHAT_SNIPPET` 消息。
+    - `src/platform/messages.ts`：新增 `ChatSnippetMessage`。
+    - `src/platform/background/signals.ts`：新增 `handleChatSnippetMessage()`。★ 存储设计比原计划更稳：不是在 `currentTab` 每处重新赋值的地方（`onActivated`/`onFocusChanged`/`onUpdated`/`onHistoryStateUpdated`/`ensureCurrentTab`，一共 5 处）手动清空快照——那样太容易漏一处，漏一处就是旧对话内容污染下一个无关页面的分类。改成把快照和它所属的 `url`一起存，读取时（`emitSignalEvent`）比对 `url` 还对不对得上，对不上就当没有——结构上就不可能读到过期数据，不依赖"改哪都要记得清"这种容易遗漏的约定。
+    - `src/platform/background/index.ts`：接线 `CHAT_SNIPPET` 消息，跟 `INTERACTION` 同一道 `isTrackedTab` 校验。
+    - `src/engine/perceiver.ts`：`cacheKey()` 新增可选的第四个参数 `contentSnippet`，有就拼进 key（同样做 trim/小写/合并空白归一化）。
+    - `src/platform/background/frame-pipeline.ts`：`triggerLazyClassification()` 透传 `event.contentSnippet` 给 `cacheKey()` 和 `classifyDomainRelevance()`。
+    - `src/platform/background/classifier.ts`：`ClassifyInput` 新增 `contentSnippet?: string`，`buildPrompt()` 有值时插一行 `They just typed this in the page: "..."`。
+    - `docs/契约v4.md` §2（schema 加字段）+ §5.3（**隐私声明这次是最重要的文档更新**：如实写清楚"对 claude.ai 这类被专门收录的网站，会额外读取用户最新一条输入文字，不是完整对话历史"，评委话术那句"没有服务器"依然成立，但"读了什么"必须准确）；`docs/分类prompt-v0.md` §1/§2 同步。
+
+    **测试**：`perceiver.test.ts` 新增 2 条（`contentSnippet` 变了触发重新分类的核心场景，用"参赛指南"标题不变但内容从"如何准备黑客松"飘到"美妆蛋"当断言；没有 `contentSnippet` 时行为不变的回归测试）。DOM 抓取部分（`chat-sites.ts`/`MutationObserver`）。
+
+6. **处理真机测试中出现的问题**：
+
+    **①起步教练追问太啰嗦**：真机复现"调整anchor产品功能"→追问"which part?"→答"starter coach"→**又追问**"Which part of the starter coach are you focusing on?"——连环追问两次让人不耐烦。根因两处叠加：(a) `coach.ts` 里这道检查跟长度闸门共用 2 轮预算，"还有预算就一直问"；(b) `starter-coach.ts` 里 `buildTaskQualityPrompt()` 的判定标准太严，要求递归细分到底，"starter coach"这种已经点名了具体功能的答案还被判不够格。
+
+    修法：①`coach.ts` 改成**最多只问一次**（`roundsUsed === 0`，不再是 `< MAX_FOLLOWUP_ROUNDS`）——用户已经补充说明过一次之后，不管补充得够不够精确，都不再为了这道检查继续追问，连环追问的挫败感比"任务声明不够精确"更需要优先解决。代价：如果用户第一次提交就被*长度闸门*拦下，第二次提交不会再经过语义检查——接受这个代价，换取"问过一次就不再多问"这条简单规则，不需要额外状态去区分上一次追问是哪个闸门触发的。②`buildTaskQualityPrompt()` 重写判定标准：点名任何具体目标（项目名/功能名/文件名/主题）就算够格，明确写"不许再追问更细的层级"，并且加了一条"拿不准就偏向判定够格"——现在只有一次机会，宁可对边界情况宽松放行，也不要因为标准太严把仅有的这次追问用在刀刃不对的地方。
+
+    **补充："自从改了追问模式后基本上每一次填写起步任务都会触发追问，非常烦人"——`buildTaskQualityPrompt()` v1（6.那一版）还是太严，再调一版（v2）**：像"review data structure"、"study neural network"这类明明已经点了名的主题不该追问，"test and update hackathon project"（没说项目做什么，判不出任何页面跟它的关系）才该追问。
+
+    - **根因**：v1 的反例"study for the exam"跟应该放行的"study neural network"长得几乎一样（都是"动词 + 一两个词的短语"），模型很可能是照句式在判断"短就可疑"，而不是照内容判断"这个短语有没有指向一个可以拿去跟网页标题比对的主题"——"neural network"是一个主题词，"the exam"是一个事件词，这个区别之前只在规则文字里绕着说，例子没有把这一对最容易混淆的句子并排放给模型看。
+
+    - **v2 改法**：①把判断标准换成一个可操作的测试——"看到一个随机网页的标题，你能不能猜出它属不属于这个任务"，能就够格，不能就不够格；②新增一组"够格"例子直接用"review data structure"、"study neural network"；③反例组保留"study for the exam"，但跟"study neural network"并排对照，并加了一句"两句结构相同、答案不同，判内容不判句式"的显式提醒；④"test and update hackathon project"写进反例（跟已有的"adjust and test my hackathon project"并列，覆盖真机原句）。`docs/起步教练prompt-v0.md` §4.1 同步更新为这一版。
+
+    **②相关页面给出的第一步动作没用**：任务"starter coach"，页面是 claude.ai 上"构建起步教练的心理学方法"，产出"Select the first sentence on the page and copy it."——随手选中/复制页面上一句话，跟"打个标题"是同一种零信息量的病（v3 那条"必须推进任务"规则本该拦住这个，但规则文字和范例都只覆盖了"打字"类动作，没想到"选中/复制"这个变体）。补了规则文字 + 一条新 Bad 范例（`starter-coach.ts`），`evals/rules.ts` 的 `checkZeroInformation()` 补了对应的机器可判正则，`evals/starter-coach.cases.json` 加了这条真机复现用例（`anchorShouldBeUsed`）。
+
+
+7. **新真机测试bug**：任务声明"study neural network"，追问后答"beginner guide"；某 claude.ai 页面标题一直是"Emma S facial mist ingredients and usage guide - Claude"（明显跟任务无关），`contextRelevance` 卡在 `UNKNOWN` 整整 5 次心跳、270 秒（4.5 分钟）不变，一次新的 `classifying` 日志都没有。
+
+    **bug①（`frame-pipeline.ts`）：心跳/RECHECK 这条路径从来不会重试惰性分类，一旦一次分类被节流窗口挡住就永久卡死**。`triggerLazyClassification()` 原来只在 `recordEventAndEvaluate()`（真实 `SignalEvent` 那条路径）里被调用；`recomputeOnHeartbeat()`（心跳 1min + RECHECK 8s 共用这一条路径）完全不调它。真机时间线对得上：这个页面刚加载时标题还是"New chat - Claude"，触发过一次分类（`MIN_RECLASSIFY_INTERVAL_MS=20s` 节流表打上了时间戳）；几秒后标题变成"Emma S facial mist..."，`cacheKey()` 命中不到旧缓存、想重新分类，但离上一次触发还不到 20s，被节流直接吞掉；而心跳/RECHECK 压根不会重试——`contextRelevance` 从此没有任何机会更新。
+
+    修法：`recomputeOnHeartbeat()` 里补上跟 `recordEventAndEvaluate()` 一样的重试——取 `eventHistory` 里最新一条事件（`computeFeatureFrame()` 内部判定 `contextRelevance` 用的也是同一条），`contextRelevance` 仍是 `UNKNOWN` 时调一次 `triggerLazyClassification()`。★ 节流判断改用心跳/RECHECK 触发的 `now`，不能沿用那条历史事件自己的 `timestamp`——它是固定在过去某一刻的数字，拿它做节流窗口对比的话，不管真实时间过去多久，`now - lastTriggered` 永远不变，节流窗口永远不会解封。`triggerLazyClassification()` 因此新增第四个参数 `now`（默认等于 `event.timestamp`，`recordEventAndEvaluate()` 那条既有调用点不用改）。这条路径同时被 RECHECK（8s 一次）复用，修完之后实际重试节奏比心跳的 1 分钟快得多。
+
+    **bug②（`onboarding.ts` + `coach.ts` 生态）：追问的回答会整句顶替掉原始任务声明，不是补充**。真机复现完全对得上这个 bug：声明"study neural network"→（被追问了一次）→追问后答"beginner guide"→最终 `taskDeclaration` 变成单独一句"beginner guide"，"neural network"这个关键词彻底丢失。根因：`OnboardingPanel.tsx` 每次提交只发这一轮输入框里的原始文字，`handleOnboardingSubmit()`/`runStarterCoach()` 全程无状态，不记得上一轮说过什么——`runStarterCoach()` 本身设计成这样是对的（引擎侧单次调用职责单一，见 `coach.ts` 顶部注释），问题出在没有任何一层把多轮的文字拼起来。
+
+    修法（拼接责任放在 SW 侧，`coach.ts` 引擎层不用改一行）：`OnboardingState`（`onboarding-state.ts`）的 `NEEDS_FOLLOWUP` 分支新增 `priorDeclaration: string`字段，跟 `roundsUsed` 一样原样存进 `chrome.storage.local` 推给 side panel；`OnboardingSubmitMessage`（`messages.ts`）新增可选的 `priorDeclaration`；`OnboardingPanel.tsx` 提交时把它原样带回去（只转发，不拼接，符合这个组件"只管问+显示+转发"的既定原则）；`handleOnboardingSubmit()`（`onboarding.ts`）收到后 `priorDeclaration ? \`${priorDeclaration}. ${text}\`.trim() : text` 拼出 `combinedDeclaration`，这才是真正喂给 `runStarterCoach()` 的那句话；如果拼接后还需要再追问一轮，把 `combinedDeclaration`（不是这一轮的 `text`）存回下一次的 `priorDeclaration`，保证跨多轮都能正确累积，不会中间某一轮又被冲掉。
+
+
+8. **复测顺带暴露分类器判断力不够，调了 prompt**：任务"study neural network beginners guide"，在对话里问"how much of calculus do i need to know"/"give a tutorial of classical machine learning basics"——这两个问题跟"学神经网络"是明显的前置知识/基础知识关系，但分类器两次都判 `UNKNOWN`（20b 小模型 + 0.7 置信度门槛对这种间接关联判不准，这个对话标题"Writing a beginner's guide opening"本身也偏题，进一步稀释了判断依据）。这不是链路 bug——`contentSnippet` 抓取、缓存 key、触发重新分类全部按预期工作，纯粹是分类器这次判断力不够。
+
+   `classifier.ts` 的 `buildPrompt()` 加了一条规则：任务的前置/基础知识类问题也算 RELEVANT，给了两个直接对应这次真机复现的例子（"study neural networks"任务下问"微积分要学多少"/"机器学习基础教程"都算相关，不要求原文关键词重合，允许推断主题接近度）。`docs/分类prompt-v0.md` §1 同步更新。
+
+9. **claude 功能成功，可扩展到所有已收录的 ai——把 `contentSnippet` 抓取从只做 claude.ai 扩到 `heuristics.ts` `AI_CHAT_DOMAINS` 收录的全部 9 个域名**（claude.ai、chatgpt.com/chat.openai.com、gemini.google.com、grok.com、perplexity.ai、copilot.microsoft.com、chat.deepseek.com、poe.com）。`contentKind` 判成 `ai_chat` 的域名和 `contentSnippet` 抓取器认识的域名一直是两份独立列表，靠人工保持同步——这次干脆让后者直接对齐前者，不再各管各的。
+
+    **`chat-sites.ts` 重构**：从"只有 claude.ai 一个硬编码抓取器"改成数据驱动的 `DOMAIN_SPECS` 数组（每条 `{domain, selectors, note}`），每个域名给一组按可能性从高到低排列的候选选择器，`extractFromSelectors()` 依次尝试、第一个抓到非空文本的就用它最后一个节点（对话里最新一条）。
+
+    **★ 置信度这次逐个域名如实标注，不是都一样"未真机验证"**：
+    - `claude.ai`：09-05 当天已真机验证，工作正常。
+    - `chatgpt.com`/`chat.openai.com`：较高置信度——`[data-message-author-role="user"]` 是 ChatGPT 网页版长期稳定、被广泛引用的约定，但**仍未真机验证**。
+    - 其余 6 个（gemini.google.com/grok.com/perplexity.ai/copilot.microsoft.com/chat.deepseek.com/poe.com）：已测试gemini，grok，perplexity均未出现问题。其余未测试不确定，但抓不到就静默返回 `null`，不影响任何既有功能。在真机验证之前，`contentSnippet` 实际上大概率是"悄悄不生效"，不会比现在更差，但也还没真正生效。
+
+
+10. **待 Joy 排查的新UI问题**：模拟场景——飘到不相干页面，观察到 observation mode 黄色猫时回神，主动返回专注页面后，observation mode 不会变回 companion（绿）。
+
+    **读代码发现的一个可疑点**：`detector.ts` 的 `isDrifting()`/`isStuck()` 开头有两道公共闸门——`state.restUntil > now` 和 `now - state.lastCheckInTs < state.checkinCooldownMs`（冷却期，FOCUSED/FALSE_POSITIVE 5 分钟、DRIFTED 2 分钟）——命中任意一道会直接 `return false`，**不会走到下面清空 `driftSustainer.since`/`stuckSustainer.since` 的那行代码**（`f.contextRelevance !== 'IRRELEVANT'` 分支）。`discardEvidenceFromBeforeCheckIn()` 专门负责清掉"check-in 之前攒的旧证据"，但这一步的调用点在这两道闸门**之后**——也就是说如果这次飘走恰好发生在**上一次 check-in 触发后的冷却期内**，`driftSustainer.since` 会被冻结在冷却期开始那一刻的值，不管用户后面有没有回到锚点页面，`pet-state.ts` 的 `advancePetState()` 读到的 `driftSustainerSince` 一直非空（"仍在累积证据"），桌宠就会一直停在 `observing`，直到整个冷却期结束、走到 `discardEvidenceFromBeforeCheckIn()` 才会被清空。
+

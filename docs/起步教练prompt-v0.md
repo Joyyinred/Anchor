@@ -353,26 +353,54 @@ Can you be a bit more specific? Something like "review data structures for tomor
 只是起步那一刻的快照，不会被后续每一次分类复用；声明本身站不站得住才是关键，所以这个检查
 **故意不传 `anchorContext`**，只看 `taskDeclaration`这句话本身。
 
+**v2（09-05，真机反馈修正）**：v1（上面这版最早的版本，已被取代）上线后几乎每一次填写
+起步任务都触发追问，包括"review data structure"、"study neural network"这类明明已经点了
+名的主题也被拦下。根因是 v1 的反例"study for the exam"跟这些好例子长得太像（都是"动词 +
+一两个词的名词短语"），模型很可能是照着句式在判，不是照着内容——v2 把结构几乎相同但答案
+相反的一对例子（"study neural network" vs "study for the exam"）并排放，逼模型看内容不看
+句式，并直接把 Jay 举的反例"test and update hackathon project"写进去。跟代码保持一致，
+现在生产用的是这一版：
+
 ```
-You judge whether a task description is specific enough to be used for an entire
-work session to decide whether ANY webpage the person visits later is relevant to their work —
-not just to write one first step for right now.
+You judge whether a task description names a concrete enough SUBJECT to be used for an
+entire work session to decide whether ANY webpage the person visits later is related to their
+work — not just to write one first step for right now.
 
 Their task: "{taskDeclaration}"
 
-A vague description names only a category or an entire project without saying which specific
-part: "adjust and test my hackathon project", "work on my presentation", "study for the exam".
-Someone who only reads this sentence could not tell whether a random webpage — say, one about
-"neural networks" or about "marketing slides" — is actually part of this work, because the
-sentence never named a concrete target.
+The test: could you look at a random webpage's title and guess yes/no whether it belongs to this
+task? You can if the task names a topic, project, feature, component, file, or section — even
+just one word of it, even if it is broad. You cannot if the task only names a bare category of
+work or a generic container word (project / presentation / assignment / exam / hackathon) with
+nothing that says what it is actually about or called.
 
-A specific description names an identifiable target: "fix the login bug in auth.ts", "write
-the intro section of my thesis", "review chapter 4 on sorting algorithms". Short is fine as
-long as it points at one real file, feature, topic, or section — do not demand extra length,
-only extra specificity.
+Sufficient (each names something you could match a webpage against):
+- "review data structure"        (a real subject — data-structure pages would match)
+- "study neural network"         (a real subject — neural-network pages would match)
+- "adjust the starter coach"     (names the feature)
+- "fix auth.ts"                  (names the file)
+- "review chapter 4"             (names the section)
 
-If it is vague, ask ONE natural, warm follow-up question that would surface the missing
-concrete target (usually: which specific part/feature/topic). Under 15 words, do not repeat
+Insufficient (nothing here tells you what the work is actually about):
+- "study for the exam"           (names an EVENT, not a subject — could be about anything)
+- "test and update hackathon project"  (names that it's a project, not what the project does)
+- "adjust and test my hackathon project"
+- "work on my presentation"
+
+Notice the first pair: "study neural network" and "study for the exam" have the same shape
+(verb + short phrase) but different answers — judge the CONTENT of the phrase, not its length or
+grammatical shape. A short, broad topic word ("neural network", "data structure") is enough; a
+generic container word with no topic attached ("the exam", "my project", "hackathon project") is
+not, no matter how it's phrased.
+
+Do not ask for further subdivision once one concrete subject is named — "which part of the
+starter coach" is exactly the kind of follow-up you must NOT ask if "starter coach" was already
+given. When genuinely unsure whether it counts, prefer sufficient:true — you only get to ask
+once, so a slightly loose "yes" costs far less than a follow-up that annoys someone who already
+gave a reasonable answer.
+
+If it is insufficient, ask ONE natural, warm follow-up question that would surface a first
+concrete subject (usually: which project/feature/file/topic). Under 15 words, do not repeat
 their sentence back, do not sound like a form field.
 
 Output JSON only, no extra text:

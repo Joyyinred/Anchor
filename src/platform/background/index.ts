@@ -5,7 +5,14 @@ import type { SessionContext } from '../../engine/types';
 import { DEFAULT_TASK_DECLARATION } from '../../engine/types';
 import { getDemoMode, setDemoMode } from './state';
 import { getOrInitSessionContext, saveSessionContext } from './session';
-import { ensureCurrentTab, getTrackedTabId, handleInteractionMessage, isTrackedTab, registerSignalListeners } from './signals';
+import {
+  ensureCurrentTab,
+  getTrackedTabId,
+  handleChatSnippetMessage,
+  handleInteractionMessage,
+  isTrackedTab,
+  registerSignalListeners,
+} from './signals';
 import {
   applyCheckInAnswer,
   recomputeOnHeartbeat,
@@ -141,6 +148,21 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
     });
     return;
   }
+  if (message.type === 'CHAT_SNIPPET') {
+    // 09-05：跟 INTERACTION 同一个模式——只信任当前被追踪的锚点 tab 发来的内容快照，
+    // 不然开着一堆无关的 AI 对话标签页也会各自往里灌无关的分类信号。
+    // 排查补：这条路径真机验证之前完全没有日志，RECHECK 那次踩过的坑（收不到消息时无法
+    // 分清"content script 没发"还是"发了但被过滤"）不要再踩一次——先打一条"收到了"。
+    console.log('[Anchor SW] received CHAT_SNIPPET from tab', sender.tab?.id, message.snippet);
+    void ensureCurrentTab().then(() => {
+      if (sender.tab?.id === undefined || !isTrackedTab(sender.tab.id)) {
+        console.log('[Anchor SW] CHAT_SNIPPET ignored — not the tracked tab (tracked =', getTrackedTabId(), ')');
+        return;
+      }
+      handleChatSnippetMessage(message.snippet);
+    });
+    return;
+  }
   if (message.type === 'RECHECK') {
     // 08-31：content script 按固定节奏（比 1min 心跳密得多）发来的"到点了，重新算一下"
     // tick——不追加 SignalEvent，只用当前 eventHistory + 最新 now 重新跑一遍判定，跟心跳复用
@@ -261,7 +283,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
   if (message.type === 'ONBOARDING_SUBMIT') {
     void (async () => {
       const isDemoMode = await getDemoMode();
-      await handleOnboardingSubmit(message.text, message.roundsUsed, Date.now(), isDemoMode);
+      await handleOnboardingSubmit(message.text, message.roundsUsed, Date.now(), isDemoMode, message.priorDeclaration);
     })();
     return;
   }

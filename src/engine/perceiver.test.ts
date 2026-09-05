@@ -87,6 +87,38 @@ describe('resolveContextRelevance (signal 1)', () => {
     expect(resolveContextRelevance(driftedEvent, ctx, cache)).toBe('UNKNOWN');
   });
 
+  // 09-05 第二次真机反馈：标题这次压根没更新（AI 对话网站不是每轮消息都会重新生成标题），
+  // 靠标题变化触发重新分类这条路对这种情况没用——contentSnippet（用户刚输入的文字）是
+  // 独立于标题之外的第二个漂移信号，同一套"缓存 key 变了就重新分类"机制照样适用。
+  it('分类缓存也认 contentSnippet——标题不变但用户刚输入的内容变了，同样是全新的 key', () => {
+    const ctx = mkCtx();
+    const url = 'https://claude.ai/chat/a6fefe56';
+    const title = 'Junction 2026 hackathon新手参赛指南 - Claude'; // 全程没变过
+    const cache = new Map([
+      [cacheKey('claude.ai', url, title, '如何准备第一次参加黑客松'), 'RELEVANT' as const],
+    ]);
+
+    const onTopicEvent: SignalEvent = {
+      ...anchorEvent, domain: 'claude.ai', url, title, contentKind: 'ai_chat', isAnchor: false,
+      contentSnippet: '如何准备第一次参加黑客松',
+    };
+    expect(resolveContextRelevance(onTopicEvent, ctx, cache)).toBe('RELEVANT');
+
+    // 标题跟上面完全一样，但用户这次问的是完全不相干的美妆问题——真机复现原句
+    const driftedEvent: SignalEvent = {
+      ...anchorEvent, domain: 'claude.ai', url, title, contentKind: 'ai_chat', isAnchor: false,
+      contentSnippet: '推荐几款好用的美妆蛋',
+    };
+    expect(resolveContextRelevance(driftedEvent, ctx, cache)).toBe('UNKNOWN');
+  });
+
+  it('没有 contentSnippet 时行为不变——绝大多数域名走的还是纯标题缓存', () => {
+    const ctx = mkCtx();
+    const cache = new Map([[cacheKey('some-blog.com', 'https://some-blog.com/post', 'A Post'), 'RELEVANT' as const]]);
+    const event: SignalEvent = { ...anchorEvent, domain: 'some-blog.com', url: 'https://some-blog.com/post', title: 'A Post', contentKind: 'article', isAnchor: false };
+    expect(resolveContextRelevance(event, ctx, cache)).toBe('RELEVANT');
+  });
+
   it('newly added blacklist domains (netflix/hulu/disneyplus) resolve IRRELEVANT', () => {
     const ctx = mkCtx();
     for (const domain of ['netflix.com', 'hulu.com', 'disneyplus.com']) {

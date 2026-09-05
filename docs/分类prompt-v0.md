@@ -16,10 +16,14 @@ The user declared their current task as:
 They are currently viewing this page:
 - URL: {url}
 - Title: {title}
-
+{snippetLine}
 Question: Is THIS PAGE relevant to the declared task?
 Judge by the page's specific content (title + path), not by the domain's general nature.
 For example, youtube.com can be relevant (a tutorial) or irrelevant (entertainment) — decide per page.
+A question about prerequisite or foundational knowledge for the task counts as relevant too —
+e.g. if the task is "study neural networks", asking "how much calculus do I need to know" or
+"tutorial on classical machine learning basics" is RELEVANT (it's the groundwork for the task),
+not a tangent. Don't require the exact task keywords to appear — infer topical closeness.
 
 Answer with exactly one of:
 RELEVANT   — the page directly supports the task (docs, code, related video/article, AI chat about the task)
@@ -30,13 +34,16 @@ Output format (JSON only, no extra text):
 {"verdict": "RELEVANT" | "IRRELEVANT" | "UNKNOWN", "confidence": 0.0-1.0}
 ```
 
+`{snippetLine}`：仅当 `input.contentSnippet` 有值时才插入这一行——`\nThey just typed this in the page: "{contentSnippet}"\n`，否则是空字符串。覆盖 `heuristics.ts` `AI_CHAT_DOMAINS` 收录的全部 AI 对话网站（claude.ai/chatgpt.com/chat.openai.com/gemini.google.com/grok.com/perplexity.ai/copilot.microsoft.com/chat.deepseek.com/poe.com，09-05 扩），非 AI 对话域名这一行始终不存在，prompt 形状跟这次改动之前完全一样。★ 名单上除 claude.ai 外的站点选择器还没有真机验证，实际能不能抓到取决于 `chat-sites.ts` 里的选择器是否命中真实 DOM。
+
 ## 2. 输出约束与红线语义
 
 | 规则 | 实现 |
 |---|---|
 | 三态输出 | `RELEVANT` / `IRRELEVANT` / `UNKNOWN`，无其他值 |
 | **低置信回 UNKNOWN** | LLM 返回 `confidence < 0.7` 时，A 侧强制覆盖为 `UNKNOWN`（契约红线1：判出前一律保守） |
-| 缓存键 | `domain + pathname + search + 标题`（perceiver.ts `cacheKey()` 已实现，09-05 加了标题——AI 对话类页面 URL 全程不变但话题会飘，只按 URL 缓存会把第一次判定冻结一辈子；标题变了自然是全新的 key，未命中会自动回落 `UNKNOWN` 触发重新分类，不用额外写"标题变了要不要重判"的逻辑） |
+| **一致性** | `temperature: 0`（09-05 新增，`groq.ts` `callGroq()`）——真机复现过同一个标题两次分类给出不同结果，分类是"是/否"判断，一致性比多样性重要 |
+| 缓存键 | `domain + pathname + search + 标题 + contentSnippet`（perceiver.ts `cacheKey()` 已实现，09-05 两次加字段——先加标题：AI 对话类页面 URL 全程不变但话题会飘，只按 URL 缓存会把第一次判定冻结一辈子；标题变了自然是全新的 key，未命中会自动回落 `UNKNOWN` 触发重新分类。后来发现标题也不是每轮对话都更新，又加了 `contentSnippet`（用户刚输入的文字，仅 `claude.ai`）——同一套"key 变了就重判"机制，不是两套逻辑） |
 | 调用时机 | 惰性：每页每会话最多一次，结果写入 `ClassificationCache` |
 | 短路优先于 LLM | 演示域预置缓存表 > sessionWhitelist > short_feed 硬判 > 内置娱乐黑名单 > LLM |
 

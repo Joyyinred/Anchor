@@ -136,6 +136,12 @@ function checkZeroInformation(action: string, task: string): Violation | null {
   if (/\b(?:typ(?:e|ing)|writ(?:e|ing)|jot|put)\s+(?:just\s+|only\s+|simply\s+|merely\s+)?(?:down\s+|out\s+)?(?:the\s+|your\s+|a\s+)?(?:title|task name|course name|topic name|subject)\b/i.test(action)) {
     return { code: 'ZERO_INFO', detail: '"打个标题/写下任务名"——做完等于没做' };
   }
+  // 09-05 真机复现（相关页面 + option (c) 分支）："Select the first sentence on the page
+  // and copy it."——随手选中/复制页面上任意一句话，跟"打个标题"是同一种病：拿到的是
+  // 一句任意内容，不是往任务推进了什么。
+  if (/\b(?:select|copy|highlight)\s+(?:the\s+)?first\s+(?:sentence|line|paragraph|word)\b/i.test(action)) {
+    return { code: 'ZERO_INFO', detail: '"选中/复制页面第一句话"——拿到的是任意内容，没有推进任务' };
+  }
   const typed = action.match(/\b(?:typ(?:e|ing)|writ(?:e|ing)|jot|put)\s+(?:down\s+|out\s+)?(.+)$/i)?.[1];
   if (typed) {
     const typedWords = contentWords(typed);

@@ -46,6 +46,10 @@ describe('评测规则 · 四版真机踩过的坑', () => {
   it('v3 变体：给空文档起个标题，同样是零信息量', () => {
     expectViolation('Open a blank doc and type just the title.', 'write my thesis intro', 'ZERO_INFO');
   });
+
+  it('09-05 真机复现：相关页面里随手选中/复制第一句话，跟打标题是同一种零信息量', () => {
+    expectViolation('Select the first sentence on the page and copy it.', 'starter coach', 'ZERO_INFO');
+  });
 });
 
 describe('评测规则 · v1 就有的四类废话', () => {

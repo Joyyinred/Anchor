@@ -111,6 +111,16 @@
       },
       "why": "同上，换一个非邮件的无关页面——避免防讨好只是学会了躲 Gmail 这一个词",
       "anchorShouldBeIgnored": true
+    },
+    {
+      "id": "regress-select-copy-trivial",
+      "task": "starter coach",
+      "anchor": {
+        "title": "构建起步教练的心理学方法 - Claude",
+        "url": "https://claude.ai/chat/a6fefe56-786a-4c6f-8625-b1e50896f6c6"
+      },
+      "why": "09-05 真机复现：页面明显相关（正在讨论起步教练本身），产出过'Select the first sentence on the page and copy it.'——随手选中/复制页面上任意一句话，跟'打个标题'是同一种零信息量的病，只是换了个动词躲过了原来的规则",
+      "anchorShouldBeUsed": true
     }
   ]
 }

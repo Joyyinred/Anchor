@@ -178,6 +178,11 @@ Rules:
   opening an empty file gives them nothing — they already knew the name. Either pull real
   material in front of them (search it, open it, read one line of it) or make them produce
   one real piece of the work (one sentence, one line of code, one solved step).
+- Using an already-open relevant page must mean actually engaging with its content — reading
+  a specific real part of it, continuing the conversation with a concrete next question,
+  scrolling to the relevant section. Selecting or copying an arbitrary sentence just because
+  it happens to be the first one on the page is the same zero-progress trap as typing a title:
+  they end up holding a random sentence, not one step closer to the task.
 - Planning is not starting. Reject "outline your approach", "think about the structure",
   "make a list of what to do" — that is procrastination wearing a productive costume.
 - Do not restate the goal. "Start writing the essay" is the goal, not an action.
@@ -204,6 +209,7 @@ Bad:  "Open the doc, then outline, then write."      (a sequence)
 Bad:  "You can do this! Just begin."                 (cheerleading, says nothing)
 Bad:  "Open the network textbook, flip to chapter 4." (invents a chapter nobody gave you)
 Bad:  "Pick up your notes and read the first line."  (assumes notes they may not have)
+Bad:  "Select the first sentence on the page and copy it." (arbitrary, gives them nothing — same trap as typing a title)
 
 Output JSON only, no extra text:
 {"firstAction": string}`;
@@ -298,26 +304,63 @@ export const groqStarterCoachCall: StarterCoachLLMCall = async ({ taskDeclaratio
 //   但 anchorContext 只是起步那一刻的快照，不会被后续每一次分类复用，声明本身站不站得住
 //   才是关键，所以这里故意不传 anchorContext（跟 coach.ts 里 TaskQualityCheckCall 的类型
 //   定义一致，不是漏传）。
+// 09-05 真机反馈修正 v2：v1 这版还是太严——真机复现自从上一次放宽后，几乎**每一次**填写
+// 起步任务都触发追问，包括"review data structure"、"study neural network"这类明明已经
+// 点了名的主题。根因是 v1 的反例"study for the exam"跟这些好例子长得太像了（都是
+// "动词 + 一两个词的名词短语"），模型很可能是照着句式模式而不是内容在判——学会了"study X"
+// 这个形状本身看着就"短，可能不够格"，而不是真的在区分"X 有没有指向一个可判断的主题"。
+//
+// v2 的修法：不再只靠一条规则文字，直接把这次的真实反例（"study for the exam"）跟
+// 结构几乎相同、但应该判够格的例子（"study neural network"）并排放，逼模型看内容不看
+// 句式——差别只在于 "neural network" 是一个能拿去跟任意网页标题比对的主题词，"the exam"
+// 不是（"exam"是一个事件，不是一个主题，任何页面都判断不出跟"the exam"是不是同一场考试）。
+// 同理把 Jay 自己举的反例"test and update hackathon project"也直接写进反例——"hackathon
+// project"这个短语本身只说明了"这是一个项目"这个事实，没有说这个项目是做什么的，看到一个
+// 关于"React"或者"数据库"的网页，没人能判断它属不属于"这个 hackathon 项目"。
+//
+// 这道检查现在（见 coach.ts）改成最多只问一次，"问不出完美答案就再问一轮"这个退路已经
+// 没有了，判定标准必须相应放宽——第一次问完就要用，宁可对模糊的边界情况偏宽松地放行，
+// 也不要因为标准太严导致仅有的这一次追问问得不够到位。
 function buildTaskQualityPrompt(taskDeclaration: string): string {
-  return `You judge whether a task description is specific enough to be used for an entire
-work session to decide whether ANY webpage the person visits later is relevant to their work —
-not just to write one first step for right now.
+  return `You judge whether a task description names a concrete enough SUBJECT to be used for an
+entire work session to decide whether ANY webpage the person visits later is related to their
+work — not just to write one first step for right now.
 
 Their task: "${taskDeclaration}"
 
-A vague description names only a category or an entire project without saying which specific
-part: "adjust and test my hackathon project", "work on my presentation", "study for the exam".
-Someone who only reads this sentence could not tell whether a random webpage — say, one about
-"neural networks" or about "marketing slides" — is actually part of this work, because the
-sentence never named a concrete target.
+The test: could you look at a random webpage's title and guess yes/no whether it belongs to this
+task? You can if the task names a topic, project, feature, component, file, or section — even
+just one word of it, even if it is broad. You cannot if the task only names a bare category of
+work or a generic container word (project / presentation / assignment / exam / hackathon) with
+nothing that says what it is actually about or called.
 
-A specific description names an identifiable target: "fix the login bug in auth.ts", "write
-the intro section of my thesis", "review chapter 4 on sorting algorithms". Short is fine as
-long as it points at one real file, feature, topic, or section — do not demand extra length,
-only extra specificity.
+Sufficient (each names something you could match a webpage against):
+- "review data structure"        (a real subject — data-structure pages would match)
+- "study neural network"         (a real subject — neural-network pages would match)
+- "adjust the starter coach"     (names the feature)
+- "fix auth.ts"                  (names the file)
+- "review chapter 4"             (names the section)
 
-If it is vague, ask ONE natural, warm follow-up question that would surface the missing
-concrete target (usually: which specific part/feature/topic). Under 15 words, do not repeat
+Insufficient (nothing here tells you what the work is actually about):
+- "study for the exam"           (names an EVENT, not a subject — could be about anything)
+- "test and update hackathon project"  (names that it's a project, not what the project does)
+- "adjust and test my hackathon project"
+- "work on my presentation"
+
+Notice the first pair: "study neural network" and "study for the exam" have the same shape
+(verb + short phrase) but different answers — judge the CONTENT of the phrase, not its length or
+grammatical shape. A short, broad topic word ("neural network", "data structure") is enough; a
+generic container word with no topic attached ("the exam", "my project", "hackathon project") is
+not, no matter how it's phrased.
+
+Do not ask for further subdivision once one concrete subject is named — "which part of the
+starter coach" is exactly the kind of follow-up you must NOT ask if "starter coach" was already
+given. When genuinely unsure whether it counts, prefer sufficient:true — you only get to ask
+once, so a slightly loose "yes" costs far less than a follow-up that annoys someone who already
+gave a reasonable answer.
+
+If it is insufficient, ask ONE natural, warm follow-up question that would surface a first
+concrete subject (usually: which project/feature/file/topic). Under 15 words, do not repeat
 their sentence back, do not sound like a form field.
 
 Output JSON only, no extra text:

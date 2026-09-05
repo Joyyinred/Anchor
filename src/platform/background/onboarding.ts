@@ -36,8 +36,17 @@ export async function handleOnboardingSubmit(
   text: string,
   roundsUsed: number,
   now: number,
-  isDemoMode: boolean
+  isDemoMode: boolean,
+  priorDeclaration?: string
 ): Promise<void> {
+  // 09-05 真机反馈修复：追问的回答是"补充"不是"替换"——runStarterCoach() 每次只认
+  // 它收到的这一个字符串，不会记得上一轮说过什么（引擎侧保持无状态，见 coach.ts
+  // runStarterCoach 的设计说明），拼接的责任落在这里。真机复现过：声明
+  // "study neural network"，追问后单独答"beginner guide"，不拼接的话最终
+  // taskDeclaration 会变成"beginner guide"，"neural network"这个关键词彻底丢失——
+  // 后面整场会话的相关性分类全靠这句话，声明变空洞会导致明明该判 IRRELEVANT/RELEVANT
+  // 的页面判不出来，长期卡 UNKNOWN。
+  const combinedDeclaration = priorDeclaration ? `${priorDeclaration}. ${text}`.trim() : text;
   // 锚点：用户声明任务这一刻正看着的那个 tab，就是这次会话的锚点——跟 session.ts 的默认
   // 兜底路径取的是同一个东西（当前活动 tab），只是那边没有任务声明、这边有。
   // 之前这里漏传了 inferredAnchor/sessionId，导致 anchor 被覆盖成 { domain: '', url: '' }：
@@ -57,7 +66,7 @@ export async function handleOnboardingSubmit(
   //   提交任务，不会得到"打开你的扩展管理页"这种荒唐建议。
   const anchorContext = url ? { title: activeTab?.title ?? '', url } : undefined;
   const result = await runStarterCoach(
-    text,
+    combinedDeclaration,
     roundsUsed,
     groqStarterCoachCall,
     now,
@@ -73,7 +82,12 @@ export async function handleOnboardingSubmit(
   );
 
   if (result.status === 'NEEDS_FOLLOWUP') {
-    await pushOnboardingState({ status: 'NEEDS_FOLLOWUP', prompt: result.prompt, roundsUsed: result.roundsUsed });
+    await pushOnboardingState({
+      status: 'NEEDS_FOLLOWUP',
+      prompt: result.prompt,
+      roundsUsed: result.roundsUsed,
+      priorDeclaration: combinedDeclaration,
+    });
     return;
   }
 

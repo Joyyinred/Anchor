@@ -235,4 +235,30 @@ describe('B6: runStarterCoach 任务质量检查（09-05 新增，语义级"够�
     expect(checkTaskQuality).not.toHaveBeenCalled();
     expect(llmCall).toHaveBeenCalledTimes(1);
   });
+
+  // 09-05 真机反馈修正：真机复现"调整anchor产品功能"→追问→答"starter coach"→**又追问**
+  // "Which part of the starter coach"——连环追问两次让人不耐烦。改成质量检查最多只问一次
+  // （roundsUsed===0），不管还剩多少轮追问预算，用户已经补充过一次之后就不再为了这道检查
+  // 继续追问。
+  it('质量检查最多只问一次：roundsUsed=1 时即使还有追问预算（<MAX_FOLLOWUP_ROUNDS）也不再触发', async () => {
+    const llmCall = mockLLM('Open the starter coach prompt file and read it');
+    const checkTaskQuality = mockQualityCheck({
+      sufficient: false,
+      followupQuestion: 'Which part of the starter coach are you focusing on?',
+    });
+    const result = await runStarterCoach(
+      'starter coach', // 用户对上一轮追问的回答——补充过一次了
+      1, // roundsUsed=1 < MAX_FOLLOWUP_ROUNDS=2，按旧逻辑还有预算，但不该再问
+      llmCall,
+      now,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      checkTaskQuality
+    );
+    expect(result.status).toBe('READY'); // 不是 NEEDS_FOLLOWUP——不能又追问一次
+    expect(checkTaskQuality).not.toHaveBeenCalled();
+    expect(llmCall).toHaveBeenCalledTimes(1);
+  });
 });

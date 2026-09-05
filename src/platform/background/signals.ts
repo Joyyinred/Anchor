@@ -20,6 +20,13 @@ interface LiveTabInfo {
 let currentTab: LiveTabInfo | null = null;
 let currentInteractionType: SignalEvent['interactionType'] = 'ACTIVE_INPUT';
 let systemIdle = false;
+// 09-05：用户刚在 AI 对话页面里输入的文字（目前仅 claude.ai，见 chat-sites.ts）。
+// ★ 存的时候连同它所属的 url 一起记——currentTab 被重新赋值的地方有好几处（onActivated/
+// onFocusChanged/onUpdated/onHistoryStateUpdated/ensureCurrentTab），挨个记得清空这个变量
+// 太容易漏一处（漏一处就是旧对话的文字污染了下一个完全无关页面的分类）。改成在读取的那一刻
+// （emitSignalEvent）比对 url 是否还对得上，对不上就当没有——结构上就不可能读到过期数据，
+// 不用依赖"改 currentTab 的每个地方都记得手动清"这种容易遗漏的约定。
+let currentContentSnippet: { url: string; snippet: string } | undefined;
 // onActivated 的监听器是异步的（await chrome.tabs.get），快速连续切 tab 时后触发的请求可能反而
 // 先 resolve——用一个单调递增的序号在 await 前后打卡，await 完了发现自己不是"最新一次"就放弃提交，
 // 避免过期请求的结果覆盖掉更新的 currentTab。
@@ -72,6 +79,8 @@ async function emitSignalEvent(reason: string): Promise<void> {
     interactionType: currentInteractionType,
     entryIntent: currentTab.entryIntent,
     systemIdle,
+    // 只在这条快照还属于当前这个 url 时才带上——见上面 currentContentSnippet 的注释。
+    contentSnippet: currentContentSnippet?.url === currentTab.url ? currentContentSnippet.snippet : undefined,
   };
   const isDemoMode = await getDemoMode();
   const { frame, result, petState } = await recordEventAndEvaluate(event, ctx, isDemoMode);
@@ -120,6 +129,14 @@ export async function ensureCurrentTab(): Promise<void> {
 export function handleInteractionMessage(interactionType: SignalEvent['interactionType']): void {
   currentInteractionType = interactionType;
   void emitSignalEvent('content-interaction');
+}
+
+// 09-05：content script 发来的最新一条用户消息（见 chat-sites.ts）。跟 handleInteractionMessage
+// 同一个模式，但不改 currentInteractionType——这不是一次交互类型的变化，是页面内容本身的变化。
+export function handleChatSnippetMessage(snippet: string): void {
+  if (!currentTab) return;
+  currentContentSnippet = { url: currentTab.url, snippet };
+  void emitSignalEvent('chat-snippet');
 }
 
 export function registerSignalListeners(): void {

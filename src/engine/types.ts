@@ -17,6 +17,12 @@ export interface SignalEvent {
                  | 'MEDIA_PLAY' | 'MEDIA_PAUSE' | 'MEDIA_SEEK';
   entryIntent: 'search' | 'direct_link' | 'feed' | 'autoplay' | 'unknown';
   systemIdle: boolean;
+  // 09-05 新增：用户刚在页面里输入的文字（目前仅 AI 对话类网站，起步只做 claude.ai，
+  // 见 src/platform/content/chat-sites.ts）。绝大多数域名这个字段是 undefined——只在能
+  // 确定"这是用户刚打的字"时才有值，不是页面全文，也不是完整对话历史（数据最小化）。
+  // 标题不一定随每轮对话更新（真机复现：连续问了 3 个无关问题，标题纹丝不动），这个字段
+  // 是比标题更细粒度、真正跟着每一轮消息走的分类依据。见 docs/契约v4.md §5.3 隐私声明。
+  contentSnippet?: string;
 }
 
 // ── FeatureFrame：A → B 的主缝，B 的所有判断都从这里读数据 ──

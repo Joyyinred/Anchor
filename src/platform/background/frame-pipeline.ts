@@ -192,7 +192,16 @@ async function evaluateAndPersist(
 // sessionWhitelist/short_feed/黑名单/缓存全部没命中）之后才触发，fire-and-forget，绝不
 // 让调用方等它。结果写回 classificationCache，供"下一次"（下一条事件，或下一次心跳补帧）
 // 重新计算帧时使用——不会让当前这一帧变成 RELEVANT/IRRELEVANT，只影响未来。
-function triggerLazyClassification(event: SignalEvent, ctx: SessionContext, frame: FeatureFrame): void {
+// 09-05 真机复现修复：`now` 单独传入（默认等于 event.timestamp，recordEventAndEvaluate
+// 那条路径不用变）——recomputeOnHeartbeat/RECHECK 那条路径喂的 event 是历史里最新一条，
+// 它的 timestamp 是固定的过去某一刻，如果节流判断也拿它来算，安静等多久都不会解封，
+// 见下面 recomputeOnHeartbeat 里的调用点和它的注释。
+function triggerLazyClassification(
+  event: SignalEvent,
+  ctx: SessionContext,
+  frame: FeatureFrame,
+  now: number = event.timestamp
+): void {
   if (frame.contextRelevance !== 'UNKNOWN') return;
   // 0829 真机测试发现（Joy）：chrome://newtab/ 刚打开、tab.url 还没被真实地址补上那一小段
   // 空档期（signals.ts 的 onUpdated 只要 title 变了就会发信号，即使 url 仍是空字符串），
@@ -201,21 +210,27 @@ function triggerLazyClassification(event: SignalEvent, ctx: SessionContext, fram
   // 不该被算作"IRRELEVANT"或任何确定结论）。domain 判空即可：cacheKey 用 domain 打头，
   // url 为空但 domain 有值的情况理论上不存在（domainOf('') === ''）。
   if (!event.domain) return;
-  // 09-05：key 带标题（见 perceiver.ts cacheKey 顶部注释）——标题一变这里就是全新的 key，
-  // 不用另外判断"标题是不是变了"，命中不到旧缓存自然会走到这里重新分类。
-  const key = cacheKey(event.domain, event.url, event.title);
+  // 09-05：key 带标题 + contentSnippet（见 perceiver.ts cacheKey 顶部注释）——标题或者
+  // 用户刚输入的文字一变，这里就是全新的 key，不用另外判断"是不是变了"，命中不到旧缓存
+  // 自然会走到这里重新分类。
+  const key = cacheKey(event.domain, event.url, event.title, event.contentSnippet);
   if (inFlightClassification.has(key) || classificationCache.has(key)) return;
 
-  // 节流：同一个页面（不看标题）刚分类过没多久，先别因为标题抖动又触发一次——见上面
-  // MIN_RECLASSIFY_INTERVAL_MS 的注释。
+  // 节流：同一个页面（不看标题/contentSnippet）刚分类过没多久，先别因为标题抖动或者
+  // AI 对话消息发得太快又触发一次——见上面 MIN_RECLASSIFY_INTERVAL_MS 的注释。
   const page = pageKey(event.domain, event.url);
   const lastTriggered = lastClassifyTriggeredAt.get(page);
-  if (lastTriggered !== undefined && event.timestamp - lastTriggered < MIN_RECLASSIFY_INTERVAL_MS) return;
-  lastClassifyTriggeredAt.set(page, event.timestamp);
+  if (lastTriggered !== undefined && now - lastTriggered < MIN_RECLASSIFY_INTERVAL_MS) return;
+  lastClassifyTriggeredAt.set(page, now);
 
   inFlightClassification.add(key);
   console.log('[Anchor SW] classifying (async)', key);
-  void classifyDomainRelevance({ taskDeclaration: ctx.taskDeclaration, url: event.url, title: event.title })
+  void classifyDomainRelevance({
+    taskDeclaration: ctx.taskDeclaration,
+    url: event.url,
+    title: event.title,
+    contentSnippet: event.contentSnippet,
+  })
     .then((verdict) => {
       classificationCache.set(key, verdict);
       console.log('[Anchor SW] classified', key, '->', verdict);
@@ -273,6 +288,19 @@ export async function recomputeOnHeartbeat(
 
   const frame = computeFeatureFrame(eventHistory, ctx, now, classificationCache, previousTexture, isDemoMode);
   previousTexture = frame.texture;
+
+  // 09-05 真机复现修复：recordEventAndEvaluate 那条路径才会调 triggerLazyClassification，
+  // 心跳/RECHECK 这条路径原来完全不重试——如果第一次分类正好撞上 20s 节流窗口被跳过
+  // （比如页面刚加载时标题还是"New chat"，触发过一次；几秒后标题/contentSnippet 变了，
+  // 命中不到缓存但离上一次触发还不到 20s，直接被节流吞掉），且用户之后只是安静阅读、
+  // 不再产生新的真实 SignalEvent，contextRelevance 就会永远卡在 UNKNOWN，DRIFT 检测
+  // 也就永远不会被触发——真机复现过连续 5 次心跳、270 秒都卡在 UNKNOWN。用历史里最新
+  // 一条事件（跟 computeFeatureFrame 内部 `current` 用的是同一条）重新尝试一次，
+  // 节流判断传 now（心跳/RECHECK 触发的当前时刻）而不是那条历史事件自己的 timestamp，
+  // 这样节流窗口才会随真实时间过去而真正解封。
+  const visible = eventHistory.filter((e) => e.timestamp <= now);
+  const latestEvent = visible[visible.length - 1];
+  if (latestEvent) triggerLazyClassification(latestEvent, ctx, frame, now);
 
   const { result, petState } = await evaluateAndPersist(frame, ctx, now, isDemoMode);
   return { frame, result, petState };

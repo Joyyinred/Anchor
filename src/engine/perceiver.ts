@@ -97,9 +97,15 @@ export function pageKey(domain: string, url: string): string {
 // 就会对着新标题重新分类一次——不用额外写"标题变了要不要重新分类"的判断逻辑，直接白拿。
 // 标题做归一化（大小写/多余空白）：同一句标题因为多个空格被判成"变了"会白白重新分类一次，
 // 只会误伤性能、不会影响正确性，但没必要。
-export function cacheKey(domain: string, url: string, title: string): string {
-  const normalizedTitle = title.trim().toLowerCase().replace(/\s+/g, ' ');
-  return `${pageKey(domain, url)}::${normalizedTitle}`;
+//
+// 09-05：contentSnippet（用户刚在页面里输入的文字，目前仅 claude.ai）同样拼进 key，
+// 理由跟标题完全一样——真机复现：标题也不是每轮对话都更新（连续问 3 个无关问题，标题
+// 从头到尾没变），单靠标题这次也失效了。有新消息就是全新的 key，跟标题变化走的是
+// 同一套"缓存命不中 → 自动退回 UNKNOWN → 触发重新分类"机制，不是另开一条判断逻辑。
+export function cacheKey(domain: string, url: string, title: string, contentSnippet?: string): string {
+  const normalize = (s: string): string => s.trim().toLowerCase().replace(/\s+/g, ' ');
+  const snippetPart = contentSnippet ? `::${normalize(contentSnippet)}` : '';
+  return `${pageKey(domain, url)}::${normalize(title)}${snippetPart}`;
 }
 
 // 真实 SignalEvent.domain 来自 URL.hostname（见 src/platform/background/domain.ts 的 domainOf()），
@@ -126,7 +132,7 @@ export function resolveContextRelevance(
   );
   if (presetMatch) return presetMatch[1];
 
-  const key = cacheKey(event.domain, event.url, event.title);
+  const key = cacheKey(event.domain, event.url, event.title, event.contentSnippet);
   const domainWhitelisted = ctx.sessionWhitelist.some((w) => domainMatches(event.domain, w));
   if (domainWhitelisted || ctx.sessionWhitelist.includes(key)) {
     return 'RELEVANT';

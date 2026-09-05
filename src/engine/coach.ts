@@ -150,14 +150,17 @@ export async function runStarterCoach(
     };
   }
 
-  // 09-05：长度过关不代表内容具体（"调整并测试hackathon项目作品"）——跟上面的长度闸门
-  // 共用同一份 roundsUsed 预算和 2 轮封顶，不是独立开一份新的追问额度：契约"最多追问 2 轮"
-  // 本来就是一个不可超支的总预算，不分是哪种原因触发的追问，问满 2 轮无论如何都要放行。
-  // 不用再额外判断 taskDeclaration 是否非空：走到这里意味着上面的长度闸门没有触发，
-  // 而它的触发条件已经覆盖了"太短（含空串）且还有追问预算"的情况——能走到这一行，
-  // 要么 roundsUsed 已经不小于 MAX_FOLLOWUP_ROUNDS（下面这个判断会挡住），要么
-  // taskDeclaration.length 已经 >= MIN_TASK_DECLARATION_LENGTH，不可能是空串。
-  if (roundsUsed < MAX_FOLLOWUP_ROUNDS) {
+  // 09-05：长度过关不代表内容具体（"调整并测试hackathon项目作品"）。
+  // ★ 09-05 真机反馈修正：这道检查**最多只问一次**（roundsUsed === 0，不是"只要还有
+  // 预算就一直问"）——原来跟长度闸门共用 2 轮总预算，结果真机复现出"调整anchor产品功能"
+  // →追问→答"starter coach"→**又追问**"Which part of the starter coach"，连环追问两次
+  // 让人不耐烦。用户已经补充说明过一次之后，不管补充得够不够精确，都不该再为了这道检查
+  // 继续追问——"追问体验不够顺"比"任务声明不够精确"是更需要优先解决的问题，分类器判定
+  // 不够准的代价用户感知不到，连环追问的挫败感用户是立刻感知到的。
+  // 代价：如果用户第一次提交就被*长度闸门*拦下（roundsUsed 从 0 变 1），第二次提交
+  // （roundsUsed=1）不会再经过语义检查——这个代价可以接受，"问过一次就不再多问"的规则
+  // 保持简单、不需要额外状态去区分"上一次追问是哪个闸门触发的"。
+  if (roundsUsed === 0) {
     const quality = await checkTaskQuality({ taskDeclaration });
     if (!quality.sufficient && quality.followupQuestion) {
       return {

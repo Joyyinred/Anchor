@@ -39,12 +39,21 @@ export function OnboardingPanel({ state, onDone }: OnboardingPanelProps) {
 
   const roundsUsed = state.status === 'NEEDS_FOLLOWUP' ? state.roundsUsed : 0;
   const prompt = state.status === 'NEEDS_FOLLOWUP' ? state.prompt : INITIAL_PROMPT;
+  // 09-05：原样带回上一轮的声明，SW 侧拼接用（见 onboarding-state.ts 顶部注释）——
+  // 这里只是转发，不做拼接，跟这个组件"只管问+显示+转发"的原则一致。
+  const priorDeclaration = state.status === 'NEEDS_FOLLOWUP' ? state.priorDeclaration : undefined;
 
   function submit() {
     const text = input.trim();
     if (!text || waiting) return;
     setWaiting(true);
-    const message: RuntimeMessage = { type: 'ONBOARDING_SUBMIT', text, roundsUsed, timestamp: Date.now() };
+    const message: RuntimeMessage = {
+      type: 'ONBOARDING_SUBMIT',
+      text,
+      roundsUsed,
+      priorDeclaration,
+      timestamp: Date.now(),
+    };
     void chrome.runtime.sendMessage(message);
     setInput('');
   }
