@@ -107,6 +107,27 @@ function discardEvidenceFromBeforeCheckIn(state: BState): void {
 }
 
 /**
+ * "这条通道现在不该说话" —— 清掉自己的持续器再返回 false。
+ *
+ * ★ 09-05 真机 bug 的统一修法。原来每一处提前 return 都是裸 `return false`，只有函数末尾
+ *   那个 `sustainedWithWindow(..., evidence=false, ...)` 会真正清空持续器。问题是：
+ *   **提前 return 的路径恰恰是用户回到正轨时最常命中的**（页面变相关了、开始打字了、
+ *   上一次 check-in 的冷却期还没过），于是证据被冻结在飘走那一刻。
+ *   而 `advancePetState()` 只看 `driftSustainer.since`/`stuckSustainer.since` 是不是非空来
+ *   决定演不演 observing——"这条通道现在根本不该说话"就被桌宠读成了"证据还在累积"，
+ *   用户回到专注页面之后桌宠一直是黄的，变不回绿（Jay 09-05 记录的第 10 条）。
+ *
+ * ★ 语义上这也是对的：持续器记的是"这个条件已经连续成立多久"。条件不成立了——不管是
+ *   因为用户改好了、还是因为闸门让整条通道闭嘴——那段连续性就断了，不该留着下次接着数。
+ *   discardEvidenceFromBeforeCheckIn() 保留不动：它是契约 §3.7 的字面实现，
+ *   冷却为 0 之类的边界下仍然是唯一负责那一条的地方。
+ */
+function silence(sustainer: { since: number | null }): false {
+  sustainer.since = null;
+  return false;
+}
+
+/**
  * 通道一：DRIFT 走神检测
  */
 export function isDrifting(
@@ -123,13 +144,14 @@ export function isDrifting(
   const cooldownMs = scaled(state.checkinCooldownMs, isDemoMode);
   const SUSTAINED_EVIDENCE_MS = scaled(30_000, isDemoMode); // 30s 持续窗口
 
-  // 公共闸口
-  if (state.restUntil > now) return false;
-  if (now - state.lastCheckInTs < cooldownMs) return false;
+  // 公共闸口。★ 全部走 silence()——闸门命中意味着这条通道此刻整个闭嘴，
+  // 攒着的证据必须一起作废，否则桌宠会把"闸门挡住了"误读成"还在累积"（见 silence 注释）。
+  if (state.restUntil > now) return silence(state.driftSustainer);
+  if (now - state.lastCheckInTs < cooldownMs) return silence(state.driftSustainer);
   // 走到这里说明冷却已经过了——把 check-in 之前攒的旧证据作废（契约v4 §3.7），
   // 否则下面的持续器会拿着冷却前的 since 立刻判定"已持续足够久"。
   discardEvidenceFromBeforeCheckIn(state);
-  if (now < ctx.graceUntil) return false;
+  if (now < ctx.graceUntil) return silence(state.driftSustainer);
 
   // DEMO_MODE 下 policy 里的阈值常量本身也要压缩（契约v4 §3.2），否则 demo 事件流用的是
   // 压缩后的小时间戳，而阈值仍是真实 8min/15min，比较永远不成立。
@@ -197,25 +219,30 @@ export function isStuck(
   const cooldownMs = scaled(state.checkinCooldownMs, isDemoMode);
   const SUSTAINED_EVIDENCE_MS = scaled(30_000, isDemoMode);
 
-  // 公共闸口
-  if (state.restUntil > now) return false;
-  if (now - state.lastCheckInTs < cooldownMs) return false;
+  // 公共闸口。理由同 isDrifting，见 silence() 的注释。
+  if (state.restUntil > now) return silence(state.stuckSustainer);
+  if (now - state.lastCheckInTs < cooldownMs) return silence(state.stuckSustainer);
   // 走到这里说明冷却已经过了——把 check-in 之前攒的旧证据作废（契约v4 §3.7），
   // 否则下面的持续器会拿着冷却前的 since 立刻判定"已持续足够久"。
   discardEvidenceFromBeforeCheckIn(state);
-  if (now < ctx.graceUntil) return false;
+  if (now < ctx.graceUntil) return silence(state.stuckSustainer);
 
-  if (!p.stuckChannelEnabled) return false;
-  if (f.systemIdle) return false;
-  if (f.texture !== 'idle') return false;
+  // ★ 下面这几条前置条件同样必须 silence 而不是裸 return false——它们描述的是
+  //   "现在压根不是一个'卡住'的场景"，那之前攒的卡住证据当然作废。
+  //   09-05 真机复现的主因就在这里：用户从不相干页面回到锚点页面并**开始打字**，
+  //   `texture !== 'idle'` 提前 return，陈旧的 stuckSustainer.since 没人清 →
+  //   桌宠读到"仍在累积证据" → 一直黄着变不回绿。
+  if (!p.stuckChannelEnabled) return silence(state.stuckSustainer);
+  if (f.systemIdle) return silence(state.stuckSustainer);
+  if (f.texture !== 'idle') return silence(state.stuckSustainer);
   // 08-30：原来只挡 IRRELEVANT，UNKNOWN 会从缝里漏过去被判"卡住"——跟 DRIFT 通道
   // （`!== 'IRRELEVANT'` → false，UNKNOWN 一律保守挡住）的态度不一致，是契约红线1
   // "判出前一律保守"没有在 STUCK 通道落实到位。改成只放行确认 RELEVANT，语义变成
   // "确认在做正事、却停住不动了，才问是不是卡住了"——跟 DRIFT 通道对 UNKNOWN 一样保守。
   // 代价（0828 已记录、这次确认接受）：分类还没判出来的这段时间窗口内，两条通道都会
   // 沉默——比"对着可能无关的页面误判卡住"更能接受，是漏报换误报的取舍，不是免费修复。
-  if (f.contextRelevance !== 'RELEVANT') return false;
-  if (f.contentFormat === 'short_feed') return false;
+  if (f.contextRelevance !== 'RELEVANT') return silence(state.stuckSustainer);
+  if (f.contentFormat === 'short_feed') return silence(state.stuckSustainer);
 
   // 净时长（扣除上次回答后的影响）
   const effectiveStillnessMs = Math.min(f.stillnessMs, now - state.lastAnswerTs);
