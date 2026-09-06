@@ -1191,3 +1191,107 @@ J7 走通之后开始真机连测，抓出并修掉了一串「收尾 → 新会
 
     **读代码发现的一个可疑点**：`detector.ts` 的 `isDrifting()`/`isStuck()` 开头有两道公共闸门——`state.restUntil > now` 和 `now - state.lastCheckInTs < state.checkinCooldownMs`（冷却期，FOCUSED/FALSE_POSITIVE 5 分钟、DRIFTED 2 分钟）——命中任意一道会直接 `return false`，**不会走到下面清空 `driftSustainer.since`/`stuckSustainer.since` 的那行代码**（`f.contextRelevance !== 'IRRELEVANT'` 分支）。`discardEvidenceFromBeforeCheckIn()` 专门负责清掉"check-in 之前攒的旧证据"，但这一步的调用点在这两道闸门**之后**——也就是说如果这次飘走恰好发生在**上一次 check-in 触发后的冷却期内**，`driftSustainer.since` 会被冻结在冷却期开始那一刻的值，不管用户后面有没有回到锚点页面，`pet-state.ts` 的 `advancePetState()` 读到的 `driftSustainerSince` 一直非空（"仍在累积证据"），桌宠就会一直停在 `observing`，直到整个冷却期结束、走到 `discardEvidenceFromBeforeCheckIn()` 才会被清空。
 
+
+## 0906
+
+### Joy
+
+两件事：排掉 Jay 留的 observing bug（根因比你怀疑的那处更大），以及**把 B16 悬浮桌宠真正做通了**。`npm test` **292/292** 全绿，`npm run typecheck` 两边干净，`npm run build` 正常出包。
+
+1. **observing 卡住不变回 companion —— Jay 的方向对，但定位的那一处不是这次复现的主因**
+
+    jay怀疑的是公共闸门（`restUntil` / 冷却期）挡在清空持续器之前。**这条属实**，但需要"最近刚触发过 check-in"这个前提，覆盖不了jay自己记的那个复现场景。
+
+    我把两条假设都写成了可执行复现（`observing-stale.test.ts`），**两条都真的挂了**。真正的主因在 `isStuck()`——它在公共闸门之后**还有五处裸 `return false`**：
+
+    ```ts
+    if (!p.stuckChannelEnabled) return false;
+    if (f.systemIdle) return false;
+    if (f.texture !== 'idle') return false;          ← 这条是主因
+    if (f.contextRelevance !== 'RELEVANT') return false;
+    if (f.contentFormat === 'short_feed') return false;
+    ```
+
+    复现链（**不需要任何 check-in，所以跟冷却期无关**）：
+
+    | | 发生了什么 | `stuckSustainer.since` |
+    |---|---|---|
+    | ① | 在锚点页面安静看了一会儿（超过 15min 阈值） | 被置上 |
+    | ② | 飘到不相干页面 → `relevance !== 'RELEVANT'` 提前 return | **冻结，没人清** |
+    | ③ | 回到锚点页面**并开始打字** → `texture !== 'idle'` 提前 return | **还是没人清** |
+
+    DRIFT 那条在③被正确清空了（它走到了函数末尾的 `sustainedWithWindow`），**但 STUCK 这条永远走不到末尾**——用户越是"回来认真干活"，`texture` 越不是 `idle`，就越清不掉。猫一直黄着。
+
+    **修法**：新增 `silence(sustainer)`，两个函数里**所有** `return false` 全部换成 `return silence(自己那条持续器)`，共 11 处。语义上这才是对的：**持续器记的是"这个条件已经连续成立多久"；条件不成立了——不管是用户改好了还是闸门让整条通道闭嘴——那段连续性就断了**，不该留着下次接着数。`discardEvidenceFromBeforeCheckIn()` 保留不动（契约 §3.7 的字面实现，冷却为 0 之类的边界下仍然只有它管）。
+
+    **根本教训**：`advancePetState()` 只看 `since` 是否非空来决定演不演 observing，所以**"这条通道现在不该说话"和"证据还在累积"在桌宠眼里长得一模一样**。以后往这两个函数里加任何提前 return，都必须先问一句"要不要 silence"。
+
+2. **B16 悬浮桌宠：做通了**
+
+    09-02 那次做到一半撤回（stash 存着），这次恢复。跟 Jay 09-05 的改动只有 `content-script.ts` 一处冲突，是"各自往文件末尾追加了不同东西"，**两边都保留**（她的 `CHAT_SNIPPET` 抓取 + 我的悬浮层挂载）。
+
+    结构：
+
+    ```
+    content-script.ts ──► mount-floating.ts ──► Shadow DOM
+                                                 ├─ floating.css   外壳：定位/拖拽/穿透
+                                                 ├─ ANCHOR_CSS     三份组件样式（?inline）
+                                                 └─ FloatingHost   拖拽 + 位置持久化
+                                                       └─ AnchorApp  ← side panel 用的同一个
+    ```
+
+    **`AnchorApp` 从 `main.tsx` 抽出来了**，side panel 入口瘦成 3 行，两个宿主共用同一份 UI，不会出现两套逻辑各自演化。**side panel 没删**——零维护成本，悬浮层注不进去的页面（`chrome://` / 商店 / PDF）它永远打得开。
+
+    几个不显眼但必要的决定：
+    - **必须 Shadow DOM**：宿主页面的 `button {…}`、`* { box-sizing }`、自定义字体这类全局规则在真实网站上到处都是，普通 div 在每个站长得都不一样。
+    - **组件不再自己 `import './x.css'`**：那种写法会被 vite 编译成"往宿主文档 head 插 style"——在网页上既污染人家的页面、又照不进 shadow root。改成宿主决定样式怎么进来（`src/ui/styles.ts` 用 `?inline` 取同一批源文件）。
+    - **动态 import 而不是静态**：悬浮层会拉起 ~470KB 的 UI chunk。写成静态 import 的话，它在任何页面加载失败都会**让整个内容脚本模块执行不了**——连带 A 侧的 keydown/scroll/video 信号监听一起没，走神检测被静默干掉。动态 import 把失败关在这一格。
+    - **挂在 `<html>` 不挂 `<body>`**：有些 SPA 路由切换时整块替换 body，挂 body 里猫会跟着被删而内容脚本不会重跑。
+    - **iframe 一律不挂**：内容脚本默认注入进每个同源 iframe，不挡的话一个页面冒出好几只猫。
+
+3. **★ 排查过程本身值得记：连续三次被不可靠的探针带偏**
+
+    这个 bug 查了很久，**三次错误结论全部来自"我用来观察的手段本身不可靠"**，不是代码难懂：
+
+    | # | 错误结论 | 真相 |
+    |---|---|---|
+    | ① | "位置算错了" | 用 `offsetHeight` 算位置，挂载时量到 0 → 卡片被摆到视口外。**而我让"看得见"依赖了"量得准"**，量不准就 `visibility:hidden`，把"位置歪了"放大成"什么都没有" |
+    | ② | "React 没渲染出来" | 探针只在**一个** `requestAnimationFrame` 里看了一眼，而 `createRoot().render()` 是异步的。改成轮询后显示**渲染于 6ms** |
+    | ③ | "祖先把我们藏了" | 打出祖先链才知道：`<html>` 正常，**是我们自己那个宿主 div 被页面的某条 CSS 规则设成了 `display:none`** |
+
+    最终修法是③的直接结果：**宿主的关键样式全部用行内 `!important` 焊死**（`setProperty(prop, value, 'important')`）。行内 `!important` 在层叠顺序里高于作者样式表的 `!important`，页面没有常规手段能盖掉。同时删掉了原来那句 `host.style.all = 'initial'`——它往行内塞了约 350 条声明**却全是普通优先级，一条都挡不住页面的规则**，反而把 display 变成 inline，纯属噪音。
+
+    **教训一（给自己）**：`host in DOM = true` 只证明节点在，不证明**看得见**。这两者之间就是我们连着卡了三轮的那条缝。
+    **教训二（工程习惯）**：在异步渲染管线上，"看一眼"从来不够——要么等到确定信号，要么别下结论。
+    **教训三（内容脚本独有）**：UI 活在别人的网页里，**不能假设自己不会被藏**。"能不能被看见"的那几条属性必须焊死。
+
+    另外加了**构建时间戳**（`vite.config.ts` 的 `define` + 挂载时打进控制台）。起因是 09-02 那轮连着三次真机测的都是**旧代码**——改完必须 `npm run build` → 重新加载扩展 → **硬刷新页面**三步都做，漏最后一步现象就跟改动完全对不上。现在"你看到的是哪一版"是可以直接核对的事实，不用靠回忆。
+
+4. **悬浮形态定稿：平时只有一只猫，鼠标移上去才出按钮**
+
+    中间试过"白卡片常驻"和"按钮常驻"，都不好看。最终形态是猫常驻、`Take a break` / `Done for today` 悬停淡入。
+
+    **中途踩了一个结构性的坑**：第一版把 `pointer-events` 逐个元素地开（猫、气泡、按钮各开各的），于是猫和按钮之间那段空白（约 14px）不吃事件——**鼠标从猫往下移去够按钮，中途 `:hover` 就断了，按钮在手到之前变回不可见、不可点**。在一个大部分区域都穿透的容器里，靠"逐个元素开事件"拼不出一条连续的悬停路径。改成整块 `.anchor-pet` 一起吃事件，中间没有缝。
+
+    两处必须一起做的细节：
+    - **藏起来时必须同时关掉 `pointer-events`**：只设 `opacity: 0` 的话，看不见的按钮照样能点——鼠标扫过右下角就可能误触 "Done for today" 把整场会话结算掉。
+    - **外壳整体 `pointer-events: none`**：背景透明**不等于**不挡点击。原来那 300×250 的方块会吃掉底下网页的所有点击，用户点不到自己正在看的内容。
+    - 说明文字（"Quietly keeping you company."）在悬浮形态下不显示——纯装饰，且压在别人网页上最难保证可读性，要留就得单独加底，等于把刚删掉的卡片请回来。**按钮不一样，它是功能**，所以给了实底+描边+投影，深色模式也配了。
+
+5. **一个不是 bug 的现象，记下来免得下次又查**
+
+    真机上停在 YouTube、`contextRelevance` 已经是 `IRRELEVANT`，但 `action` 一直 `DO_NOTHING`、猫也不变色。查下来**完全符合设计**：
+
+    - **YouTube 故意不在黑名单里**（`perceiver.ts` 明写：youtube/bilibili/reddit/x 这类"学习+娱乐混合站"域级拉黑会误伤真正相关的用法），所以 15s 快速通道不适用，走 5 分钟通用阈值；
+    - 当时 `anchorDetachedMs` 才 187 秒（3.1 分钟）< 300 秒 → `anchorAbandoned = false` → 证据一条都没开始攒 → `driftSustainer.since` 是 null → 猫当然是绿的。
+
+    再等约 2 分钟：5:00 越过阈值 → 猫变黄；5:30 持续窗口满 → check-in。
+
+    **顺带暴露一个可以讨论的设计问题**：`observing` 实际上只是 check-in 前 30 秒的预告，不是"我开始注意你了"的渐进过程。另一种语义是"一判定 IRRELEVANT 就进观察态"——更符合直觉，但**黄猫会出现得频繁得多**（查个资料切一下就黄）。两种都讲得通，我们可以再想想。
+
+6. **留给后面的**
+
+    - **demo 一定要开 `DEMO_MODE`**：真实时间下走神到 check-in 要 5.5 分钟，压缩 120 倍后是 2.75 秒。J10 走查时别忘。
+    - **悬浮桌宠现在会挡住自己那块区域（约 300×200）的网页点击**。可以接受（那里本来就站着一只猫，不是隐形方块），但如果试下来碍事，可以把可悬停区收窄到贴着猫和按钮的实际轮廓——会多几条布局约束。
+    - **470KB 的 UI chunk 仍然每页都会加载**（内容脚本本体只有 2.87KB，UI 是独立 chunk）。先测真实开销，卡再上按需加载。
+
