@@ -1,4 +1,7 @@
-// Anchor · Content Script：交互纹理采集（A4）
+// Anchor · Content Script：交互纹理采集（A4）+ AI 对话抓取（09-05）+ 页面内悬浮桌宠（B16）
+//
+// 三件事刻意放在同一个文件里：它们都是"每个页面各一份"的东西，用到的 chrome.storage/runtime
+// 权限也完全一致，拆成多个内容脚本只会多几份注入开销和几处 manifest 配置。
 import type { ChatSnippetMessage, InteractionMessage, RecheckMessage, RuntimeMessage } from '../messages';
 import { findChatSiteExtractor } from './chat-sites';
 
@@ -109,3 +112,20 @@ if (chatExtractor) {
   });
   chatObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
 }
+
+// ── B16：页面内悬浮桌宠 ──
+// ★ 必须是**动态** import，不能写成文件顶部的静态 import。
+//   悬浮层会拉起一个 ~470KB 的 UI chunk（React + Lottie）。写成静态 import 的话，那个 chunk
+//   在任何一个页面上加载失败（宿主 CSP、网络时序、扩展刚重载导致上下文失效……），
+//   **整个内容脚本模块都执行不了**——连带上面那些 keydown/scroll/video 信号监听一起没了。
+//   也就是说 UI 出问题会静默地把走神检测整个干掉，而这才是产品的命根子。
+//   动态 import 把失败关在这一格里：信号采集照跑，最多是这个页面上没有猫。
+//   顺带的好处是加载被推迟到信号监听都装好之后，不抢那一小段时间。
+void import('./mount-floating')
+  .then(({ mountFloatingPet }) => {
+    console.log('[Anchor floating] chunk loaded');
+    mountFloatingPet();
+  })
+  .catch((err) => {
+    console.warn('[Anchor content script] floating pet failed to load/mount', err);
+  });

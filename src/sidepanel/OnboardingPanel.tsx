@@ -6,7 +6,6 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import type { OnboardingState } from '../platform/onboarding-state';
 import type { RuntimeMessage } from '../platform/messages';
-import './onboarding.css';
 
 const INITIAL_PROMPT = 'What are you working on right now?';
 

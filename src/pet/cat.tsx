@@ -15,7 +15,6 @@ import { useEffect, useRef, useState } from 'react';
 // MV3 扩展页面的 CSP 硬性禁止 unsafe-eval（跟普通网站不同，这条不能靠 manifest 放开），
 // 用不到 expressions 这个功能，改用不含 eval 的 "light" 构建（同一套 SVG 渲染器/类型）。
 import lottie, { type AnimationItem } from 'lottie-web/build/player/lottie_light';
-import './cat.css';
 import catAnimation from './assets/cat.json';
 import type { CuteAnchorPetProps } from './types';
 

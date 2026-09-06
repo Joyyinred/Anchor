@@ -11,7 +11,6 @@ import {
   buildSessionSummaryFooter,
 } from '../engine/wording';
 import type { SessionSummary } from '../platform/session-summary-state';
-import './summary.css';
 
 interface SummaryPanelProps {
   summary: SessionSummary;

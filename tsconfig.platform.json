@@ -2,7 +2,9 @@
   "extends": "./tsconfig.engine.json",
   "compilerOptions": {
     "lib": ["ES2022", "DOM"],
-    "types": ["chrome"],
+    // vite/client 提供 `*.css?inline` 这类模块的类型声明——B16 的 Shadow DOM 宿主
+    // 要把样式当字符串拿到手，没有它 tsc 会报 TS2307 找不到模块。
+    "types": ["chrome", "vite/client"],
     "jsx": "react-jsx"
   },
   "include": ["src/platform", "src/sidepanel","src/pet", "evals"]

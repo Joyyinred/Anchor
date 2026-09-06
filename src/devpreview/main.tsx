@@ -1,6 +1,9 @@
 // 只是本地看一眼各态长什么样，不参与扩展的真实构建。
 // 跑法：npx vite --config Devpreview.vite.config.ts   然后打开终端里打印的地址
 import { createRoot } from 'react-dom/client';
+// 09-02：组件不再自己 import css（内容脚本要把样式注进 Shadow DOM），宿主自己引
+import '../pet/cat.css';
+import '../sidepanel/summary.css';
 import { CuteAnchorPet } from '../pet/cat';
 import { SummaryPanel } from '../sidepanel/SummaryPanel';
 import {
