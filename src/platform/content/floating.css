@@ -1,0 +1,129 @@
+/* Anchor · 悬浮层外壳样式（B16，09-02）。只管"这块东西怎么浮在页面上"，
+   里面的桌宠/起步/收尾三屏样式还是 cat.css / onboarding.css / summary.css 那三份。
+
+   ★ 这份也走 Shadow DOM，所以不需要担心跟宿主网页的类名撞车；但**仍然要提防反向影响**——
+     宿主页面的 `* { transition: ... }` 之类的全局规则穿不进 shadow root，这正是选 Shadow DOM
+     而不是普通 div 的原因。 */
+
+:host {
+  /* 宿主页面的 z-index 战争没有上限，只能取一个足够大的值。
+     2147483647 是 32 位有符号整数的最大值，也是浏览器实际接受的 z-index 上限。 */
+  all: initial;
+}
+
+/* ── 平时：只有一只猫浮在页面上，没有卡片、不挡点击 ──────────────────────────
+   09-06 定的形态。之前是一张白卡片，两个问题：
+     ① 一只猫外面套个白框，不像桌宠像个小挂件；
+     ② **更要命的是那 300×250 的方块会挡住底下网页的点击**——即使背景透明，
+        元素照样吃事件，用户点不到自己正在看的页面。
+   现在的规则：外壳 `pointer-events: none` 整块不吃事件，只有真正看得见的那几处
+   （猫、气泡、按钮、起步/收尾面板）单独打开。 */
+.anchor-floating {
+  pointer-events: none;
+
+  /* 09-06：跟宿主同一个理由——页面上的规则可能命中我们。这几条是"能不能被看见"的底线，
+     写死成 !important，其余装饰性属性不需要这么防。 */
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: fixed;
+  z-index: 2147483647;
+
+  /* 全程透明：不要卡片，就是一只猫浮在页面上。 */
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  cursor: grab;
+  /* 触摸屏上如果不关掉浏览器自己的手势接管，拖动会变成滚动页面。 */
+  touch-action: none;
+  /* 宿主页面的字号可能被改过（有些站点给 html 设 62.5%），这里锁死一个基准，
+     否则桌宠在不同网站上会忽大忽小。 */
+  font-size: 16px;
+  line-height: normal;
+
+  /* ★ 必须给死宽度。三屏（起步输入框 / 桌宠 / 收尾）的内容各自 max-width: 280px，
+     但在一个 position:fixed、没有宽度的容器里，它们会各自收缩到自己的内容宽——
+     于是从起步切到桌宠、再切到收尾，卡片会一屏一个宽度地跳。300 = 280 内容 + 两侧留白。 */
+  width: 300px;
+  box-sizing: border-box;
+
+  /* 收尾视图在统计行多的时候会比较高；笔记本屏 + 缩放之后可能超过一屏。
+     给个上限并允许内部滚动，免得底部的"Start something new"按钮被挤出可视区点不到。 */
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;   /* 滚到底不要把宿主页面一起带着滚 */
+}
+
+/* ── 可悬停区域：必须**连续**，这是上一版按钮点不动的根子 ────────────────────
+   09-06 第一版把 pointer-events 逐个元素地开（猫、气泡、按钮各开各的），于是猫和按钮
+   之间那段空白（stage 的 padding-bottom + 按钮行的 margin-top，约 14px）不吃事件——
+   鼠标从猫往下移去够按钮，中途 `:hover` 就断了，按钮在手到之前变回不可见、不可点。
+   **在一个大部分区域都穿透的容器里，靠"逐个元素开事件"是拼不出一条连续悬停路径的。**
+
+   现在整块 `.anchor-pet` 一起吃事件：猫、空白、按钮全在同一个悬停区域内，中间没有缝，
+   鼠标怎么走 `:hover` 都不会断。
+   代价：桌宠自己那块区域（约 300×200）会挡住底下网页的点击。这是可以接受的——
+   那里本来就站着一只猫，不是"看不见却挡路"的隐形方块（那才是最早要修的问题）。 */
+.anchor-floating .anchor-pet,
+.anchor-floating .anchor-pet-bubble,
+.anchor-floating .anchor-onboarding,
+.anchor-floating .anchor-summary {
+  pointer-events: auto;
+}
+
+/* 说明文字（"Quietly keeping you company."）在悬浮形态下不显示：
+   它是纯装饰，而且直接压在别人的网页上（什么底色都可能）最难保证可读性——
+   要留就得给它单独加底，那等于把已经删掉的卡片请回来。按钮不一样，它是功能。 */
+.anchor-floating .anchor-pet-caption {
+  display: none;
+}
+
+/* 平时只有一只猫；鼠标进入桌宠区域，按钮才淡入。
+   ★ opacity 而不是 display：位置一直占着，浮出来时猫不会往上跳一下。
+   ★ 藏着的时候必须一起关掉 pointer-events——只设 opacity:0 的话，**看不见的按钮照样能点**，
+     鼠标扫过右下角就可能误触 "Done for today" 把整场会话结算掉。
+   ★ 触发条件挂在 `.anchor-pet:hover` 而不是 `.anchor-floating:hover`：外壳是穿透的，
+     它的 :hover 只在鼠标压在某个吃事件的子元素上时才成立，靠不住（见上面那段）。 */
+.anchor-floating .anchor-pet-rest-row {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+.anchor-floating .anchor-pet:hover .anchor-pet-rest-row {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 按钮要在任何网页背景上都看得清，所以给实底 + 描边，不能沿用面板里那种透明底。
+   面板里背景是已知的浅色，页面上不是。 */
+.anchor-floating .anchor-pet-rest-button {
+  background: var(--ap-card, #ffffff);
+  border-color: var(--ap-line, #d9e3df);
+  color: var(--ap-ink-soft, #4c5b57);
+  box-shadow: 0 4px 12px -6px hsl(220 30% 20% / 0.4);
+}
+.anchor-floating .anchor-pet-rest-button:hover {
+  background: var(--ap-paper, #eef3f1);
+  color: var(--ap-ink, #1f2b29);
+}
+
+.anchor-floating[data-dragging='true'] {
+  cursor: grabbing;
+  /* 拖动时禁止选中，否则鼠标划过会把气泡文字整段刷蓝。 */
+  user-select: none;
+  /* 抬起一点，读起来像"被拿在手里" */
+  box-shadow: 0 20px 44px -12px hsl(220 30% 20% / 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  /* 外壳本身没有背景了，深色模式只需要照顾按钮那几条实底。 */
+  .anchor-floating .anchor-pet-rest-button {
+    background: #1c2523;
+    border-color: #2a3533;
+    color: #b7c4c0;
+  }
+  .anchor-floating .anchor-pet-rest-button:hover {
+    background: #141b1a;
+    color: #eef3f1;
+  }
+}

@@ -7,5 +7,5 @@
     "types": ["chrome", "vite/client"],
     "jsx": "react-jsx"
   },
-  "include": ["src/platform", "src/sidepanel","src/pet", "evals"]
+  "include": ["src/platform", "src/sidepanel","src/pet", "src/ui", "evals", "src/vite-env.d.ts"]
 }
