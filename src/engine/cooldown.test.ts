@@ -50,6 +50,7 @@ function driftFrame(now: number): FeatureFrame {
     currentDomain: 'distraction.test',
     currentTitle: 'Distraction',
     currentContentKind: 'video',
+    currentUrl: 'https://distraction.test/',
   };
 }
 

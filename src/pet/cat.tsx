@@ -55,6 +55,8 @@ export function CuteAnchorPet({
   isResting,
   onRestStart,
   onRestEnd,
+  isReminderDue,
+  onRestSnooze,
   onSessionEnd,
   className,
 }: CuteAnchorPetProps) {
@@ -157,12 +159,26 @@ export function CuteAnchorPet({
                 否则跟"卡住了"分不清。 */}
             {state === 'checkin' && onAnswer && (
               <div className="anchor-pet-chips" data-answered={answered}>
+                {/* 09-11 真机反馈：DRIFT 通道下 "Still focused"/"Just researching" 两个按钮
+                    原文很含糊，实际效果差很多——只有 FALSE_POSITIVE（"This counts as work"）
+                    会把域名写进白名单、以后不再对它触发 DRIFT；FOCUSED（"Still on track"）
+                    只清空这一次的证据计时器，不记得这个页面，冷却一过同一个页面还会再问一遍
+                    （真机复现过反复点"Still focused"却一直被重新 check-in）。换了一套更贴近
+                    DRIFT 真实效果的文案。
+                    ★ STUCK 通道原本也有一个 FALSE_POSITIVE（"Just researching"）——查证后
+                    发现它在 STUCK 下跟"什么都不点"没有任何区别（`applyCheckInFeedback()` 只在
+                    `FOCUSED` 分支里让阈值梯子升级，`FALSE_POSITIVE` 分支不存在，落不到任何
+                    有效果的代码），Jay 反馈"不知道什么情况该点这个"——与其编一个文案硬凑出
+                    第三种含义，不如直接去掉这个没有实际作用的选项，STUCK 只保留 FOCUSED（有
+                    持续效果：阈值梯子升级）和 DRIFTED（微重启）两个真正做事的按钮。 */}
                 <button type="button" disabled={answered} onClick={() => answerOnce('FOCUSED')}>
-                  Still focused
+                  {channel === 'DRIFT' ? 'Still on track' : 'Deep in thought'}
                 </button>
-                <button type="button" disabled={answered} onClick={() => answerOnce('FALSE_POSITIVE')}>
-                  Just researching
-                </button>
+                {channel === 'DRIFT' && (
+                  <button type="button" disabled={answered} onClick={() => answerOnce('FALSE_POSITIVE')}>
+                    This counts as work
+                  </button>
+                )}
                 <button type="button" disabled={answered} onClick={() => answerOnce('DRIFTED')}>
                   Drifted - pull me back
                 </button>
@@ -234,8 +250,15 @@ export function CuteAnchorPet({
           )}
         </div>
       )}
-      {isResting && (onRestEnd || onSessionEnd) && (
+      {isResting && (onRestEnd || onSessionEnd || (isReminderDue && onRestSnooze)) && (
         <div className="anchor-pet-rest-row">
+          {/* 09-11：只在提醒正在显示时出现——平时休息中不该多一个按钮抢注意力，
+              这个选项要解决的问题（"提醒赶不走"）也只在提醒真的弹出来时才存在。 */}
+          {isReminderDue && onRestSnooze && (
+            <button type="button" className="anchor-pet-rest-button" onClick={onRestSnooze}>
+              5 more minutes
+            </button>
+          )}
           {onRestEnd && (
             <button type="button" className="anchor-pet-rest-button" onClick={onRestEnd}>
               Back to it

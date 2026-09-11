@@ -24,6 +24,11 @@ A question about prerequisite or foundational knowledge for the task counts as r
 e.g. if the task is "study neural networks", asking "how much calculus do I need to know" or
 "tutorial on classical machine learning basics" is RELEVANT (it's the groundwork for the task),
 not a tangent. Don't require the exact task keywords to appear — infer topical closeness.
+But "prerequisite" means a genuine dependency for THIS specific task, not just belonging to the
+same broad category — e.g. if the task is "study english", a question about "how to learn Swedish"
+is IRRELEVANT (a different language, not a stepping stone toward English), even though both are
+"language learning". Calculus is a real dependency of neural networks; Swedish is not a dependency
+of English, they're siblings under the same category. Don't let a shared category alone justify RELEVANT.
 
 Answer with exactly one of:
 RELEVANT   — the page directly supports the task (docs, code, related video/article, AI chat about the task)
@@ -43,6 +48,7 @@ Output format (JSON only, no extra text):
 | 三态输出 | `RELEVANT` / `IRRELEVANT` / `UNKNOWN`，无其他值 |
 | **低置信回 UNKNOWN** | LLM 返回 `confidence < 0.7` 时，A 侧强制覆盖为 `UNKNOWN`（契约红线1：判出前一律保守） |
 | **一致性** | `temperature: 0`（09-05 新增，`groq.ts` `callGroq()`）——真机复现过同一个标题两次分类给出不同结果，分类是"是/否"判断，一致性比多样性重要 |
+| **max_tokens 余量** | `maxTokens: 500`（09-11 新增，`classifier.ts`，原来吃 `groq.ts` 默认值 200）——`gpt-oss-20b` 是推理模型，reasoning 的 token 算进 max_tokens；真机复现过响应被截断成 `{"verdict":"IRRELEVANT","confidence`（模型已经算出正确答案，只是没写完），`JSON.parse` 失败保守落回 `UNKNOWN`，不是分类判断力的问题 |
 | 缓存键 | `domain + pathname + search + 标题 + contentSnippet`（perceiver.ts `cacheKey()` 已实现，09-05 两次加字段——先加标题：AI 对话类页面 URL 全程不变但话题会飘，只按 URL 缓存会把第一次判定冻结一辈子；标题变了自然是全新的 key，未命中会自动回落 `UNKNOWN` 触发重新分类。后来发现标题也不是每轮对话都更新，又加了 `contentSnippet`（用户刚输入的文字，仅 `claude.ai`）——同一套"key 变了就重判"机制，不是两套逻辑） |
 | 调用时机 | 惰性：每页每会话最多一次，结果写入 `ClassificationCache` |
 | 短路优先于 LLM | 演示域预置缓存表 > sessionWhitelist > short_feed 硬判 > 内置娱乐黑名单 > LLM |
@@ -87,6 +93,8 @@ Output format (JSON only, no extra text):
 **⚠️ 品牌官网长尾（Nike/Adidas/New Balance/Puma/Zara/H&M/Dior 等）不进黑名单**（08-25 明确设计边界）：全球品牌官网数量不可枚举、且不断有新品牌出现，逐个拉黑是维护不完的无底洞。解决思路是分层——只把**数量有限、体量巨大的头部聚合平台**（上面两个表格里的域名）纳入静态黑名单，品牌官网这类**长尾、单点流量**交给已有的 LLM 内容级分类兜底（本文档 §1），在真实 LLM 接入（A8）前默认保守判 `UNKNOWN`（契约红线1）。这也更准确：品牌官网并非总是纯消费页面，例如"调研运动品牌可持续发展策略"这类任务，nike.com/adidas.com 就是相关的，域级拉黑会误判。
 
 命中黑名单直接判 `IRRELEVANT`，但 `sessionWhitelist` 优先级更高——用户一旦手动申诉过某个黑名单域名，当次会话内该域名会短路成 `RELEVANT`，不会被黑名单卡死。
+
+**⚠️ 09-11：申诉（DRIFT+FALSE_POSITIVE）对"混合内容站点"不能按域名白名单**——真机复现：任务"study english"，在 youtube.com 上纠正了一个视频（"this counts as work"）之后，切到 YouTube 推荐栏第一个完全不相关的娱乐视频，也被短路判 `RELEVANT`。根因是白名单写的是 `frame.currentDomain`（裸域名），而 youtube/bilibili/reddit/x/twitter/facebook/pinterest/threads/全部 AI_CHAT_DOMAINS 这批本文档反复强调"内容形态因页面而异、不能域级判定"的站点，域级白名单跟域级黑名单是同一个错误的两面。修法：`heuristics.ts` 新增 `MIXED_CONTENT_DOMAINS`（上述几个列表的并集），命中的域名申诉时改用 `pageKey`（domain+path）粒度白名单，只放行用户实际纠正过的那个具体页面；其余域名（真正意义上大部分页面都算同一回事的那种）维持原有的域级申诉行为不变。见 `docs/契约v4.md` §2 `SessionContext.sessionWhitelist` 的两种粒度说明。
 
 ## 4. 起步教练 Prompt（B6 使用，A2 顺带记录避免重复造）
 

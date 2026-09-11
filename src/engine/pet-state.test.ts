@@ -112,16 +112,18 @@ describe('B9: 迟滞（视觉防抖，MIN_OBSERVING_MS）', () => {
 });
 
 describe('B9: DEMO_MODE 时间压缩（红线5：所有时间常数都要压）', () => {
-  it('demo 模式下迟滞窗口按 120x 压缩，不会拖慢 4 秒触发的演示节奏', () => {
+  // 09-11：压缩倍数从 120x 调到 30x（demo 节奏太快、边操作边讲解跟不上，见 types.ts
+  // DEMO_TIME_SCALE 顶部注释），15s 迟滞窗口现在压到 500ms，不是 125ms。
+  it('demo 模式下迟滞窗口按 30x 压缩，不会拖慢 13 秒触发的演示节奏', () => {
     const m = createPetStateMachine();
     advancePetState(m, 'DO_NOTHING', noEvidence({ driftSustainerSince: now }), now, true);
-    // 真实值 15s → demo 下 125ms；过了 130ms 应该已经退回
-    expect(advancePetState(m, 'DO_NOTHING', noEvidence(), now + 130, true)).toBe('companion');
+    // 真实值 15s → demo 下 500ms；过了 510ms 应该已经退回
+    expect(advancePetState(m, 'DO_NOTHING', noEvidence(), now + 510, true)).toBe('companion');
   });
 
-  it('同样的 130ms 在非 demo 模式下还远没到迟滞窗口，仍是 observing（对照组）', () => {
+  it('同样的 510ms 在非 demo 模式下还远没到迟滞窗口，仍是 observing（对照组）', () => {
     const m = createPetStateMachine();
     advancePetState(m, 'DO_NOTHING', noEvidence({ driftSustainerSince: now }), now);
-    expect(advancePetState(m, 'DO_NOTHING', noEvidence(), now + 130)).toBe('observing');
+    expect(advancePetState(m, 'DO_NOTHING', noEvidence(), now + 510)).toBe('observing');
   });
 });

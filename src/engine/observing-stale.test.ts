@@ -50,6 +50,7 @@ function baseFrame(now: number): FeatureFrame {
     currentDomain: 'anchor.test',
     currentTitle: 'work.md',
     currentContentKind: 'docs',
+    currentUrl: 'https://anchor.test/',
   };
 }
 

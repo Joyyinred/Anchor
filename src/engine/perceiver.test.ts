@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeFeatureFrame, resolveContextRelevance, cacheKey, ClassificationCache } from './perceiver';
+import { computeFeatureFrame, resolveContextRelevance, cacheKey, pageKey, ClassificationCache } from './perceiver';
 import { SignalEvent, SessionContext, PROFILE_PRESETS } from './types';
 
 function mkCtx(overrides: Partial<SessionContext> = {}): SessionContext {
@@ -37,6 +37,33 @@ describe('resolveContextRelevance (signal 1)', () => {
     const ctx = mkCtx({ sessionWhitelist: ['youtube.com'] });
     const event: SignalEvent = { ...anchorEvent, domain: 'youtube.com', url: 'https://www.youtube.com/watch?v=fun123', isAnchor: false };
     expect(resolveContextRelevance(event, ctx, new Map())).toBe('RELEVANT');
+  });
+
+  // 09-11 真机复现：DRIFT+FALSE_POSITIVE 对 youtube.com 这类混合内容站点改成按 pageKey（不是
+  // 域名）白名单（见 frame-pipeline.ts applyCheckInAnswer()）——resolveContextRelevance()
+  // 要能认出这种粒度的条目，纠正的那一个视频判 RELEVANT，同域名下其它没纠正过的视频不受影响。
+  describe('pageKey 粒度的 sessionWhitelist（09-11，混合内容站点按页面而不是域名白名单）', () => {
+    it('sessionWhitelist 存的是 pageKey：命中的那个具体视频判 RELEVANT', () => {
+      const whitelistedUrl = 'https://www.youtube.com/watch?v=fun123';
+      const ctx = mkCtx({ sessionWhitelist: [pageKey('youtube.com', whitelistedUrl)] });
+      const event: SignalEvent = { ...anchorEvent, domain: 'youtube.com', url: whitelistedUrl, isAnchor: false };
+      expect(resolveContextRelevance(event, ctx, new Map())).toBe('RELEVANT');
+    });
+
+    it('同一域名下没被纠正过的另一个视频不受影响——不会被连带放行', () => {
+      const whitelistedUrl = 'https://www.youtube.com/watch?v=fun123';
+      const ctx = mkCtx({ sessionWhitelist: [pageKey('youtube.com', whitelistedUrl)] });
+      const otherVideo: SignalEvent = {
+        ...anchorEvent,
+        domain: 'youtube.com',
+        url: 'https://www.youtube.com/watch?v=someOtherVideo',
+        contentKind: 'unknown',
+        isAnchor: false,
+      };
+      // 没有命中演示预置/白名单/short_feed/黑名单，也没有分类缓存——保守落回 UNKNOWN，
+      // 不是 RELEVANT（这正是这次要修的 bug：域级白名单会让它错误地判成 RELEVANT）。
+      expect(resolveContextRelevance(otherVideo, ctx, new Map())).toBe('UNKNOWN');
+    });
   });
 
   it('short_feed content is hard-ruled IRRELEVANT regardless of domain (场景10：Shorts)', () => {
@@ -219,11 +246,12 @@ describe('computeFeatureFrame: 派生字段（场景1 数据）', () => {
     { timestamp: 45000, domain: 'react.dev', url: 'https://react.dev/reference/hooks', title: 'Hooks Reference', contentKind: 'docs', isAnchor: false, interactionType: 'PASSIVE_SCROLL', entryIntent: 'search', systemIdle: false },
   ];
 
-  it('currentDomain/currentTitle/currentContentKind 取最后一条事件', () => {
+  it('currentDomain/currentTitle/currentContentKind/currentUrl 取最后一条事件', () => {
     const frame = computeFeatureFrame(events, ctx, 45000);
     expect(frame.currentDomain).toBe('react.dev');
     expect(frame.currentTitle).toBe('Hooks Reference');
     expect(frame.currentContentKind).toBe('docs');
+    expect(frame.currentUrl).toBe('https://react.dev/reference/hooks');
   });
 
   it('entryIntent 5值归约为3值：search → purposeful', () => {
@@ -290,6 +318,17 @@ describe('computeFeatureFrame: 派生字段（场景1 数据）', () => {
   it('lastAnchorSnapshot 记录最后一次"RELEVANT 页面"上的有意义交互（不要求是最初的锚点）', () => {
     const frame = computeFeatureFrame(events, ctx, 45000);
     expect(frame.lastAnchorSnapshot).toEqual({ title: 'Hooks Reference', url: 'https://react.dev/reference/hooks', ts: 45000 });
+  });
+
+  // 09-11：pull-back.ts 精确匹配"当初那个 tab 有没有自己飘走"要靠这个字段，SignalEvent.tabId
+  // 必须原样透传进 lastAnchorSnapshot，不能在这一步弄丢。
+  it('lastAnchorSnapshot 透传 SignalEvent.tabId（pull-back.ts 精确匹配用）', () => {
+    const eventsWithTab: SignalEvent[] = [
+      { ...anchorEvent, tabId: 7 },
+      { ...events[1], tabId: 9 },
+    ];
+    const frame = computeFeatureFrame(eventsWithTab, ctx, 45000);
+    expect(frame.lastAnchorSnapshot.tabId).toBe(9);
   });
 
   // 08-30 真机测试暴露的 bug：历史里从来没有一条"RELEVANT 页面上的有意义交互"时（比如
@@ -474,5 +513,50 @@ describe('computeFeatureFrame: stillnessMs 只看当前页自己的交互', () =
     // 当前页是 vscode.dev（锚点），距 t=0 的 ACTIVE_INPUT 已经过去 902000ms，
     // 中途在微信上的那一下不属于当前页，不该把 stillnessMs 重置成距 t=900000 的 2000ms。
     expect(computeFeatureFrame(events, ctx, 902_000).stillnessMs).toBe(902_000);
+  });
+});
+
+// 09-11：真机复现安静看一个仍在播放的相关视频被误判"卡住"——video 的 play 事件只在开始播放
+// 那一刻发一次，持续播放中途不会再发。mediaPlaying 靠"当前页最近一条 MEDIA_PLAY/MEDIA_PAUSE
+// 是不是 PLAY"推断视频当下还在播，供 detector.ts isStuck() 豁免这种场景。
+describe('computeFeatureFrame: mediaPlaying（当前页最近一条 MEDIA_PLAY/MEDIA_PAUSE 是不是 PLAY）', () => {
+  it('最近一次播放事件是 MEDIA_PLAY，之后再也没有新事件（视频持续播放中）→ true', () => {
+    const ctx = mkCtx();
+    const playEvent: SignalEvent = { ...anchorEvent, timestamp: 0, interactionType: 'MEDIA_PLAY' };
+    // 很久之后才再算一帧（心跳/RECHECK 推进 now，没有新事件）——video play 事件本来就不会重发。
+    expect(computeFeatureFrame([playEvent], ctx, 20 * 60_000).mediaPlaying).toBe(true);
+  });
+
+  it('MEDIA_PLAY 之后又 MEDIA_PAUSE → false（真的停了）', () => {
+    const ctx = mkCtx();
+    const playEvent: SignalEvent = { ...anchorEvent, timestamp: 0, interactionType: 'MEDIA_PLAY' };
+    const pauseEvent: SignalEvent = { ...anchorEvent, timestamp: 5_000, interactionType: 'MEDIA_PAUSE' };
+    expect(computeFeatureFrame([playEvent, pauseEvent], ctx, 20 * 60_000).mediaPlaying).toBe(false);
+  });
+
+  it('MEDIA_SEEK 不改变播放状态——暂停后拖进度条，最近的 PLAY/PAUSE 仍是 PAUSE → false', () => {
+    const ctx = mkCtx();
+    const playEvent: SignalEvent = { ...anchorEvent, timestamp: 0, interactionType: 'MEDIA_PLAY' };
+    const pauseEvent: SignalEvent = { ...anchorEvent, timestamp: 5_000, interactionType: 'MEDIA_PAUSE' };
+    const seekEvent: SignalEvent = { ...anchorEvent, timestamp: 6_000, interactionType: 'MEDIA_SEEK' };
+    expect(computeFeatureFrame([playEvent, pauseEvent, seekEvent], ctx, 20 * 60_000).mediaPlaying).toBe(false);
+  });
+
+  it('从来没有播放事件 → false（不是视频页，或视频从没播过）', () => {
+    const ctx = mkCtx();
+    expect(computeFeatureFrame([anchorEvent], ctx, 0).mediaPlaying).toBe(false);
+  });
+
+  it('别的域上的 MEDIA_PLAY 不算当前页在播——只看当前页自己的事件', () => {
+    const ctx = mkCtx();
+    const otherDomainPlay: SignalEvent = {
+      ...anchorEvent,
+      domain: 'www.youtube.com',
+      url: 'https://www.youtube.com/watch?v=abc',
+      timestamp: 0,
+      interactionType: 'MEDIA_PLAY',
+    };
+    const backToAnchor: SignalEvent = { ...anchorEvent, timestamp: 1_000, interactionType: 'IDLE' };
+    expect(computeFeatureFrame([otherDomainPlay, backToAnchor], ctx, 2_000).mediaPlaying).toBe(false);
   });
 });

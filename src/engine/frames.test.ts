@@ -71,6 +71,7 @@ function buildFrame(now: number, partial: Partial<FeatureFrame>, sessionId: stri
     currentDomain: '',
     currentTitle: '',
     currentContentKind: 'unknown',
+    currentUrl: '',
     ...partial,
   };
 }

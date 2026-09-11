@@ -6,7 +6,7 @@
 // 误报"是不是卡住了"。修法：STUCK 也改成只放行确认 RELEVANT（`!== 'RELEVANT'` → false），
 // 跟 DRIFT 对 UNKNOWN 的保守程度对齐。
 import { describe, it, expect } from 'vitest';
-import { evaluateFrame } from './detector';
+import { evaluateFrame, startRest } from './detector';
 import { defaultSessionContext, createInitialBState, PROFILE_PRESETS, type FeatureFrame } from './types';
 
 function baseFrame(now: number, contextRelevance: FeatureFrame['contextRelevance']): FeatureFrame {
@@ -25,6 +25,7 @@ function baseFrame(now: number, contextRelevance: FeatureFrame['contextRelevance
     currentDomain: 'www.youtube.com',
     currentTitle: 'some video',
     currentContentKind: 'video',
+    currentUrl: 'https://www.youtube.com/watch?v=some',
   };
 }
 
@@ -62,6 +63,41 @@ describe('STUCK 通道对 contextRelevance 的闸门（detector.ts isStuck）', 
       ctx,
       state,
       secondNow
+    );
+    expect(action).toBe('CHECK_IN_STUCK');
+  });
+
+  // 09-11 真机复现：安静看一个仍在播放的相关视频（比如一节教程），几分钟后被误判"卡住"。
+  // 根因是上游信号盲区——video 的 play 事件只在开始播放那一刻发一次，持续播放中途不会
+  // 再发，stillnessMs 因此把"专心看着还在播的视频"和"人已经走开"算成同一回事。
+  it('mediaPlaying=true：视频还在播，即使 stillnessMs 早就超过阈值也不判"卡住"', () => {
+    const ctx = defaultSessionContext(0);
+    const state = createInitialBState('CREATOR');
+    const firstNow = 30 * 60_000;
+    evaluateFrame(
+      { ...baseFrame(firstNow, 'RELEVANT'), mediaPlaying: true },
+      'CREATOR', PROFILE_PRESETS.CREATOR, ctx, state, firstNow
+    );
+    const secondNow = firstNow + 31_000;
+    const action = evaluateFrame(
+      { ...baseFrame(secondNow, 'RELEVANT'), mediaPlaying: true },
+      'CREATOR', PROFILE_PRESETS.CREATOR, ctx, state, secondNow
+    );
+    expect(action).toBe('DO_NOTHING');
+  });
+
+  it('mediaPlaying=false（视频已暂停/没有视频）：跟这次改动之前行为一致，正常触发', () => {
+    const ctx = defaultSessionContext(0);
+    const state = createInitialBState('CREATOR');
+    const firstNow = 30 * 60_000;
+    evaluateFrame(
+      { ...baseFrame(firstNow, 'RELEVANT'), mediaPlaying: false },
+      'CREATOR', PROFILE_PRESETS.CREATOR, ctx, state, firstNow
+    );
+    const secondNow = firstNow + 31_000;
+    const action = evaluateFrame(
+      { ...baseFrame(secondNow, 'RELEVANT'), mediaPlaying: false },
+      'CREATOR', PROFILE_PRESETS.CREATOR, ctx, state, secondNow
     );
     expect(action).toBe('CHECK_IN_STUCK');
   });
@@ -142,5 +178,74 @@ describe('DRIFT 通用 anchorDetachedThresholdMs（CREATOR：08-30 从 8min 调�
     const now3 = now2 + 31_000;
     const frame3: FeatureFrame = { ...baseFrame(now3, 'IRRELEVANT'), currentDomain: domain, texture: 'idle', anchorDetachedMs: 5 * 60_000 + 92_000 };
     expect(evaluateFrame(frame3, 'CREATOR', PROFILE_PRESETS.CREATOR, ctx, state, now3)).toBe('CHECK_IN_DRIFT');
+  });
+});
+
+// 09-11 两轮真机反馈的最终结论：
+//   ①休息结束后 stillnessMs 把休息期间的静止也算进"卡住"证据，修法是净时长从
+//     state.restEndedTs（休息真正结束的时刻）重新起算，跟 state.lastAnswerTs 同一个道理。
+//   ②demo mode 下休息窗口（当时是 20min/120=10s）比一个真人"随便切个标签页"所需的真实时间
+//     还短，"休息"事实上从没真的陪用户休息过。改成 restUntil=Infinity，双通道无限期静默直到
+//     用户显式点"Back to it"（endRest()，见 rest.ts）——这也是为什么下面的用例不再手写
+//     state.restUntil，而是直接调用 endRest 的等价效果（手动置 -Infinity + 写 restEndedTs）。
+describe('STUCK 净时长扣除休息影响（detector.ts isStuck 的 effectiveStillnessMs，09-11）', () => {
+  it('刚点了 Back to it：即使 stillnessMs 早就超过阈值（休息期间的静止也算在内），净时长从休息结束那一刻重新起算，不会立刻判卡住', () => {
+    const ctx = defaultSessionContext(0);
+    const state = createInitialBState('CREATOR');
+    const restEndedTs = 30 * 60_000;
+    // 等价于调用 endRest(state, restEndedTs)：restUntil 回到"未休息"的哨兵值，
+    // restEndedTs 记下这一刻。
+    state.restUntil = -Infinity;
+    state.restEndedTs = restEndedTs;
+
+    const now = restEndedTs + 5_000; // 结束休息才 5s
+    const frame: FeatureFrame = {
+      ...baseFrame(now, 'RELEVANT'),
+      stillnessMs: 40 * 60_000, // 远超 CREATOR 15min 阈值——旧逻辑会立刻判定"卡住"
+    };
+    expect(evaluateFrame(frame, 'CREATOR', PROFILE_PRESETS.CREATOR, ctx, state, now)).toBe('DO_NOTHING');
+  });
+
+  it('从休息结束算起，净时长真的超过阈值 + 30s 持续窗口后，仍能正常触发（没被这次修复误伤）', () => {
+    const ctx = defaultSessionContext(0);
+    const state = createInitialBState('CREATOR');
+    const restEndedTs = 30 * 60_000;
+    state.restUntil = -Infinity;
+    state.restEndedTs = restEndedTs;
+
+    // 第一帧：净时长（now - restEndedTs）刚超过 CREATOR 15min 阈值，sustainer 起算。
+    const now1 = restEndedTs + 15 * 60_000 + 1_000;
+    const frame1: FeatureFrame = { ...baseFrame(now1, 'RELEVANT'), stillnessMs: 40 * 60_000 };
+    expect(evaluateFrame(frame1, 'CREATOR', PROFILE_PRESETS.CREATOR, ctx, state, now1)).toBe('DO_NOTHING');
+
+    // 第二帧：再过 31s，30s 持续窗口也够了，触发。
+    const now2 = now1 + 31_000;
+    const frame2: FeatureFrame = { ...baseFrame(now2, 'RELEVANT'), stillnessMs: 40 * 60_000 };
+    expect(evaluateFrame(frame2, 'CREATOR', PROFILE_PRESETS.CREATOR, ctx, state, now2)).toBe('CHECK_IN_STUCK');
+  });
+
+  it('从没休息过（restEndedTs 仍是初始的 -Infinity）：行为不受这次改动影响', () => {
+    const ctx = defaultSessionContext(0);
+    const state = createInitialBState('CREATOR');
+    expect(state.restEndedTs).toBe(-Infinity);
+
+    const now1 = 30 * 60_000;
+    evaluateFrame(baseFrame(now1, 'RELEVANT'), 'CREATOR', PROFILE_PRESETS.CREATOR, ctx, state, now1);
+    const now2 = now1 + 31_000;
+    const action = evaluateFrame(baseFrame(now2, 'RELEVANT'), 'CREATOR', PROFILE_PRESETS.CREATOR, ctx, state, now2);
+    expect(action).toBe('CHECK_IN_STUCK');
+  });
+
+  it('休息期间（restUntil=Infinity）：DRIFT/STUCK 双通道无限期静默，不管休息了多久都不会自动恢复', () => {
+    const ctx = defaultSessionContext(0);
+    const state = createInitialBState('CREATOR');
+    startRest(state, 0);
+    expect(state.restUntil).toBe(Infinity);
+
+    // 休息 10 个真实小时也不会自动恢复——旧设计里 20min 一到就会自动恢复，这正是
+    // 09-11 第二轮真机反馈要改掉的行为。
+    const muchLater = 10 * 60 * 60_000;
+    const frame: FeatureFrame = { ...baseFrame(muchLater, 'IRRELEVANT'), anchorDetachedMs: 999_000 };
+    expect(evaluateFrame(frame, 'CREATOR', PROFILE_PRESETS.CREATOR, ctx, state, muchLater)).toBe('DO_NOTHING');
   });
 });

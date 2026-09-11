@@ -7,7 +7,8 @@ import { SignalEvent, FeatureFrame, SessionContext, scaled } from './types';
 
 export type ContextRelevance = FeatureFrame['contextRelevance'];
 
-// 契约v4 §3.2：DEMO_MODE 下所有时间常数压缩 120 倍——不只是 B 侧的判定阈值，
+// 契约v4 §3.2：DEMO_MODE 下所有时间常数按 DEMO_TIME_SCALE 压缩（09-11 从 120x 调到 30x，
+// 见 types.ts 顶部注释）——不只是 B 侧的判定阈值，
 // A 侧用来圈"最近多久"的窗口常量（纹理窗口、短停豁免）同样要压，否则 demo 的压缩时间轴上
 // 这些窗口相对变得无限大，等于没有窗口。08-28：scaled() 之前这里自己维护了一份，跟 detector.ts
 // 的实现几乎一样却是两份代码——统一改成从 types.ts 导入唯一的规范实现。
@@ -134,7 +135,12 @@ export function resolveContextRelevance(
 
   const key = cacheKey(event.domain, event.url, event.title, event.contentSnippet);
   const domainWhitelisted = ctx.sessionWhitelist.some((w) => domainMatches(event.domain, w));
-  if (domainWhitelisted || ctx.sessionWhitelist.includes(key)) {
+  // 09-11：sessionWhitelist 现在可能存的是一整个域名（老行为，"查资料"场景4），也可能是
+  // 某个具体页面的 pageKey（domain+path，混合内容站点专用，见 frame-pipeline.ts
+  // applyCheckInAnswer() 的注释）——两种粒度共存在同一个数组里，字符串形状天然不会撞
+  // （域名不含 "/"，pageKey 一定含 "/"），这里都认。
+  const pageWhitelisted = ctx.sessionWhitelist.includes(pageKey(event.domain, event.url));
+  if (domainWhitelisted || pageWhitelisted || ctx.sessionWhitelist.includes(key)) {
     return 'RELEVANT';
   }
 
@@ -181,7 +187,7 @@ function computeAnchorSignal(
       resolveContextRelevance(e, ctx, cache) === 'RELEVANT'
     ) {
       lastTs = e.timestamp;
-      snapshot = { title: e.title, url: e.url, ts: e.timestamp };
+      snapshot = { title: e.title, url: e.url, ts: e.timestamp, tabId: e.tabId };
     }
   }
   return { anchorDetachedMs: now - lastTs, lastAnchorSnapshot: snapshot };
@@ -337,6 +343,23 @@ function computeStillnessMs(events: SignalEvent[], now: number): number {
   return now - lastActivityTs;
 }
 
+// ── 辅助测量：当前页最近一条 MEDIA_PLAY/MEDIA_PAUSE 是不是 PLAY（09-11）──
+// `video.play` 事件只在开始播放那一刻发一次，持续播放中途不会再发；不看这个字段的话，
+// stillnessMs/texture 会把"安静看着一个仍在播放的视频"和"人已经走开、视频早停了/根本没播"
+// 算成同一回事（见 isStuck() 里的用法）。MEDIA_SEEK 不改变播放状态（暂停时也能拖进度条），
+// 不参与这个判断，只看 PLAY/PAUSE 谁最后发生。
+function computeMediaPlaying(events: SignalEvent[]): boolean {
+  const current = events[events.length - 1];
+  if (!current) return false;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.domain !== current.domain || e.url !== current.url) continue;
+    if (e.interactionType === 'MEDIA_PLAY') return true;
+    if (e.interactionType === 'MEDIA_PAUSE') return false;
+  }
+  return false;
+}
+
 // ── entryIntent：SignalEvent 5 值 → FeatureFrame 3 值归约 ──
 function reduceEntryIntent(intent: SignalEvent['entryIntent']): FeatureFrame['entryIntent'] {
   switch (intent) {
@@ -371,6 +394,7 @@ export function computeFeatureFrame(
   const texture = computeTexture(visible, now, contextRelevance, previousTexture, isDemoMode);
   const jumpPattern = computeJumpPattern(visible, ctx, cache, now, isDemoMode);
   const stillnessMs = computeStillnessMs(visible, now);
+  const mediaPlaying = computeMediaPlaying(visible);
 
   return {
     timestamp: now,
@@ -380,6 +404,7 @@ export function computeFeatureFrame(
     texture,
     jumpPattern,
     stillnessMs,
+    mediaPlaying,
     entryIntent: current ? reduceEntryIntent(current.entryIntent) : 'unknown',
     contentFormat: current?.contentKind === 'short_feed' ? 'short_feed' : 'standard',
     systemIdle: current?.systemIdle ?? false,
@@ -387,5 +412,6 @@ export function computeFeatureFrame(
     currentDomain: current?.domain ?? '',
     currentTitle: current?.title ?? '',
     currentContentKind: current?.contentKind ?? 'unknown',
+    currentUrl: current?.url ?? '',
   };
 }

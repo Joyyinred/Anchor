@@ -55,10 +55,18 @@ export interface CheckInAnswerMessage {
   // 答 FALSE_POSITIVE 时 SW 用它写回 SessionContext.sessionWhitelist（J6：sessionWhitelist
   // 一直只有读没有写的那个缺口）。STUCK 通道没有意义，可以不传。
   domain?: string;
+  // 09-11：跟 domain 同一份快照的 frame.currentUrl，从 PanelState.currentUrl 原样带回来——
+  // 答 FALSE_POSITIVE 时，命中混合内容站点（youtube.com 等）要按这个具体页面写白名单，
+  // 不能只按 domain（见 frame-pipeline.ts applyCheckInAnswer() 的注释）。
+  currentUrl?: string;
   // 08-30：DRIFT 通道触发时的 frame.lastAnchorSnapshot.url，从 PanelState.anchorUrl
   // 原样带回来——答 DRIFTED 时 SW 用它调 pullBackToAnchor()，要跟触发那一刻 check-in
   // 文案说的是同一个地方，不能读用户点按钮那一刻的最新状态（sticky 面板的同一个道理）。
   anchorUrl?: string;
+  // 09-11：跟 anchorUrl 同一份快照的 tabId，从 PanelState.anchorTabId 原样带回来——
+  // pullBackToAnchor() 用它精确判断"当初那个 tab 是不是还在原地"，不能只按域名找
+  // （见 pull-back.ts 顶部注释）。
+  anchorTabId?: number;
   timestamp: number;
 }
 
@@ -85,7 +93,8 @@ export interface OnboardingSubmitMessage {
 // 这三条是 B 定的 UI 契约，A 侧照 CHECK_IN_ANSWER 已有的模式在 background/index.ts 接即可。
 
 // 用户点了桌宠下方的"Take a break"。SW 收到后调 detector.ts 的 startRest(state, now)
-// —— restUntil = now + 20min，期间 isDrifting/isStuck 的公共闸口会让双通道全静默。
+// —— restUntil = Infinity（09-11 起不再自动到期，见 detector.ts 顶部注释），期间
+// isDrifting/isStuck 的公共闸口会让双通道全静默，直到 REST_END。
 export interface RestStartMessage {
   type: 'REST_START';
   timestamp: number;
@@ -96,6 +105,14 @@ export interface RestStartMessage {
 // restReminderDue() 会继续按老的休息起点判定，提醒不会停。
 export interface RestEndMessage {
   type: 'REST_END';
+  timestamp: number;
+}
+
+// 09-11 新增：用户在休息提醒里点了"再休息 5 分钟"——不是"Back to it"，休息继续，只是让
+// restReminderDue() 接下来 5 分钟（demo mode 压缩）都不再判定"该提醒了"。见 detector.ts
+// snoozeRest() 顶部注释。
+export interface RestSnoozeMessage {
+  type: 'REST_SNOOZE';
   timestamp: number;
 }
 
@@ -125,5 +142,6 @@ export type RuntimeMessage =
   | OnboardingSubmitMessage
   | RestStartMessage
   | RestEndMessage
+  | RestSnoozeMessage
   | SessionEndMessage
   | SessionRestartMessage;

@@ -22,7 +22,7 @@ import {
 } from './frame-pipeline';
 import { pushPanelState, pushMicroRestartToast } from './panel';
 import { pushOnboardingStatus, handleOnboardingSubmit } from './onboarding';
-import { beginRest, endRest, refreshRestReminder } from './rest';
+import { beginRest, endRest, refreshRestReminder, snoozeReminder } from './rest';
 import { pullBackToAnchor } from './pull-back';
 import { recordCheckInAnswer, recordRestStart, endSession, restartSession } from './session-summary';
 import { REST_STATE_KEY } from '../rest-state';
@@ -33,6 +33,20 @@ const HEARTBEAT_ALARM_NAME = 'anchor-heartbeat';
 const HEARTBEAT_PERIOD_MINUTES = 1;
 
 const ALIVE_MARKER_KEY = 'anchor_sw_alive_marker';
+
+// A17（阶段二·信号优雅降级）：这个文件里几乎每条消息处理/事件监听都是 fire-and-forget 的
+// `void (async () => {...})()`——之前没有一处 catch。中间任何一步意外抛错（storage 读写
+// 异常、chrome API 在 SW 生命周期边界上的竞态拒绝、或任何没预料到的情况）都会变成一次静默
+// 的 unhandled rejection：不会让 SW 崩掉（MV3 每条消息本来就是独立的执行上下文，下一条消息
+// 照样能正常处理），但那一次操作会凭空消失，且 Chrome 默认只打一行不带业务上下文的
+// "Uncaught (in promise)"堆栈，排查时完全看不出是哪条消息、哪个环节失败的。
+// 统一收口：给每个 fire-and-forget 调用包一层，出错了至少打一条能一眼看出是"哪条消息处理
+// 失败"的日志——不吞异常，也不让它变成完全没有上下文的裸 rejection。
+function runSafely(label: string, fn: () => Promise<void>): void {
+  fn().catch((err) => {
+    console.error(`[Anchor SW] ${label} failed`, err);
+  });
+}
 
 /**
  * 08-31 真机反馈：chrome://extensions 里把插件关掉再打开，UI 停在上次关闭前的页面（桌宠/
@@ -89,17 +103,19 @@ async function rehydrate(): Promise<void> {
 // `action` 字段后必须显式声明这个行为，否则点图标默认什么都不会发生。
 void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(() => {
   console.log('[Anchor SW] onInstalled');
   chrome.alarms.create(HEARTBEAT_ALARM_NAME, { periodInMinutes: HEARTBEAT_PERIOD_MINUTES });
-  // 存储读写 round-trip，验证 chrome.storage.local 可用
-  await setDemoMode(false);
-  await rehydrate();
+  runSafely('onInstalled', async () => {
+    // 存储读写 round-trip，验证 chrome.storage.local 可用
+    await setDemoMode(false);
+    await rehydrate();
+  });
 });
 
 chrome.runtime.onStartup.addListener(() => {
   console.log('[Anchor SW] onStartup');
-  void rehydrate();
+  runSafely('onStartup/rehydrate', rehydrate);
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -107,11 +123,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     console.log('[Anchor SW] heartbeat fired at', new Date().toISOString());
     // 心跳是 currentTab 的最后一道保险：如果 SW 被回收后一直没有 tab 切换/导航事件重新填充它，
     // 最多 1 分钟后心跳也会把它补回来，不会无限期哑火。
-    void ensureCurrentTab();
+    runSafely('heartbeat/ensureCurrentTab', ensureCurrentTab);
     // 契约v4 §3.1"事件静默 >60s 补帧"：安静看视频/停在锚点页面发呆这类场景不会产生新的
     // SignalEvent，只靠事件触发那条路径，anchorDetachedMs/stillnessMs 会永远停在最后一个
     // 事件的时间戳上——心跳周期性用当前时刻重新跑一次评估，不需要新事件也能让证据继续累积。
-    void (async () => {
+    runSafely('heartbeat', async () => {
       const now = Date.now(); // 一次心跳只有一个"此刻"——frame/result 和推给 panel 的
       // 文案（"X 分钟前"）必须算的是同一个 now，不能分两次各取各的，见 08-27 code review。
       const isDemoMode = await getDemoMode();
@@ -119,29 +135,30 @@ chrome.alarms.onAlarm.addListener((alarm) => {
       // 休息提醒节拍（契约v4 §3.8：15min 首次，之后每 5min）跟"有没有新事件"无关，
       // 独立于 recomputeOnHeartbeat 的 eventHistory 空则 null-return 那条早退路径。
       const restState = await getBStateForSession(ctx);
-      await refreshRestReminder(restState, now);
+      await refreshRestReminder(restState, now, isDemoMode);
       const outcome = await recomputeOnHeartbeat(ctx, now, isDemoMode);
       if (!outcome) return;
       await pushPanelState(outcome.frame, outcome.result, outcome.petState, now);
       console.log('[Anchor SW] heartbeat FeatureFrame', outcome.frame);
       console.log('[Anchor SW] heartbeat DetectionResult', outcome.result);
       console.log('[Anchor SW] graceUntil', ctx.graceUntil, 'stillInGrace', now < ctx.graceUntil);
-    })();
+    });
   }
 });
 
 registerSignalListeners();
 // SW 刚被（重新）启动执行到这里时，currentTab 也是空的——不要等第一个 tabs 事件，主动查一次。
-void ensureCurrentTab();
+runSafely('top-level/ensureCurrentTab', ensureCurrentTab);
 // 见上面 resetIfFreshStart() 顶部注释——每次这个文件的顶层代码执行都要查一遍"活着"标记，
 // 不止 onInstalled/onStartup 那两个事件覆盖的场景（两者都不认"手动关再开"）。
-void resetIfFreshStart();
+runSafely('resetIfFreshStart', resetIfFreshStart);
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
   if (message.type === 'INTERACTION') {
     // 只信任当前被追踪的锚点 tab 发来的交互信号（契约v4 §5.1：单一锚点模型）；
     // 先补一次 currentTab（SW 可能是被这条消息本身唤醒的，currentTab 还是空的）再判断。
-    void ensureCurrentTab().then(() => {
+    runSafely('INTERACTION', async () => {
+      await ensureCurrentTab();
       if (sender.tab?.id !== undefined && isTrackedTab(sender.tab.id)) {
         handleInteractionMessage(message.interactionType);
       }
@@ -154,7 +171,8 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
     // 排查补：这条路径真机验证之前完全没有日志，RECHECK 那次踩过的坑（收不到消息时无法
     // 分清"content script 没发"还是"发了但被过滤"）不要再踩一次——先打一条"收到了"。
     console.log('[Anchor SW] received CHAT_SNIPPET from tab', sender.tab?.id, message.snippet);
-    void ensureCurrentTab().then(() => {
+    runSafely('CHAT_SNIPPET', async () => {
+      await ensureCurrentTab();
       if (sender.tab?.id === undefined || !isTrackedTab(sender.tab.id)) {
         console.log('[Anchor SW] CHAT_SNIPPET ignored — not the tracked tab (tracked =', getTrackedTabId(), ')');
         return;
@@ -173,7 +191,8 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
     // recomputeOnHeartbeat 提前 return 把它在到达底部日志之前就悄悄吞掉了——先打一条"收到了"
     // 的日志，跟最终结果日志分开两处，才能分清是"content script 压根没发"还是"发了但被过滤"。
     console.log('[Anchor SW] received RECHECK from tab', sender.tab?.id, sender.tab?.url);
-    void ensureCurrentTab().then(async () => {
+    runSafely('RECHECK', async () => {
+      await ensureCurrentTab();
       if (sender.tab?.id === undefined || !isTrackedTab(sender.tab.id)) {
         console.log('[Anchor SW] recheck ignored — not the tracked tab (tracked =', getTrackedTabId(), ')');
         return;
@@ -181,6 +200,11 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
       const now = Date.now();
       const isDemoMode = await getDemoMode();
       const ctx = await getOrInitSessionContext();
+      // 09-11：休息提醒节拍原来只在 1 分钟心跳里刷新——demo mode 把 15/5min 阈值压缩到秒级
+      // 之后，光靠 60s 一次的心跳粒度追不上，RECHECK（8s 一次）补上同样一次刷新，
+      // 跟 recomputeOnHeartbeat 在心跳里被两条路径共用是同一个道理（见 frame-pipeline.ts）。
+      const restState = await getBStateForSession(ctx);
+      await refreshRestReminder(restState, now, isDemoMode);
       const outcome = await recomputeOnHeartbeat(ctx, now, isDemoMode);
       if (!outcome) {
         console.log('[Anchor SW] recheck skipped — no eventHistory yet');
@@ -196,11 +220,11 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
   if (message.type === 'CHECK_IN_ANSWER') {
     // 来自 side panel，不是某个特定 tab 发的（sender.tab 通常是 undefined），
     // 不需要走 isTrackedTab 那道锚点 tab 校验。
-    void (async () => {
+    runSafely('CHECK_IN_ANSWER', async () => {
       const ctx = await getOrInitSessionContext();
       const feedback = { channel: message.channel, answer: message.answer };
       const now = Date.now();
-      await applyCheckInAnswer(ctx, feedback, now, message.domain);
+      await applyCheckInAnswer(ctx, feedback, now, message.domain, message.currentUrl);
       await recordCheckInAnswer(feedback, now);
       // 0830 真机测试发现的 bug：这里原来只判断 answer==='DRIFTED'，没管是哪条 channel——
       // STUCK 通道现在（08-30 那次修复后）只在 contextRelevance==='RELEVANT' 时才会触发，
@@ -223,7 +247,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
       let pulledBack = true;
       if (feedback.answer === 'DRIFTED') {
         pulledBack = feedback.channel === 'DRIFT' && message.anchorUrl
-          ? await pullBackToAnchor(message.anchorUrl)
+          ? await pullBackToAnchor(message.anchorUrl, message.anchorTabId)
           : false;
       }
       // check-in 已经处理完了——立刻把 panel 摘出 checkin 态，不能干等下一次心跳/事件
@@ -231,11 +255,11 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
       // pushMicroRestartToast 会先短暂显示 B7 的一句反馈，过会儿再自己摘回空白 companion。
       await pushMicroRestartToast(feedback, pulledBack);
       console.log('[Anchor SW] applied check-in feedback', message.answer, message.channel, 'pulledBack =', pulledBack);
-    })();
+    });
     return;
   }
   if (message.type === 'REST_START') {
-    void (async () => {
+    runSafely('REST_START', async () => {
       const ctx = await getOrInitSessionContext();
       const now = Date.now();
       const state = await getBStateForSession(ctx);
@@ -243,48 +267,61 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender) => {
       persistBState(ctx, state);
       await recordRestStart(now);
       console.log('[Anchor SW] rest started');
-    })();
+    });
     return;
   }
   if (message.type === 'REST_END') {
-    void (async () => {
+    runSafely('REST_END', async () => {
       const ctx = await getOrInitSessionContext();
+      const now = Date.now();
       const state = await getBStateForSession(ctx);
-      await endRest(state);
+      await endRest(state, now);
       persistBState(ctx, state);
       console.log('[Anchor SW] rest ended');
-    })();
+    });
+    return;
+  }
+  if (message.type === 'REST_SNOOZE') {
+    runSafely('REST_SNOOZE', async () => {
+      const ctx = await getOrInitSessionContext();
+      const now = Date.now();
+      const isDemoMode = await getDemoMode();
+      const state = await getBStateForSession(ctx);
+      await snoozeReminder(state, now, isDemoMode);
+      persistBState(ctx, state);
+      console.log('[Anchor SW] rest snoozed 5 more minutes');
+    });
     return;
   }
   if (message.type === 'SESSION_END') {
-    void (async () => {
+    runSafely('SESSION_END', async () => {
       const ctx = await getOrInitSessionContext();
       await endSession(ctx, Date.now());
       console.log('[Anchor SW] session ended');
-    })();
+    });
     return;
   }
   if (message.type === 'SESSION_RESTART') {
-    void (async () => {
+    runSafely('SESSION_RESTART', async () => {
       await restartSession();
       console.log('[Anchor SW] session restarted');
-    })();
+    });
     return;
   }
   if (message.type === 'ONBOARDING_STATUS_REQUEST') {
     // side panel 挂载时问一次——不能只信任面板自己缓存的旧值，SW 可能在这次打开之间
     // 已经完成过一次 onboarding。
-    void (async () => {
+    runSafely('ONBOARDING_STATUS_REQUEST', async () => {
       const ctx = await getOrInitSessionContext();
       await pushOnboardingStatus(ctx);
-    })();
+    });
     return;
   }
   if (message.type === 'ONBOARDING_SUBMIT') {
-    void (async () => {
+    runSafely('ONBOARDING_SUBMIT', async () => {
       const isDemoMode = await getDemoMode();
       await handleOnboardingSubmit(message.text, message.roundsUsed, Date.now(), isDemoMode, message.priorDeclaration);
-    })();
+    });
     return;
   }
   console.log('[Anchor SW] received message', message.type, 'from', sender.tab?.url);

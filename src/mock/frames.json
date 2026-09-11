@@ -324,17 +324,17 @@
     },
     {
       "id": 24,
-      "desc": "DEMO 模式：youtube 娱乐视频，时间压缩 120x，4s 内触发 check-in",
+      "desc": "DEMO 模式：youtube 娱乐视频，时间压缩 30x，11s 内触发 check-in",
       "archetype": "CREATOR",
       "graceUntil": 0,
       "demoMode": true,
-      "initialState": { "driftSustainerSinceOffset": 251, "passiveSinceOffset": 501 },
+      "initialState": { "driftSustainerSinceOffset": 1001, "passiveSinceOffset": 2001 },
       "steps": [
         {
-          "now": 4001,
-          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 4001, "texture": "passive", "currentDomain": "youtube.com" },
+          "now": 10001,
+          "frame": { "contextRelevance": "IRRELEVANT", "anchorDetachedMs": 10001, "texture": "passive", "currentDomain": "youtube.com" },
           "expectedAction": "CHECK_IN_DRIFT",
-          "note": "scaled(8min)=4000ms，scaled(30s)=250ms，scaled(60s)=500ms，全部在 <5000ms 内完成"
+          "note": "09-11 压缩倍数从 120x 调到 30x：scaled(5min)=10000ms，scaled(30s)=1000ms，scaled(60s)=2000ms，全部在 <11000ms 内完成"
         }
       ]
     },

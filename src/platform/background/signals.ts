@@ -66,32 +66,45 @@ export function isAnchorMatch(domain: string, anchor: SessionContext['anchor']):
 
 // A7：真实事件流不再只打日志——喂进感知半（computeFeatureFrame）产出 FeatureFrame，
 // 这条路径替换的是 mock events.json 那条测试专用路径
+//
+// ★ A17（阶段二·信号优雅降级）：这是全项目唯一一条"感知 → 决策 → 面板"的主干路径，
+//   所有信号来源（tab 切换/导航/交互/idle/RECHECK/心跳）最终都会走到这一个函数。
+//   之前这里没有任何 try/catch——链路上任何一步意外失败（storage 读写异常、
+//   recordEventAndEvaluate 内部的分类/持久化出问题、或者任何没预料到的边界情况）都会
+//   变成一次静默的 unhandled rejection：不会让 SW 崩掉（下一次事件来了照样能正常处理），
+//   但那一次信号会凭空消失，且没有任何痕迹——比"崩溃"更难排查，因为看起来像什么都没发生。
+//   包一层 try/catch，在这一个位置就能兜住所有上游信号源的失败，不用在每个监听器里各自处理。
 async function emitSignalEvent(reason: string): Promise<void> {
   if (!currentTab) return;
-  const ctx = await getOrInitSessionContext();
-  const event: SignalEvent = {
-    timestamp: Date.now(),
-    domain: currentTab.domain,
-    url: currentTab.url,
-    title: currentTab.title,
-    contentKind: guessContentKind(currentTab.url, currentTab.domain),
-    isAnchor: isAnchorMatch(currentTab.domain, ctx.anchor),
-    interactionType: currentInteractionType,
-    entryIntent: currentTab.entryIntent,
-    systemIdle,
-    // 只在这条快照还属于当前这个 url 时才带上——见上面 currentContentSnippet 的注释。
-    contentSnippet: currentContentSnippet?.url === currentTab.url ? currentContentSnippet.snippet : undefined,
-  };
-  const isDemoMode = await getDemoMode();
-  const { frame, result, petState } = await recordEventAndEvaluate(event, ctx, isDemoMode);
-  await pushPanelState(frame, result, petState, event.timestamp);
-  console.log(`[Anchor SW] SignalEvent (${reason})`, event);
-  console.log('[Anchor SW] FeatureFrame', frame);
-  console.log('[Anchor SW] DetectionResult', result);
-  // 08-31 排查补：graceUntil（起步后 2 分钟宽限期，detector.ts isDrifting()/isStuck() 排在
-  // 黑名单快速通道之前的公共闸门）之前完全没有日志可查，只能靠时间戳反推，排查效率很低——
-  // 直接打出来，下次一眼能看出是不是撞在这道闸上。
-  console.log('[Anchor SW] graceUntil', ctx.graceUntil, 'stillInGrace', event.timestamp < ctx.graceUntil);
+  try {
+    const ctx = await getOrInitSessionContext();
+    const event: SignalEvent = {
+      timestamp: Date.now(),
+      domain: currentTab.domain,
+      url: currentTab.url,
+      title: currentTab.title,
+      tabId: currentTab.tabId,
+      contentKind: guessContentKind(currentTab.url, currentTab.domain),
+      isAnchor: isAnchorMatch(currentTab.domain, ctx.anchor),
+      interactionType: currentInteractionType,
+      entryIntent: currentTab.entryIntent,
+      systemIdle,
+      // 只在这条快照还属于当前这个 url 时才带上——见上面 currentContentSnippet 的注释。
+      contentSnippet: currentContentSnippet?.url === currentTab.url ? currentContentSnippet.snippet : undefined,
+    };
+    const isDemoMode = await getDemoMode();
+    const { frame, result, petState } = await recordEventAndEvaluate(event, ctx, isDemoMode);
+    await pushPanelState(frame, result, petState, event.timestamp);
+    console.log(`[Anchor SW] SignalEvent (${reason})`, event);
+    console.log('[Anchor SW] FeatureFrame', frame);
+    console.log('[Anchor SW] DetectionResult', result);
+    // 08-31 排查补：graceUntil（起步后 2 分钟宽限期，detector.ts isDrifting()/isStuck() 排在
+    // 黑名单快速通道之前的公共闸门）之前完全没有日志可查，只能靠时间戳反推，排查效率很低——
+    // 直接打出来，下次一眼能看出是不是撞在这道闸上。
+    console.log('[Anchor SW] graceUntil', ctx.graceUntil, 'stillInGrace', event.timestamp < ctx.graceUntil);
+  } catch (err) {
+    console.error(`[Anchor SW] emitSignalEvent(${reason}) failed — this signal is dropped, next one should recover`, err);
+  }
 }
 
 export function isTrackedTab(tabId: number): boolean {
@@ -110,7 +123,16 @@ export function getTrackedTabId(): number | null {
 // 主动查一次当前激活 tab 来补回状态，而不是干等一个可能永远不会来的 tab 切换事件。
 export async function ensureCurrentTab(): Promise<void> {
   if (currentTab) return;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  // A17：chrome.tabs.query 理论上很少失败，但心跳/RECHECK/onInstalled 好几条路径都会调这个
+  // 函数，SW 生命周期边界（刚被唤醒/即将被回收）上的怪异状态不是完全不可能撞到——查不到就
+  // 当这次没查到处理，下一次心跳/事件会再试一次，不需要在这里做任何特殊恢复。
+  let tab: chrome.tabs.Tab | undefined;
+  try {
+    [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  } catch (err) {
+    console.error('[Anchor SW] ensureCurrentTab: chrome.tabs.query failed', err);
+    return;
+  }
   // 等待查询期间，一次真正的 tabs.onActivated 可能已经把 currentTab 填上了，所以不要用这次
   // 可能已经过期的查询结果覆盖掉它（同一类 await-期间竞态，和 onActivated 里的问题是一回事）。
   if (currentTab) return;
@@ -142,7 +164,17 @@ export function handleChatSnippetMessage(snippet: string): void {
 export function registerSignalListeners(): void {
   chrome.tabs.onActivated.addListener(async ({ tabId }) => {
     const seq = ++activationSeq;
-    const tab = await chrome.tabs.get(tabId);
+    // A17：真实存在的竞态，不是理论风险——用户手速快的话，这个 tab 可能在 onActivated 触发
+    // 之后、这次查询真正 resolve 之前就被关掉了，chrome.tabs.get 会 reject（"No tab with
+    // id: N"）。这不是需要恢复的错误——tab 都不在了，本来就没有 currentTab 可切，跟其它
+    // "查不到就跳过，等下一次事件"的分支是同一个处理方式。
+    let tab: chrome.tabs.Tab;
+    try {
+      tab = await chrome.tabs.get(tabId);
+    } catch (err) {
+      console.warn('[Anchor SW] onActivated: chrome.tabs.get failed (tab likely closed mid-query)', tabId, err);
+      return;
+    }
     if (seq !== activationSeq) return; // 已经被更新的一次 onActivated 超过，这次的结果作废
     // chrome://newtab/ 等内部页面刚打开时 tab.url 是空字符串（真实 URL 要等 onUpdated 才补上）。
     // 之前这里直接 return，tabId 没跟着切过去——onUpdated/onCommitted/onHistoryStateUpdated
@@ -168,7 +200,14 @@ export function registerSignalListeners(): void {
   chrome.windows.onFocusChanged.addListener(async (windowId) => {
     if (windowId === chrome.windows.WINDOW_ID_NONE) return; // 焦点离开 Chrome 本身（切到别的应用），不是标签切换
     const seq = ++activationSeq;
-    const [tab] = await chrome.tabs.query({ active: true, windowId });
+    // A17：跟上面 onActivated 同一类竞态——窗口可能在查询期间被关掉。
+    let tab: chrome.tabs.Tab | undefined;
+    try {
+      [tab] = await chrome.tabs.query({ active: true, windowId });
+    } catch (err) {
+      console.warn('[Anchor SW] onFocusChanged: chrome.tabs.query failed (window likely closed mid-query)', windowId, err);
+      return;
+    }
     if (seq !== activationSeq) return;
     if (!tab?.id) return;
     if (currentTab?.tabId === tab.id) return; // 同一个 tab 只是窗口重新拿到焦点，不是真的切换

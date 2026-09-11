@@ -7,7 +7,7 @@
 //
 // 引擎侧 startRest()/restReminderDue() 是 B1 早就写好并测过的（metascenario.test.ts 场景23），
 // 这里不重新实现任何判定，只负责"读写 BState + 把结果推给面板"。
-import { startRest, restReminderDue } from '../../engine/detector';
+import { startRest, restReminderDue, snoozeRest } from '../../engine/detector';
 import type { BState } from '../../engine/detector';
 import { REST_STATE_KEY, type RestState } from '../rest-state';
 
@@ -16,8 +16,9 @@ async function pushRestState(state: RestState): Promise<void> {
 }
 
 /**
- * 用户点了"Take a break"。startRest() 就地写 restStartTs/restUntil（restUntil = now + 20min），
- * 之后 isDrifting/isStuck 的公共闸口 `state.restUntil > now` 会让双通道全静默。
+ * 用户点了"Take a break"。startRest() 就地写 restStartTs/restUntil（restUntil = Infinity，
+ * 09-11 改成不自动到期，见 detector.ts startRest() 顶部注释），之后 isDrifting/isStuck 的
+ * 公共闸口 `state.restUntil > now` 会让双通道全静默，直到 endRest() 被调用。
  * 调用方负责把改过的 state 持久化（跟 applyCheckInAnswer 一样走 setBState/toPersistable）。
  */
 export async function beginRest(state: BState, now: number): Promise<void> {
@@ -26,13 +27,17 @@ export async function beginRest(state: BState, now: number): Promise<void> {
 }
 
 /**
- * 用户在提醒里点了"Back to it"。
+ * 用户点了"Back to it"（面板上随时可点，不需要等到提醒出现——见 pet/types.ts 08-29 的注释）。
  * ★ 必须同时清 restUntil 和 restStartTs：只清 restUntil 的话，restReminderDue() 还会按
  *   老的休息起点继续判定，提醒停不下来（它只读 restStartTs，不读 restUntil）。
+ * ★ 09-11 新增 `restEndedTs = now`：isStuck() 算"净静止时长"要拿它当基准点，扣掉休息期间
+ *   累积的静止（见 detector.ts isStuck() 09-11 的注释）——`restUntil` 现在是哨兵值，不再
+ *   携带"休息在何时结束"这个信息，这个职责转移到这个新字段上。
  */
-export async function endRest(state: BState): Promise<void> {
+export async function endRest(state: BState, now: number): Promise<void> {
   state.restUntil = -Infinity;
   state.restStartTs = -Infinity;
+  state.restEndedTs = now;
   await pushRestState({ isResting: false });
 }
 
@@ -43,8 +48,18 @@ export async function endRest(state: BState): Promise<void> {
  * 提醒文案不在这里生成：面板拿着 restStartTs 自己就能算出"已休息 N 分钟"，
  * 让 SW 每分钟为了一个数字重写一次 storage 不划算（见 main.tsx 里同一处的注释）。
  */
-export async function refreshRestReminder(state: BState, now: number): Promise<void> {
+export async function refreshRestReminder(state: BState, now: number, isDemoMode?: boolean): Promise<void> {
   if (!(state.restUntil > now)) return; // 没在休息（或休息已自然到期），不碰面板状态
-  const due = restReminderDue(state, now);
+  const due = restReminderDue(state, now, isDemoMode);
   await pushRestState({ isResting: true, restStartTs: state.restStartTs, isReminderDue: due });
+}
+
+/**
+ * 用户在提醒里点了"再休息 5 分钟"（不是"Back to it"）：不结束休息，只是让 restReminderDue()
+ * 接下来 5 分钟（demo mode 压缩）都不再判定"该提醒了"——立刻把 isReminderDue 摘掉，
+ * 不用等下一次心跳/RECHECK 才刷新，否则提醒会在按钮点掉之后又闪一下才消失。
+ */
+export async function snoozeReminder(state: BState, now: number, isDemoMode?: boolean): Promise<void> {
+  snoozeRest(state, now, isDemoMode);
+  await pushRestState({ isResting: true, restStartTs: state.restStartTs, isReminderDue: false });
 }

@@ -49,6 +49,11 @@ A question about prerequisite or foundational knowledge for the task counts as r
 e.g. if the task is "study neural networks", asking "how much calculus do I need to know" or
 "tutorial on classical machine learning basics" is RELEVANT (it's the groundwork for the task),
 not a tangent. Don't require the exact task keywords to appear — infer topical closeness.
+But "prerequisite" means a genuine dependency for THIS specific task, not just belonging to the
+same broad category — e.g. if the task is "study english", a question about "how to learn Swedish"
+is IRRELEVANT (a different language, not a stepping stone toward English), even though both are
+"language learning". Calculus is a real dependency of neural networks; Swedish is not a dependency
+of English, they're siblings under the same category. Don't let a shared category alone justify RELEVANT.
 
 Answer with exactly one of:
 RELEVANT   — the page directly supports the task (docs, code, related video/article, AI chat about the task)
@@ -72,12 +77,25 @@ export async function classifyDomainRelevance(input: ClassifyInput): Promise<Con
   // 09-05 真机反馈：同一个标题两次分类给出过不同判定（UNKNOWN 一次、IRRELEVANT 一次）——
   // 分类是"是/否"判断，一致性比多样性重要，temperature=0 让同样的输入尽量给出同样的答案
   // （见 groq.ts callGroq 顶部注释；这个默认值只影响这里，不影响 starter-coach.ts）。
-  const text = await callGroq(GROQ_CLASSIFY_MODEL, buildPrompt(input), { temperature: 0 });
+  // 09-11 真机复现：这条调用一直没传 maxTokens，吃 groq.ts 里的默认值 200——gpt-oss-20b
+  // 是推理模型，reasoning 的 token 算进 max_tokens（groq.ts 顶部注释记过同一个坑：起步教练
+  // 09-05 之前也踩过，200 的预算被 reasoning 吃掉大半，JSON 写到一半被截断）。分类的 prompt
+  // 平时确实短，200 大多数时候够用（这也是当初选它的理由），但这次真机日志里能看到原始响应
+  // 文本是 `{"verdict":"IRRELEVANT","confidence`——模型已经算出了正确答案，只是没写完就被
+  // 截断，JSON.parse 自然失败，只能保守落回 UNKNOWN。不是分类判断力的问题，是预算不够。
+  // 500 给了明显的余量，分类调用本身走 Groq 很快，多这点 token 预算不影响体感速度。
+  const text = await callGroq(GROQ_CLASSIFY_MODEL, buildPrompt(input), { temperature: 0, maxTokens: 500 });
   if (!text) return 'UNKNOWN'; // callGroq 已经打过日志说明具体是没配 key / 请求失败 / 超时中的哪一种
 
   const parsed = extractJsonObject(text) as { verdict?: unknown; confidence?: unknown } | null;
   if (!parsed || !isValidVerdict(parsed.verdict)) {
-    console.warn('[Anchor SW] Groq classify: response did not parse as expected JSON', text);
+    // 09-11：不是每次解析失败都是"截断"，但截断是最容易漏诊的一种——响应文本看起来完全正常，
+    // 只是缺了收尾。加一个纯字符串判断的提示，下次再撞见不用再靠肉眼数括号猜。
+    const looksTruncated = !text.trim().endsWith('}');
+    console.warn(
+      `[Anchor SW] Groq classify: response did not parse as expected JSON${looksTruncated ? ' (looks truncated — likely ran out of max_tokens before finishing)' : ''}`,
+      text
+    );
     return 'UNKNOWN';
   }
   if (typeof parsed.confidence !== 'number' || parsed.confidence < CONFIDENCE_THRESHOLD) {

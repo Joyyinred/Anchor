@@ -14,7 +14,7 @@ import { PANEL_STATE_KEY, type PanelState } from '../panel-state';
 import type { PetState } from '../../pet/types';
 
 function toPanelState(
-  frame: Pick<FeatureFrame, 'lastAnchorSnapshot' | 'currentTitle' | 'currentDomain'>,
+  frame: Pick<FeatureFrame, 'lastAnchorSnapshot' | 'currentTitle' | 'currentDomain' | 'currentUrl'>,
   result: DetectionResult,
   petState: PetState,
   now: number
@@ -23,6 +23,9 @@ function toPanelState(
     // domain 记的是"就是这个域名把我判成走神了"（触发那一刻的 frame.currentDomain）——
     // 答 FALSE_POSITIVE 时要用它写回 sessionWhitelist，不是用户点按钮那一刻恰好在哪个域名
     // （sticky 面板允许气泡还没消失时用户已经切走，见 pushPanelState 上面的注释）。
+    // currentUrl 是同一份快照的完整 URL——09-11：混合内容站点（youtube.com 等）答
+    // FALSE_POSITIVE 时要按这个具体页面白名单，不能只按 domain（见 frame-pipeline.ts
+    // applyCheckInAnswer() 的注释）。
     // anchorUrl 记的是 frame.lastAnchorSnapshot.url——check-in 文案就是拿它拼的
     // （"Last I saw you on X"），答 DRIFTED 时 pull-back 要去同一个地方，两者必须一致。
     return {
@@ -30,7 +33,9 @@ function toPanelState(
       channel: 'DRIFT',
       message: buildCheckInMessage('DRIFT', frame, now),
       domain: frame.currentDomain,
+      currentUrl: frame.currentUrl,
       anchorUrl: frame.lastAnchorSnapshot.url,
+      anchorTabId: frame.lastAnchorSnapshot.tabId,
     };
   }
   if (result.action === 'CHECK_IN_STUCK') {

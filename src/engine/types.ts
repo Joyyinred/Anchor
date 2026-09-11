@@ -23,6 +23,11 @@ export interface SignalEvent {
   // 标题不一定随每轮对话更新（真机复现：连续问了 3 个无关问题，标题纹丝不动），这个字段
   // 是比标题更细粒度、真正跟着每一轮消息走的分类依据。见 docs/契约v4.md §5.3 隐私声明。
   contentSnippet?: string;
+  // 09-11 新增：产生这条事件的浏览器 tab id（平台层 chrome.tabs API 概念，engine 本身不解释
+  // 这个数字，只是原样透传进 lastAnchorSnapshot，供 pull-back.ts 精确判断"当初那个 tab
+  // 有没有自己飘走"——见 pull-back.ts 顶部注释和 docs/契约v4.md §2）。可选：mock/测试场景
+  // 没有真实 tab 概念，不传就是 undefined，不影响任何既有判定逻辑。
+  tabId?: number;
 }
 
 // ── FeatureFrame：A → B 的主缝，B 的所有判断都从这里读数据 ──
@@ -40,6 +45,12 @@ export interface FeatureFrame {
   stillnessMs: number;
   entryIntent: 'purposeful' | 'feed_driven' | 'unknown';
   contentFormat: 'short_feed' | 'standard';
+  // 09-11 新增：当前页最近一条 MEDIA_PLAY/MEDIA_PAUSE 事件是不是 PLAY（真机复现：视频
+  // `play` 事件只在开始播放那一刻发一次，持续播放中途不会再发，`stillnessMs`/`texture`
+  // 因此把"安静看着一个仍在播放的视频"跟"人已经走开"算成同一回事——STUCK 需要这个字段
+  // 单独豁免前者，见 detector.ts isStuck()）。可选：mock/测试场景不传就是 undefined/false，
+  // 不影响任何既有判定逻辑。
+  mediaPlaying?: boolean;
 
   // v4 新增
   systemIdle: boolean;
@@ -47,12 +58,22 @@ export interface FeatureFrame {
     title: string;
     url: string;
     ts: number;
+    // 09-11：产生这份快照的具体 tab（SignalEvent.tabId 原样带过来）。同域名下可能同时有
+    // "当初判相关的那个 tab"和"后来又开的另一个同域不相关 tab"，pull-back.ts 需要这个字段
+    // 才能分清"就是它自己飘走了"还是"这是另一个仍然合法的同域 tab"。
+    tabId?: number;
   };
 
   // 辅助（不参与判定，仅供措辞用）
   currentDomain: string;
   currentTitle: string;
   currentContentKind: SignalEvent['contentKind'];
+  // 09-11 新增：当前页完整 URL。真机复现：答 DRIFT+FALSE_POSITIVE 时只把 frame.currentDomain
+  // 写进 sessionWhitelist——对 youtube.com 这类"内容形态因页面而异"的混合站，域级白名单会让
+  // 用户纠正的那一个视频之外的所有视频（包括纯娱乐的）都跟着被判 RELEVANT。这个字段配合
+  // perceiver.ts 已有的 pageKey() 让 applyCheckInAnswer() 对这类域名改成按具体页面（而不是
+  // 整个域名）白名单，见 frame-pipeline.ts。
+  currentUrl: string;
 }
 
 // ── SessionContext：B 写 / A·B 读 ──
@@ -135,6 +156,14 @@ export interface BStatePersistable {
   // detector.ts 的 startRest() 写入，不再是一个 evaluateFrame() 之外单独游离、容易被忘记
   // 接线的返回值。
   restStartTs: number;
+  // 09-11 新增：上一次休息"真正结束"的时刻（点 Back to it / endRest() 的那一刻）。
+  // `restUntil` 现在是 Infinity（休息中）/-Infinity（未休息）的哨兵值，不再是真实时间戳
+  // （见 detector.ts startRest() 顶部 09-11 的注释），isStuck() 算"净静止时长"要靠这个
+  // 字段扣掉休息期间累积的静止，不能再拿 restUntil 当"休息刚结束"的基准点用。
+  restEndedTs: number;
+  // 09-11 新增：用户点了"再休息 5 分钟"——restReminderDue() 在这个时刻之前都不判定
+  // "该提醒了"，见 detector.ts snoozeRest() 顶部注释。
+  restSnoozedUntil: number;
   // 08-31 新增：下一次 check-in 冷却该用多久，由上一次 applyCheckInFeedback() 的回答决定
   // （DRIFTED 短冷却，FOCUSED/FALSE_POSITIVE 长冷却）；从没回答过时用 CHECKIN_COOLDOWN_MS
   // 这个长的默认值（createInitialBState 初始化）。
@@ -193,6 +222,8 @@ export function createInitialBState(profile: 'CREATOR' | 'READER' | 'VIEWER'): B
     lastAnswerTs: -Infinity,
     restUntil: -Infinity,
     restStartTs: -Infinity,
+    restEndedTs: -Infinity,
+    restSnoozedUntil: -Infinity,
     checkinCooldownMs: CHECKIN_COOLDOWN_MS,
     driftSustainer: { since: null },
     stuckSustainer: { since: null },
@@ -200,12 +231,17 @@ export function createInitialBState(profile: 'CREATOR' | 'READER' | 'VIEWER'): B
   };
 }
 
-// 契约v4 §3.2：DEMO_MODE 下所有时间常数压缩 120 倍。这是唯一的规范实现——types.ts 是
+// 契约v4 §3.2：DEMO_MODE 下所有时间常数压缩。这是唯一的规范实现——types.ts 是
 // engine 内被 perceiver.ts/detector.ts 共同依赖的叶子模块，不会产生循环依赖，其余模块要压缩
 // 时间一律从这里 import，不许各自再写一份（08-28 复盘：detector.ts 和 perceiver.ts 之前各自
 // 维护了一份几乎一样的实现，defaultSessionContext 的 graceUntil 完全没接入压缩，就是因为
 // 没有一个大家都能安全 import 的公共位置）。
-const DEMO_TIME_SCALE = 1 / 120;
+// ★ 09-11：120 倍改成 30 倍——Jay 反馈 120x 下大部分阈值压到 1 秒以内，边操作边讲解跟不上，
+// 演示显得很忙乱。30x 下典型 DRIFT 触发（错过页面 5min+60s 纹理+30s 持续）≈13s、STUCK
+// （静止 15min+30s）≈31s、休息首次提醒（15min）≈30s——节奏放慢到能一边操作一边讲解，
+// 又不至于跟真实模式一样要等几分钟。契约v4 §3.2/§4 场景24 写的"120x"这个具体数字随之更新，
+// 压缩本身仍然只在这一处实现，不受影响。
+const DEMO_TIME_SCALE = 1 / 30;
 export function scaled(ms: number, isDemoMode?: boolean): number {
   return isDemoMode ? ms * DEMO_TIME_SCALE : ms;
 }

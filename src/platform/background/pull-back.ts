@@ -23,24 +23,51 @@ import { domainMatches } from '../../engine/perceiver';
 import { domainOf } from './domain';
 
 /**
- * 把用户切回 `targetUrl` 所在的 tab（同域即可，不要求 URL 完全相同——专注过程中同一个
- * 相关域名下的页面可能变了具体路径，比如 Notion 笔记从一个 block 滚到另一个）。
+ * 把用户切回 `targetUrl` 所在的 tab。
+ *
+ * ★ 09-11 真机复现的 bug：原来只按"同域即可"匹配（专注过程中同一个相关域名下的页面可能
+ *   变了具体路径，比如 Notion 笔记从一个 block 滚到另一个，这个容忍度本身没错）。但 x.com
+ *   这类"同域名混杂相关/不相关内容"的站点（分类prompt-v0.md §3.2 明确点名，所以没进黑名单）
+ *   踩了这条设计的反面：同一个 tab 内 SPA 从相关内容跳到了不相关内容，域名没变，
+ *   check-in 文案已经拿 lastAnchorSnapshot 说了是哪一页，pull-back 却把人带去了那个 tab
+ *   现在实际显示的、完全不同的内容——文案说的和真正带去的对不上。
+ *
+ *   修法：`targetTabId`（当初产生这份快照的具体 tab）参与判断。优先精确匹配"就是那个 tab
+ *   且 URL 还没变"；如果那个 tab 的 URL 已经变了（它自己飘走了），不能再拿它顶上去充数，
+ *   只在**其它** tab 上找同域匹配（这才是"同域名下还有一个合法的相关 tab"的真实场景，
+ *   跟"就是这一个 tab 自己跑题了"是两码事）；两边都找不到就老实返回 false，不假装能带
+ *   用户回到一个已经不在的页面。
+ *
  * 返回是否真的切成功了——调用方要用这个结果决定说哪句话（切成功了才能说"我们回去吧"，
  * 没切成不能承诺）。
  */
-export async function pullBackToAnchor(targetUrl: string): Promise<boolean> {
+export async function pullBackToAnchor(targetUrl: string, targetTabId?: number): Promise<boolean> {
   const targetDomain = domainOf(targetUrl);
   if (!targetDomain) return false; // 压根没有可用的目标（从没有过 RELEVANT 页面的记录）
 
   const tabs = await chrome.tabs.query({});
-  const targetTab = tabs.find((t) => t.url && domainMatches(domainOf(t.url), targetDomain));
-  if (!targetTab?.id) return false;
 
-  await chrome.tabs.update(targetTab.id, { active: true });
+  if (targetTabId !== undefined) {
+    const exact = tabs.find((t) => t.id === targetTabId && t.url === targetUrl);
+    if (exact) return activateTab(exact);
+  }
+
+  // 同域的其它 tab——显式排除 targetTabId 本身，避免把"已经飘走的那个 tab"当成合法候选。
+  const candidate = tabs.find(
+    (t) => t.id !== targetTabId && t.url && domainMatches(domainOf(t.url), targetDomain)
+  );
+  if (!candidate) return false;
+
+  return activateTab(candidate);
+}
+
+async function activateTab(tab: chrome.tabs.Tab): Promise<boolean> {
+  if (!tab.id) return false;
+  await chrome.tabs.update(tab.id, { active: true });
   // 目标可能在另一个窗口里——只 active 那个 tab 的话用户屏幕上什么都不会变，
   // 得把那个窗口也提到前台，否则"拉回去了"这件事用户根本看不见。
-  if (targetTab.windowId !== undefined) {
-    await chrome.windows.update(targetTab.windowId, { focused: true });
+  if (tab.windowId !== undefined) {
+    await chrome.windows.update(tab.windowId, { focused: true });
   }
   return true;
 }

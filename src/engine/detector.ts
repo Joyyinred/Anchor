@@ -25,6 +25,13 @@ export interface BState {
   lastAnswerTs: number;
   restUntil: number;
   restStartTs: number;
+  // 09-11：上一次休息"真正结束"的时刻（点 Back to it 或调用 endRest() 的那一刻），
+  // 跟 restUntil 是两码事——restUntil 现在是 Infinity/-Infinity 的哨兵值（见 startRest()
+  // 顶部注释），不再是一个真实时间戳，不能再拿它当"休息刚结束"的基准点用。
+  restEndedTs: number;
+  // 09-11：用户点了"再休息 5 分钟"——restReminderDue() 在这个时刻之前都不判定"该提醒了"，
+  // 见 snoozeRest() 顶部注释。
+  restSnoozedUntil: number;
   // 08-31：下一次冷却该用多久，applyCheckInFeedback() 按上一次回答写入——见 types.ts
   // BStatePersistable.checkinCooldownMs 顶部注释。
   checkinCooldownMs: number;
@@ -243,9 +250,28 @@ export function isStuck(
   // 沉默——比"对着可能无关的页面误判卡住"更能接受，是漏报换误报的取舍，不是免费修复。
   if (f.contextRelevance !== 'RELEVANT') return silence(state.stuckSustainer);
   if (f.contentFormat === 'short_feed') return silence(state.stuckSustainer);
+  // ★ 09-11 真机复现：安静看一个仍在播放的相关视频（比如一节 20min 的教程），几分钟后被
+  //   判"卡住"弹了 check-in。根因不在这条通道本身，是上游信号的盲区——video 的 `play` 事件
+  //   只在开始播放那一刻发一次，持续播放中途不会再发，`stillnessMs`（也包括 `texture` 窗口
+  //   耗尽后回落 'idle'）因此把"专心看着还在播的视频"和"人已经走开"算成同一回事。
+  //   `f.mediaPlaying`（perceiver.ts computeMediaPlaying()）根据"最近一条 MEDIA_PLAY/PAUSE
+  //   是不是 PLAY"推断视频当下还在播——播着就不该问"是不是卡住了"，这条通道问的是"停住不动
+  //   了"，视频还在播就不是"停住"，跟 DRIFT 通道无关（DRIFT 判的是相关/不相关，不是这个）。
+  if (f.mediaPlaying) return silence(state.stuckSustainer);
 
-  // 净时长（扣除上次回答后的影响）
-  const effectiveStillnessMs = Math.min(f.stillnessMs, now - state.lastAnswerTs);
+  // 净时长（扣除上次回答后的影响，09-11 追加扣除休息的影响）。
+  // ★ 09-11 真机复现：休息结束后不久就弹出 STUCK check-in——`f.stillnessMs` 是从原始信号
+  //   历史算的"距上次真实交互过了多久"（perceiver.ts computeStillnessMs()），完全不知道
+  //   "休息"这件事——用户休息期间当然不会有任何交互，这段真实静止时长照样被算进
+  //   stillnessMs。休息一结束，这段"休息造成的静止"立刻就够格判定"卡住"了：休息和卡住在
+  //   信号层面长得一模一样（都是"没有交互"）。
+  //   跟 `state.lastAnswerTs` 已经在做的事是同一个道理（"回答过 check-in 之后重新起算"）：
+  //   `state.restEndedTs`（点"Back to it"/调用 endRest() 的那一刻，见 startRest() 顶部
+  //   09-11 的注释——`restUntil` 现在是 Infinity/-Infinity 哨兵值，不再是真实时间戳，
+  //   不能再拿它当"休息刚结束"的基准）标记的是"休息真正结束的时刻"，休息期间/刚结束这段
+  //   不该被当成卡住证据，取跟 lastAnswerTs 更晚的那个作为起算点。
+  const stillnessBaselineTs = Math.max(state.lastAnswerTs, state.restEndedTs);
+  const effectiveStillnessMs = Math.min(f.stillnessMs, now - stillnessBaselineTs);
   const stuckThresholdMs = scaled(state.stuckThresholdMs, isDemoMode);
 
   return sustainedWithWindow(
@@ -270,12 +296,20 @@ const REST_REMINDER_TOLERANCE_MS = 60_000;
  * 用户主动点"休息"：就地把 restStartTs/restUntil 写进 BState（不再返回一个调用方需要
  * 自己记得回填的独立对象——之前 createRestState() 就是这样被落下的：返回值算对了，
  * 但从来没有任何调用方把它写回 state.restUntil，isDrifting/isStuck 的公共闸口读到的
- * 永远是初始值，"休息"点了也没用）。restUntil = now + 20min（契约v4 §3.8），期间
- * isDrifting/isStuck 的公共闸口 `state.restUntil > now` 会让双通道全静默。
+ * 永远是初始值，"休息"点了也没用）。
+ *
+ * ★ 09-11：`restUntil` 不再是"now + 20min，到点自动恢复监控"——真机复现：demo mode 下这个
+ *   窗口被压缩到 10s，用户还没来得及真的"休息"（开个新标签页、搜点东西）监控就已经悄悄
+ *   恢复，弹出了 check-in，体验上完全不像"我说了要休息"该有的样子。改成 `Infinity`：
+ *   双通道保持静默，直到用户显式点"Back to it"（`endRest()`）——契约v4 §3.8 原文本来就是
+ *   "可随时继续专注或结束专注"，从没说过"到点自动恢复"，这也更贴合契约原意，不是纯 demo
+ *   mode 补丁，真实模式下同样受益（之前如果用户忘了点回去，20min 一到监控也会悄悄恢复）。
+ *   15min 首次/之后每 5min 的轻声提醒不受影响——那部分只看 restStartTs（下面
+ *   `restReminderDue()`），跟这里的 `restUntil` 无关，继续按 demo mode 压缩。
  */
 export function startRest(state: BState, now: number): BState {
   state.restStartTs = now;
-  state.restUntil = now + 20 * 60_000;
+  state.restUntil = Infinity;
   return state;
 }
 
@@ -287,11 +321,42 @@ export function startRest(state: BState, now: number): BState {
  * 调用方约定：按心跳节拍（不要更密集地）调用本函数，节拍间隔需 ≤ REST_REMINDER_TOLERANCE_MS，
  * 这样每个提醒节拍只会落进一次心跳窗口，不会在同一节拍内被重复触发。
  */
-export function restReminderDue(state: Pick<BState, 'restStartTs'>, now: number): boolean {
+export function restReminderDue(
+  state: Pick<BState, 'restStartTs' | 'restSnoozedUntil'>,
+  now: number,
+  isDemoMode?: boolean
+): boolean {
+  // 09-11 真机反馈：首次提醒弹出后只有"Back to it"，没有"再休息 5 分钟"——用户不想现在
+  // 回去、又不想被打扰，唯一的办法是放着不管，而放着不管每次心跳/RECHECK 都会重新判一次
+  // "到点了吗"，答案照样是"到点了"，提醒因此形同虚设、赶都赶不走。这道闸门给了一个显式的
+  // "我知道了，5 分钟后再问我"出口（snoozeRest()），在此之前不管自然节拍算出来是不是该提醒，
+  // 都先不提醒。
+  if (now < state.restSnoozedUntil) return false;
+  const firstReminderMs = scaled(REST_FIRST_REMINDER_MS, isDemoMode);
+  const repeatReminderMs = scaled(REST_REPEAT_REMINDER_MS, isDemoMode);
+  // ★ 容差本身不压缩：它对应的是真实心跳节拍（chrome.alarms 硬性下限 1 分钟，demo mode
+  //   改不了这个），不是这个函数自己判定用的逻辑阈值。demo mode 下 repeatReminderMs 会被
+  //   压到比这个容差还小（5min/120 ≈ 2.5s < 60s），意味着"过了首次提醒点之后，只要心跳一到
+  //   就一定判定为 due"——这是可以接受的代价：真实心跳的 60s 粒度本来就比压缩后的重复节拍粗，
+  //   没法在这个粒度下还原"每 5min（压缩后）提醒一次"的精确节奏，demo 场景下"提醒常驻直到
+  //   用户点回去"比"静默漏掉提醒"更符合这个功能本身的用途（演示/测试休息提醒确实会弹）。
   const elapsed = now - state.restStartTs;
-  if (elapsed < REST_FIRST_REMINDER_MS) return false;
-  const sinceFirstReminder = elapsed - REST_FIRST_REMINDER_MS;
-  return sinceFirstReminder % REST_REPEAT_REMINDER_MS < REST_REMINDER_TOLERANCE_MS;
+  if (elapsed < firstReminderMs) return false;
+  const sinceFirstReminder = elapsed - firstReminderMs;
+  return sinceFirstReminder % repeatReminderMs < REST_REMINDER_TOLERANCE_MS;
+}
+
+/**
+ * 用户在提醒里点了"再休息 5 分钟"：不结束休息（双通道仍然静默，restUntil 不变），
+ * 只是让 restReminderDue() 在接下来这 5 分钟（demo mode 下按 scaled() 压缩）里都不再判定
+ * "该提醒了"，snoozedUntil 一过，恢复正常节拍——如果那时用户还在休息，会照常再提醒一次。
+ * 用固定时长的哨兵值而不是"往回拨 restStartTs"：后者要跟 restReminderDue() 内部的取模
+ * 算法耦合在一起才能拨对（拨多拨少全看两个常量的相对大小），这里的字段直接表达意图，
+ * 不用反推。
+ */
+export function snoozeRest(state: BState, now: number, isDemoMode?: boolean): BState {
+  state.restSnoozedUntil = now + scaled(REST_REPEAT_REMINDER_MS, isDemoMode);
+  return state;
 }
 
 /**

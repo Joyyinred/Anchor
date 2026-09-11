@@ -6,13 +6,14 @@
 // A（平台层）的职责，跟 eventHistory/currentTab 是同一套"SW 回收后重新水合"模式。
 import type { SignalEvent, SessionContext, FeatureFrame, DetectionResult, BState, BStatePersistable, CheckInFeedback } from '../../engine/types';
 import { createInitialBState, CHECKIN_COOLDOWN_MS } from '../../engine/types';
-import { computeFeatureFrame, cacheKey, pageKey, type ClassificationCache } from '../../engine/perceiver';
+import { computeFeatureFrame, cacheKey, pageKey, domainMatches, type ClassificationCache } from '../../engine/perceiver';
 import { evaluateFrame, applyCheckInFeedback } from '../../engine/detector';
 import { createPetStateMachine, advancePetState } from '../../engine/pet-state';
 import type { PetState } from '../../pet/types';
 import { classifyDomainRelevance } from './classifier';
 import { getBState, setBState, removeBState } from './state';
 import { saveSessionContext } from './session';
+import { MIXED_CONTENT_DOMAINS } from './heuristics';
 
 
 type Archetype = 'CREATOR' | 'READER' | 'VIEWER';
@@ -99,6 +100,15 @@ async function ensureBStateLoaded(sessionId: string, archetype: Archetype): Prom
         // 会是 undefined，冷却闸门算出 NaN 会让冷却形同虚设；退回长冷却默认值兜底，只影响
         // 这次升级后的第一次水合，用户下次真正走一遍 check-in 就会被正确覆盖。
         checkinCooldownMs: persisted.checkinCooldownMs ?? CHECKIN_COOLDOWN_MS,
+        // 09-11 新增字段——同上一条的理由，老版本存盘的 BStatePersistable 没有这个字段，
+        // 水合回来是 undefined，isStuck() 的 `Math.max(lastAnswerTs, restEndedTs)` 会算出
+        // NaN（任何数跟 NaN 比较都是 false），STUCK 通道会整个失效；退回 -Infinity（等价于
+        // "从没休息过"，退回 lastAnswerTs 单独决定基准点），跟 createInitialBState 的初值一致。
+        restEndedTs: persisted.restEndedTs ?? -Infinity,
+        // 09-11 新增字段，同上一条的理由——老版本存盘的 BStatePersistable 没有这个字段，
+        // 水合回来是 undefined 时 `now < undefined` 恒为 false，等价于"从没 snooze 过"，
+        // 本来就是这个字段的初始语义，兜底成 -Infinity 是安全的。
+        restSnoozedUntil: persisted.restSnoozedUntil ?? -Infinity,
         driftSustainer: { since: null },
         stuckSustainer: { since: null },
         passiveSince: null,
@@ -314,14 +324,24 @@ export async function recomputeOnHeartbeat(
  * J6（08-28 补上的 B→A 反向缝）：DRIFT 通道答 FALSE_POSITIVE 时，detector.ts 的注释里写明
  * "调用方自己用 FeatureFrame.currentDomain 去改 SessionContext.sessionWhitelist"——这里
  * 之前一直没做，答"查资料呢"只会清空 driftSustainer，不会真正把当前域名加入白名单免打扰，
- * 下一次同一个域名照样会被判 DRIFT 重新问一遍。domain 由调用方传入（来自触发那一刻的
- * PanelState.domain，不是用户点按钮那一刻恰好在哪个域名，见 panel.ts 的注释）。
+ * 下一次同一个域名照样会被判 DRIFT 重新问一遍。domain/url 由调用方传入（来自触发那一刻的
+ * PanelState.domain/currentUrl，不是用户点按钮那一刻恰好在哪个域名/页面，见 panel.ts 的
+ * 注释——sticky 面板允许气泡还没消失时用户已经切走）。
+ *
+ * ★ 09-11 真机反馈：域级白名单对 youtube.com 这类"内容形态因页面而异"的混合站是错的——
+ *   纠正了一个视频之后，同一会话内这整个域名下所有视频（包括纯娱乐的）都会被短路判
+ *   RELEVANT，跟这批域名"必须按页面判断"的既有设计原则直接冲突（分类prompt-v0.md §3.2、
+ *   heuristics.ts A16 注释都明确写过这条原则，这次是真机复现的时候被违反了）。
+ *   `MIXED_CONTENT_DOMAINS`（heuristics.ts）命中的域名改成按具体页面（`pageKey`）白名单；
+ *   其余域名（真正意义上"整个域名基本都是同一回事"的那种）维持契约v4 场景4"查资料后
+ *   白名单"的原有域级行为——不是所有域名都要收紧，只收紧真机证明有问题的这一类。
  */
 export async function applyCheckInAnswer(
   ctx: SessionContext,
   feedback: CheckInFeedback,
   now: number,
-  domain?: string
+  domain?: string,
+  url?: string
 ): Promise<void> {
   const archetype = ctx.profile.archetype as Archetype;
   const state = await ensureBStateLoaded(ctx.sessionId, archetype);
@@ -329,8 +349,10 @@ export async function applyCheckInAnswer(
   void setBState(ctx.sessionId, toPersistable(state));
 
   if (feedback.channel === 'DRIFT' && feedback.answer === 'FALSE_POSITIVE' && domain) {
-    if (!ctx.sessionWhitelist.includes(domain)) {
-      ctx.sessionWhitelist.push(domain);
+    const isMixedContent = MIXED_CONTENT_DOMAINS.some((d) => domainMatches(domain, d));
+    const entry = isMixedContent && url ? pageKey(domain, url) : domain;
+    if (!ctx.sessionWhitelist.includes(entry)) {
+      ctx.sessionWhitelist.push(entry);
       await saveSessionContext(ctx);
     }
   }

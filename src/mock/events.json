@@ -298,10 +298,10 @@
     },
     {
       "id": 24,
-      "name": "DEMO 模式 · youtube 娱乐视频 4s 触发 CHECK_IN_DRIFT（时间压缩 120x）",
+      "name": "DEMO 模式 · youtube 娱乐视频约 11s 触发 CHECK_IN_DRIFT（时间压缩 30x）",
       "profile": "CREATOR",
       "expectedAction": "CHECK_IN_DRIFT",
-      "_note": "v4 DEMO_MODE：TIME_SCALE=1/120，anchorDetachedThresholdMs=8min→4s，SUSTAINED_EVIDENCE=30s→250ms；从切到 youtube 到 check-in ≤5 秒",
+      "_note": "09-11：压缩倍数从 120x 调到 30x（见 src/engine/types.ts DEMO_TIME_SCALE 顶部注释——120x 下大部分阈值压到 1 秒以内，demo 边操作边讲解跟不上）。TIME_SCALE=1/30，CREATOR anchorDetachedThresholdMs=5min→10s，SUSTAINED_EVIDENCE=30s→1s，纹理 60s 窗口→2s；从切到 youtube 到 check-in 约 11 秒（integration.test.ts 的 tailBufferMs 已同步放大到 8000ms 才能走完这条链路）",
       "events": [
         { "timestamp": 0, "domain": "vscode.dev", "url": "https://vscode.dev/proj", "title": "login.tsx", "contentKind": "code", "isAnchor": true, "interactionType": "ACTIVE_INPUT", "entryIntent": "direct_link", "systemIdle": false },
         { "timestamp": 1000, "domain": "youtube.com", "url": "https://www.youtube.com/watch?v=fun123", "title": "Top 10 Funny Cats", "contentKind": "video", "isAnchor": false, "interactionType": "MEDIA_PLAY", "entryIntent": "feed", "systemIdle": false },

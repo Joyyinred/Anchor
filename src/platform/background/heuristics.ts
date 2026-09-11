@@ -28,6 +28,16 @@ const MUSIC_DOMAINS = ['open.spotify.com', 'music.163.com'];
 const SOCIAL_DOMAINS = ['reddit.com', 'x.com', 'twitter.com', 'facebook.com', 'pinterest.com', 'threads.net'];
 const ARTICLE_DOMAINS = ['wikipedia.org', 'medium.com', 'zhihu.com'];
 
+// 09-11 新增，供 frame-pipeline.ts applyCheckInAnswer() 使用：这三组域名的共同点是"内容形态
+// 因页面而异，不能域级一刀切"（本文件 A16 注释、docs/分类prompt-v0.md §3.2 都明确写过这个
+// 判断，这里只是把它变成一份可以在别处复用的具体名单，不是新决定）。真机复现过的具体后果：
+// 答 DRIFT+FALSE_POSITIVE（"This counts as work"）时如果只把域名写进 sessionWhitelist，
+// youtube.com 上纠正了一个视频之后，同一会话内这整个域名下所有视频（包括纯娱乐的）都会被
+// 短路判 RELEVANT——跟这批域名"必须按页面判断"的既有设计原则直接冲突。这批域名答
+// FALSE_POSITIVE 时改成按具体页面（pageKey）白名单，不再是按域名；其余域名维持契约v4
+// 场景4"查资料后白名单"的原有域级行为不变。
+export const MIXED_CONTENT_DOMAINS = [...VIDEO_DOMAINS, ...SOCIAL_DOMAINS, ...AI_CHAT_DOMAINS];
+
 function matchesDomain(domain: string, list: string[]): boolean {
   return list.some((d) => domainMatches(domain, d));
 }

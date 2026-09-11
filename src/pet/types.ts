@@ -59,6 +59,19 @@ export interface CuteAnchorPetProps {
   /** 用户点了"继续专注"（随时，不限于提醒弹出时）。调用方发 REST_END 消息（那边清空 restUntil）。 */
   onRestEnd?: () => void;
   /**
+   * 09-11 新增：提醒正在显示（restReminderDue() 为 true）。只用来控制下面 onRestSnooze
+   * 对应的"再休息 5 分钟"按钮要不要出现——onRestEnd（"Back to it"）不受这个字段影响，
+   * 休息期间随时可点，跟 08-29 那条注释是同一个原则。
+   */
+  isReminderDue?: boolean;
+  /**
+   * 用户点了"再休息 5 分钟"（只在 isReminderDue 时出现）。调用方发 REST_SNOOZE 消息——
+   * 不结束休息，只是让接下来 5 分钟内不再判定"该提醒了"。09-11 真机反馈：休息提醒弹出后
+   * 只有"Back to it"一个选项，用户不想现在回去又不想被打扰，只能放着不管——但放着不管
+   * 每次评估都会重新判一次"到点了吗"，答案照样是"到点了"，提醒因此形同虚设、赶都赶不走。
+   */
+  onRestSnooze?: () => void;
+  /**
    * 用户点了"结束专注"——契约v4 §3.8 里跟"继续专注"并列的第二个选项，语义是
    * "今天这场专注到此为止"。随时可点：companion/observing/resting 时在锚点下方常驻，
    * checkin 时挪进气泡内部（弱化视觉，不跟三个判定按钮抢注意力）——任何状态都有出口。

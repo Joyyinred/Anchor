@@ -124,7 +124,9 @@ export function AnchorApp() {
       answer,
       channel,
       domain: panelState.domain,
+      currentUrl: panelState.currentUrl,
       anchorUrl: panelState.anchorUrl,
+      anchorTabId: panelState.anchorTabId,
       timestamp: Date.now(),
     };
     void chrome.runtime.sendMessage(message);
@@ -135,7 +137,7 @@ export function AnchorApp() {
   function sendMessage(message: RuntimeMessage) {
     void chrome.runtime.sendMessage(message);
   }
-  function sendRest(type: 'REST_START' | 'REST_END' | 'SESSION_END') {
+  function sendRest(type: 'REST_START' | 'REST_END' | 'REST_SNOOZE' | 'SESSION_END') {
     sendMessage({ type, timestamp: Date.now() });
   }
 
@@ -173,6 +175,8 @@ export function AnchorApp() {
       isResting={restState.isResting}
       onRestStart={() => sendRest('REST_START')}
       onRestEnd={() => sendRest('REST_END')}
+      isReminderDue={restState.isReminderDue}
+      onRestSnooze={() => sendRest('REST_SNOOZE')}
       onSessionEnd={() => sendRest('SESSION_END')}
     />
   );

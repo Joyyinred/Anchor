@@ -109,7 +109,10 @@ function simulate(
   // 真实系统里 chrome.alarms 心跳补帧会在事件静默后继续产帧（§3.1），证据持续器（30s 窗口，
   // 或连续 passive ≥60s）需要事件停止后仍有几帧机会走完累积——这里额外把采样窗口向后延伸一段，
   // 模拟"最后一条浏览器事件之后，用户没再动，心跳帧仍在继续判定"。
-  const tailBufferMs = demoMode ? 2_000 : 120_000;
+  // ★ 09-11：demo 压缩倍数从 120x 调到 30x（见 types.ts DEMO_TIME_SCALE），需要的真实时间
+  // 变成约 4 倍——2000ms 已经不够场景 24 走完 anchorDetachedThresholdMs(scaled 5min=10s)+
+  // texture 60s 窗口(scaled 2s)+30s 持续窗口(scaled 1s) 这条链路，跟着放大到 8000ms。
+  const tailBufferMs = demoMode ? 8_000 : 120_000;
   const finalTs = lastEventTs + tailBufferMs;
 
   const timestamps = new Set<number>();

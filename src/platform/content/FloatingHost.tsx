@@ -196,6 +196,15 @@ export function FloatingHost() {
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
+      // ★ 键盘事件默认会跨 Shadow DOM 边界冒泡到宿主页面的 document。很多聊天类网站
+      //   （claude.ai 在内）在 document 上挂了"按任意键自动聚焦对话框"的全局监听，
+      //   会在浏览器真正插入字符之前把焦点抢回它自己的输入框——于是在我们卡片里的
+      //   textarea 打字，字反而出现在宿主页面的输入框里。在这里拦住冒泡，宿主页面
+      //   就永远看不到这些按键；不影响我们自己 textarea 的默认插入行为（那是每个
+      //   元素自己的默认动作，不依赖事件冒泡到祖先节点）。
+      onKeyDown={(e) => e.stopPropagation()}
+      onKeyUp={(e) => e.stopPropagation()}
+      onKeyPress={(e) => e.stopPropagation()}
     >
       <AnchorApp />
     </div>

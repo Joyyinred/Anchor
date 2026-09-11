@@ -14,9 +14,18 @@ export interface PanelState {
   // 判成走神了"），答 FALSE_POSITIVE 时要把这个域名写回 SessionContext.sessionWhitelist，
   // 而不是用户点按钮那一刻恰好在哪个域名（sticky 面板允许用户在气泡还没消失时已经切走）。
   domain?: string;
+  // 09-11：跟 domain 同一份快照里的 frame.currentUrl——DRIFT+FALSE_POSITIVE 时，`domain`
+  // 命中"内容形态因页面而异"的域名（youtube.com 等，见 heuristics.ts MIXED_CONTENT_DOMAINS）
+  // 要按这个具体页面（不是整个域名）写白名单，否则会把同一域名下其它完全不相关的页面
+  // 也一起放行（真机复现：纠正一个 YouTube 视频后，切到下一个纯娱乐视频也被判 RELEVANT）。
+  currentUrl?: string;
   // 08-30：DRIFT check-in 触发那一刻的 frame.lastAnchorSnapshot.url——check-in 文案
   // "Last I saw you on X"就是拿它拼的，答 DRIFTED 时"带我回去"也要去同一个地方，
   // 不能文案说 X、却把人带去别处（说了不算）。跟上面的 `domain` 是两码事：`domain` 是
   // "把我判成走神的那个页面"（写白名单用），这个是"走神前最后待着的相关页面"（拉回去用）。
   anchorUrl?: string;
+  // 09-11：跟 anchorUrl 同一份快照里的 tabId——pull-back.ts 用它精确判断"当初那个 tab
+  // 是不是还在原地"，不能只靠域名（真机复现：x.com 同一个 tab 从相关内容 SPA 跳到了不相关
+  // 内容，域名没变，pull-back 却把人带去了跳转后的新内容，跟 check-in 文案说的不是同一页）。
+  anchorTabId?: number;
 }

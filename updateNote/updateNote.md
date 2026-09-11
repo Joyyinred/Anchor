@@ -270,7 +270,8 @@ complete B1、B2（引擎侧逻辑），B4 桌宠组件定稿并接入 Lottie �
     - 每次重测起步教练都要 `chrome.storage.local.clear()` + `chrome://extensions` 刷新扩展——onboarding 靠 `taskDeclaration` 是否为占位文案判断该不该显示。
     - Groq key 手动配：`chrome.storage.local.set({ anchor_groq_api_key: 'gsk_...' })`，配在 **Anchor 自己的 Service Worker 控制台**里（不是网页控制台，storage 是分开的）。
     - **声明完任务后必须先在锚点页面上滚动/敲字几下再切走**——`computeAnchorSignal` 要求 `isAnchor` + `ACTIVE_INPUT`/`PASSIVE_SCROLL`/`MEDIA_PAUSE`/`MEDIA_SEEK` 才写快照，光把锚点设对了不够。否则 check-in 文案只能说兜底的 "what you were working on"。**这条要编进 demo 脚本**，评委看的路径很容易踩到。
-    - demo 模式：`chrome.storage.local.set({ anchor_demo_mode: true })`，120x 压缩（不开的话触发一次 DRIFT 要 8 分钟锚点脱离 + 60s 被动 + 30s 持续 ≈ 10 分钟起）。注意心跳 alarm 最短 1 分钟是 Chrome 硬性下限，demo 模式也压不了。
+    - demo 模式：`chrome.storage.local.set({ anchor_demo_mode: true })`，120x 压缩（不开的话触发一次 DRIFT 要 8 分钟锚点脱离 + 60s 被动 + 30s 持续 ≈ 10 分钟起）。注意心跳 alarm 最短 1 分钟是 Chrome 硬性下限，demo 模式也压不了。★ 09-11 更新：压缩倍数已经从 120x 调到 30x，这条记录按当天原始数字保留，最新倍数见 09-11 当天的条目。
+
 
 ## 0828
 ### Jay
@@ -1294,4 +1295,138 @@ J7 走通之后开始真机连测，抓出并修掉了一串「收尾 → 新会
     - **demo 一定要开 `DEMO_MODE`**：真实时间下走神到 check-in 要 5.5 分钟，压缩 120 倍后是 2.75 秒。J10 走查时别忘。
     - **悬浮桌宠现在会挡住自己那块区域（约 300×200）的网页点击**。可以接受（那里本来就站着一只猫，不是隐形方块），但如果试下来碍事，可以把可悬停区收窄到贴着猫和按钮的实际轮廓——会多几条布局约束。
     - **470KB 的 UI chunk 仍然每页都会加载**（内容脚本本体只有 2.87KB，UI 是独立 chunk）。先测真实开销，卡再上按需加载。
+
+## 0911
+### Jay
+
+真机复现新 bug：悬浮桌宠能看见了（B16 已经做通），但打开起步问答的输入框、鼠标点进去打字，字没有出现在我们的悬浮卡片里，而是直接打进了当前网页自己的输入框（复现在 claude.ai：字跑进了它自己的聊天输入框）。
+
+1. **根因**：Shadow DOM 隔样式，不隔事件。`keydown` 默认是"跨 Shadow 边界冒泡"（`composed: true`）的，而这条链路上（`mount-floating.ts`/`FloatingHost.tsx`/`OnboardingPanel.tsx`）没有任何一处调用过 `stopPropagation()`（全仓 grep 零命中）。冒泡链是 `textarea → shadow root → 宿主 div → 宿主页面 document`——claude.ai 这类聊天应用几乎都实现了"页面上按任意键自动聚焦对话框"这个体验优化（在 `document` 上挂全局 `keydown` 监听，收到按键就把焦点抢到它自己的输入框），而这个抢焦点发生在浏览器真正把字符插入"当前聚焦元素"**之前**，于是字符插进了宿主页面的输入框，不是我们卡片里的 `textarea`——现象跟这个机制完全吻合。
+
+2. **修法**（`src/platform/content/FloatingHost.tsx`）：最外层 `.anchor-floating` 容器上加 `onKeyDown`/`onKeyUp`/`onKeyPress`，一律 `e.stopPropagation()`。只挡"继续往宿主页面冒泡"，不挡"浏览器把字符插进当前聚焦元素"——那是目标元素自己的默认动作，不依赖事件冒泡到祖先节点，所以我们卡片自己的输入体验不受影响。没有加 `preventDefault()`。
+
+
+3. **真机复现新 bug：check-in 文案说的是 A 页面，"drifted"按钮却把人带去了 B 页面**。时间线：Page A（x.com，"Avi Chawla on X: CPU vs GPU vs TPU..."）判 RELEVANT → 同一个 tab 内 SPA 跳到 Page B（x.com，"Agents, Loops, Graphs..."）判 UNKNOWN → 切到 booking.com 触发 check-in，文案正确引用了 `lastAnchorSnapshot`（Page A）→ 答"drifted"，pull-back 却把用户切到了那个已经在 Page B 的 tab，跟文案说的不是同一页。
+
+    **根因**（`src/platform/background/pull-back.ts` 的 `pullBackToAnchor()`）：匹配目标 tab 原来**只看域名**（08-30 注释里明确写是故意的，为了容忍"同一个相关域名下路径变了但还是那件事"，比如 Notion 笔记滚到另一个 block）。x.com 这类"同域名混杂相关/不相关内容"的站点（`分类prompt-v0.md` §3.2 明确点名过，所以没进黑名单）正好踩中这条容忍度设计的反面：**同一个 tab** 在同一个域名下从相关内容 SPA 跳到了不相关内容，域名匹配认为"没变"，实际内容早就不是快照那一刻的东西了。
+
+    **修法** 排除已飘走的那个 tab"）：
+    - `SignalEvent` 新增可选字段 `tabId`（`src/engine/types.ts`，同步 `docs/契约v4.md` §2），`FeatureFrame.lastAnchorSnapshot` 也加一份，`perceiver.ts` 的 `computeAnchorSignal()` 原样透传（`src/engine/perceiver.ts`）——纯函数改动，`perceiver.test.ts` 补了一条真机复现同形态的用例（"透传 SignalEvent.tabId"）。
+    - `signals.ts` 构造 `SignalEvent` 时带上 `currentTab.tabId`（这个值本来就在，只是之前没往下传）。
+    - 传输层跟着串一遍：`panel-state.ts`/`panel.ts` 的 `PanelState` 新增 `anchorTabId`（跟 `anchorUrl` 是同一份快照，必须一起走，理由跟 `anchorUrl` 当初加的那条注释一致——文案和"带我回去"必须指向同一个地方）→ `messages.ts` 的 `CheckInAnswerMessage` 新增 `anchorTabId` → `AnchorApp.tsx` 提交时原样带上 → `index.ts` 传给 `pullBackToAnchor()`。
+    - `pull-back.ts` 核心改动：`pullBackToAnchor(targetUrl, targetTabId?)`——**优先精确匹配"就是当初那个 tab 且 URL 还没变"**；如果那个 tab 的 URL 已经变了（它自己飘走了），不能再拿它顶上去充数，**只在其它 tab 上找同域匹配**（这才是"同域名下还有一个合法的相关 tab"的真实场景，跟"就是这一个 tab 自己跑题了"是两码事）；两边都找不到就老实返回 `false`，不假装能带用户回到一个已经不在的页面。`targetTabId` 不传（老快照/mock 场景）时退化成原来的纯域名匹配，不是硬性要求。
+
+    这个修法的代价：如果确实发生了"同一个 tab 在同一相关域名下真的只是换了路径（比如 Notion 换 block）"这种合法场景，现在也会因为"URL 变了"被判定成"飘走"，只有存在另一个独立的同域 tab 时才还能拉回去——两种失效模式没法只靠域名信号完全分开，这次选择的是"宁可少数合法场景拉不回去，也不要把人带去错的页面"。
+
+
+4. **demo mode 下休息功能异常，点了 take a break 等了一会儿没出现 15 分钟后每 5 分钟的提醒**：`startRest()`/`restReminderDue()`（`src/engine/detector.ts`）的 20min 休息窗口、15min 首次提醒、5min 重复提醒这三个阈值原来全是字面量，**完全没有接这个文件里其它所有阈值都在用的 `scaled()` 压缩**——demo mode 开着也没用，不管等多久（真实时间）都要等到真的过 15 分钟才会提醒，这跟"demo mode 应该把等待压缩 120 倍"这条项目里到处遵守的约定不一致。
+
+    **修法**：`startRest(state, now, isDemoMode?)`/`restReminderDue(state, now, isDemoMode?)` 新增可选第三参数，20min/15min/5min 三处都包一层 `scaled()`；**重复提醒的容差窗口（`REST_REMINDER_TOLERANCE_MS`=60s）特意没有压缩**——它对应的是真实心跳节拍（`chrome.alarms` 硬性下限 1 分钟，demo mode 改不了这个物理限制），不是这个函数自己判定用的逻辑阈值，压了反而会因为"命中窗口比心跳粒度还窄"导致 demo mode 下提醒基本从不触发（过犹不及）。代价：demo mode 下过了压缩后的首次提醒点，之后每次心跳/RECHECK 基本都会判定"该提醒"（压缩后 5min≈2.5s 的重复节拍比 60s 心跳粒度还细，没法在这个粒度下精确复现"每 5min 一次"），效果是提醒常驻直到用户点"回去"——这对演示/测试场景是合理的，比静默漏提醒更符合这个功能存在的意义。
+
+    顺带发现并修了第二个相关缺口：**心跳（1 分钟一次）是原来唯一会刷新休息提醒状态的路径，RECHECK（页面可见时 8 秒一次，`index.ts` 已有的更高频评估补帧机制）完全没接这段逻辑**。demo mode 把阈值压到秒级之后，只靠 60 秒一次的心跳粒度追不上，等于打了半个折扣的补丁；照着 `recomputeOnHeartbeat()` 同时被心跳和 RECHECK 两条路径复用的既有模式，在 RECHECK 分支里也加了一次 `refreshRestReminder()` 调用。
+
+    改动的文件：`detector.ts`（核心阈值）、`platform/background/rest.ts` 的 `beginRest()`/`refreshRestReminder()` 透传 `isDemoMode`、`platform/background/index.ts` 三处调用点（心跳分支补传已经取到的 `isDemoMode`；REST_START 分支补一次 `getDemoMode()` 调用；RECHECK 分支新增 `refreshRestReminder()` 调用）。`isDemoMode` 参数全部可选、默认 `undefined`（等价于关闭压缩），老调用方不传参数行为不变。
+
+5. **"demo mode 下休息为什么还会 check-in？"——真机日志确诊：闸门没坏，是真实漏洞，在真实模式下同样存在**。真机复现：demo mode 点了"休息"，YouTube 上停在一个相关视频（`contextRelevance` 全程 `RELEVANT`），几十秒后弹出了一条 STUCK check-in（"hasn't moved in a while..."）。
+
+    **真正的根因**：STUCK 判定用的"净静止时长"——`effectiveStillnessMs = min(f.stillnessMs, now - state.lastAnswerTs)`——里的 `f.stillnessMs` 是 `perceiver.ts` `computeStillnessMs()` 从原始信号历史算出来的"距上次真实交互过了多久"，**完全不知道"休息"这件事**。用户休息期间当然不会有任何交互，这段真实静止时间照样被计入 `stillnessMs`；闸门一放行（休息到期），这段"因为休息而没有动"的静止立刻就够格判定"卡住"了——休息和卡住在信号层面长得一模一样（都是"没有交互"），算法分不清。
+
+    demo mode 只是把这条缝暴露得快：把休息窗口压缩到 10s、STUCK 阈值压缩到 5s（CREATOR 15min/120）之后，几十秒内就能复现。**这条缝在真实（非 demo）模式下同样存在**，只是要等真实 20min 休息 + 10-15min 静止阈值才会暴露，没人会在手动测试里真的等这么久，所以之前一直没被发现——不是这次 demo mode 修复引入的新问题，是揭出了一个更早就存在的潜伏 bug。
+
+    **修法**（`src/engine/detector.ts` `isStuck()`）：净时长的起算点从只看 `state.lastAnswerTs`（回答过 check-in 之后重新起算，这个已经在做）扩展成 `Math.max(state.lastAnswerTs, state.restUntil)`——`restUntil` 标记的是"休息生效到几时"，取两者较晚的一个，跟 `lastAnswerTs` 已经在做的事是同一个道理："休息期间/刚结束这段不该被当成卡住证据"。没休息过时 `restUntil` 是初始值 `-Infinity`，`Math.max` 结果等于原来的 `lastAnswerTs`，行为不变。
+
+
+6. **"安静看视频，本来不应该被 check-in，现在播视频又 check-in 了"：0831 那次"通用修复"当年就没真正覆盖到的一半**。0831 的 note（见上）已经点名过"两个成因（心跳周期 vs `MEDIA_PLAY` 只发一次）"，但当时选的"通用修复"（`RecheckMessage`，8s 一次重新评估）**只解决了心跳周期这一半**，对"`MEDIA_PLAY` 只发一次"这一半完全没碰——那条 note 的"效果"描述里写了"安静看视频"也被覆盖到，回头看是不准确的，RECHECK 让 SW 评估更频繁，但每次评估看到的还是同一个从未更新过的信号，帮不上忙。
+
+    **根因**：`content-script.ts` 的 `video.addEventListener('play', ...)` 只在**开始播放那一刻**触发一次，持续播放中途浏览器不会重复发这个事件。`stillnessMs`（`perceiver.ts` `computeStillnessMs()`，STUCK 通道的核心依据）和 `texture`（120s 窗口内完全没有新事件就回落 `'idle'`，STUCK 通道要求 `texture==='idle'` 才会继续判）因此都把"专心看着一个仍在播放的视频"和"人已经真的走开了"算成同一回事——两者在信号层面完全没区别：都是"过去这段时间没有任何新事件"。一节 15-20 分钟的教程视频，看到一半就会撞上 CREATOR 的 15min 卡住阈值。
+
+    **修法**：给 `FeatureFrame` 加一个新字段 `mediaPlaying?: boolean`（`types.ts`，同步 `docs/契约v4.md` §2），`perceiver.ts` 新增纯函数 `computeMediaPlaying()`——只看当前页（同 domain+url）最近一条 `MEDIA_PLAY`/`MEDIA_PAUSE` 事件，是 `PLAY` 就认为"现在还在播"（`MEDIA_SEEK` 不改变播放状态，暂停时也能拖进度条，不参与判断）。`detector.ts` `isStuck()` 新增一道闸门：`if (f.mediaPlaying) return silence(state.stuckSustainer)`——跟"这不是一个卡住场景"的其它闸门（`short_feed`/`contextRelevance!=='RELEVANT'`）同一个位置、同一个语义："视频还在播就不是'停住不动'，STUCK 问的正是这件事"。不影响 DRIFT 通道——一个不相关页面上安静播着视频依然应该被 DRIFT 判定为持续走神证据，这次只动了 STUCK 这一条通道。
+
+7. **"我在休息期间开了新标签页，确实还会被 check-in"——真机日志揭出休息功能一个更根本的设计问题**。日志显示：点"休息"后先安静留在 YouTube 上（DO_NOTHING，正常），随后开了新标签页搜"instagram"、跳去 instagram.com，在**这个新 tab** 上弹出了 `CHECK_IN_DRIFT`——逐帧核对时间戳，从"rest started"到触发 DRIFT，中间已经过去了将近 30 秒，而 demo mode 下休息窗口（上一条第4点刚修好）只有约 10 秒——**闸门本身没坏，休息窗口在用户开新标签页之前就已经自然到期了**。
+
+    **真正的问题**：`state.restUntil = now + 20min` 到点后会**自动恢复监控**，不需要用户做任何确认。demo mode 把这个窗口压缩到 10 秒后，问题被放大到肉眼可见——一个真人"随便开个新标签页、打字搜点什么"本身就要花掉不止 10 秒真实时间，还没等用户真的做完"休息该做的事"，压缩后的窗口就已经过去，监控已经在背后悄悄恢复了。这不是 demo mode 专属：`docs/契约v4.md` §3.8 原文写的是"可随时**继续专注**或**结束专注**"——两个都是用户主动动作，从没说过"到点自动恢复"，"到点自动恢复"是实现时加上去的、契约原文没有明确要求的行为，只是真实模式下 20 分钟窗口够长，没人手动测到过这个体验缺口。
+
+    **休息不再自动到期，双通道无限期静默，直到用户显式点"Back to it"才恢复监控**（面板上这个按钮休息期间随时可点，不需要等提醒出现）。
+
+    **实现**（`src/engine/detector.ts` + `src/engine/types.ts` + `src/platform/background/rest.ts` + `index.ts`）：
+    - `startRest()` 不再接 `isDemoMode`、不再算 `now + scaled(20min, ...)`，直接把 `restUntil` 设成 `Infinity`——`state.restUntil > now` 这道公共闸门因此无限期为真，直到 `endRest()` 主动把它写回 `-Infinity`。
+    - 新增 `BStatePersistable.restEndedTs`（`types.ts`，同步 `docs/契约v4.md` §3.8/§2）：上一次休息真正结束的时刻。`restUntil` 现在是 `Infinity`/`-Infinity` 的哨兵值，不再携带"休息何时结束"这个信息，这个职责转移到新字段上——上一条（第4点）里 `isStuck()` 拿来扣休息静止时长的基准点，从 `state.restUntil` 改成 `state.restEndedTs`（`Math.max(lastAnswerTs, restEndedTs)`）。
+    - `endRest()`（`rest.ts`）新增 `now` 参数，把 `restEndedTs = now` 一并写入；`index.ts` 的 `REST_END` 分支补一次 `Date.now()` 传进去。`REST_START` 分支不再需要 `getDemoMode()`（`beginRest()`/`startRest()` 都不再吃这个参数了）。
+    - `frame-pipeline.ts` 的 `ensureBStateLoaded()` 补了 `restEndedTs: persisted.restEndedTs ?? -Infinity` 的水合兜底，跟 `checkinCooldownMs` 那条 08-31 的兜底同一个理由——老版本存盘的 `BStatePersistable` 没有这个新字段，水合回来是 `undefined` 的话 `Math.max` 会算出 `NaN`，STUCK 通道会整个失效。
+    - `restReminderDue()`（15min 首次/5min 重复的轻声提醒）完全不受影响——它一直只看 `restStartTs`，不看 `restUntil`，"到点自动恢复监控"和"到点开始提醒"本来就是两件独立的事，这次只改了前者。
+    - `pet-state.ts` 的 `advancePetState()` 不用改：它读 `restUntil > now` 判断要不要强制显示"陪伴"态，`Infinity > now` 永远为真，休息期间行为不变。
+
+8. **"每 5 分钟提醒实际效果并不好"：休息提醒弹出后只有"Back to it"一个选项，没有"再休息 5 分钟"**。上一条把休息改成不自动到期之后，提醒本身（15min 首次/5min 重复，"直到用户回来"）成了唯一还在按固定节拍运作的部分——但用户如果这时候还不想回去、又不想被继续打扰，除了置之不理没有别的选择，而置之不理的后果是**每次评估都会重新判一次"到点了吗"，答案照样是"到点了"，提醒因此赶不走**，虽然不是 bug（`isReminderDue` 本来就该在这段时间内持续为真），但作为一个"选项"确实没有真正发挥作用。
+
+    **加法**：提醒里新增"再休息 5 分钟"，语义是"我知道到点了，但先不回去，5 分钟后再问我一次"——跟"Back to it"（结束休息）是两件不同的事：休息本身（`restUntil`）不受影响，双通道继续静默，只是把**下一次提醒**往后挪 5 分钟。
+
+    - `src/engine/detector.ts`：新增 `BStatePersistable.restSnoozedUntil`（`types.ts` 同步，默认 `-Infinity`），`restReminderDue()` 开头加一道闸门 `if (now < state.restSnoozedUntil) return false`；新增 `snoozeRest(state, now, isDemoMode?)`：`restSnoozedUntil = now + scaled(REST_REPEAT_REMINDER_MS, isDemoMode)`——snooze 时长直接复用已有的"5 分钟重复节拍"常量，不新造一个数字，这样连续 snooze 几次的节奏跟"不 snooze、每 5 分钟自然重复"是同一个感觉，只是用户主动确认了一次。用固定时长的哨兵字段，不是"倒拨 restStartTs 假装时间没走"——后者要跟 `restReminderDue()` 内部的取模算法耦合在一起才能拨对量，容易拨错，这里直接表达意图更不容易出错。
+    - `frame-pipeline.ts` 的 `ensureBStateLoaded()` 补 `restSnoozedUntil ?? -Infinity` 水合兜底，同上两条字段一样的理由。
+    - `rest.ts` 新增 `snoozeReminder(state, now, isDemoMode?)`：调 `snoozeRest()` 后立刻把 `isReminderDue` 摘掉推给面板，不用等下一次心跳/RECHECK 才刷新（不这样做的话按钮点掉之后提醒还会再闪一下才消失，跟 08-30 check-in 气泡"一闪而过"是同一类体验问题，这次直接照那次的修法处理）。
+    - `messages.ts` 新增 `RestSnoozeMessage`（`REST_SNOOZE`），`index.ts` 加对应 handler。
+    - `pet/types.ts` 新增 `isReminderDue`/`onRestSnooze` 两个 prop；`cat.tsx` 的休息按钮行里加"5 more minutes"按钮，**只在 `isReminderDue` 为真时才出现**（平时休息中不该多一个按钮抢注意力，这个选项要解决的问题只在提醒真的弹出来时才存在，"Back to it" 不受这个条件限制，休息期间随时可点，是两条独立的可见性规则）；`AnchorApp.tsx` 接上 `restState.isReminderDue`/`REST_SNOOZE` 消息。
+
+9. **补做 A17：信号优雅降级**。grep 了一遍全部 `platform/background`+`platform/content` 文件的 `try {` 密度：`groq.ts`（所有 LLM 调用的共用出口）早就做得很扎实（超时 `AbortController`+网络异常+非 2xx+JSON 解析全部 catch，从不 throw，统一返回 `null`，`classifier.ts`/`starter-coach.ts` 消费 `null` 各自有兜底——这部分是 A9 顺带做的），`chat-sites.ts`/`mount-floating.ts` 也各有一处防御。但**真正的信号采集核心 `signals.ts` 全文一处 try/catch 都没有**，且不是纯理论风险——`chrome.tabs.onActivated` 监听器里 `await chrome.tabs.get(tabId)` 如果在这个 await 期间用户把标签页关掉了（真实存在的 Chrome 竞态），promise 会 reject，没有任何兜底，会变成一次未处理的 rejection；`index.ts` 里全部消息处理也是零 try/catch 的 `void (async () => {...})()`。确认了"没做"之后才动手补。
+
+    **改法**：
+    - `signals.ts`：`emitSignalEvent()`（所有信号来源——tab 切换/导航/交互/idle/RECHECK/心跳——最终都会走到的这一个函数）包一层 try/catch，在这一个位置就能兜住整条链路任何一步的失败，不用在每个监听器里各自处理；`ensureCurrentTab()`、`chrome.tabs.onActivated`、`chrome.windows.onFocusChanged` 三处真实的 `chrome.tabs.get`/`chrome.tabs.query` 竞态（tab/window 在查询期间被关掉）各自加了 try/catch，失败时按"这次没查到，下一次心跳/事件会再试"处理，不是需要特殊恢复的错误。
+    - `index.ts`：新增 `runSafely(label, fn)` helper——`fn().catch(err => console.error(...))`，统一收口全部 fire-and-forget 调用（心跳、`ensureCurrentTab`、`resetIfFreshStart`、`onInstalled`/`onStartup`、以及 `onMessage` 里全部十条消息类型的处理），出错至少打一条带着"是哪条消息/哪个监听器失败"的日志，不再是 Chrome 默认那种不带业务上下文的裸 "Uncaught (in promise)"。三处原来用 `.then()` 链式写法的（`INTERACTION`/`CHAT_SNIPPET`/`RECHECK`）顺手改成跟其它七条消息一样的 `async/await` 写法，风格统一。
+
+    **不是"防崩溃"（MV3 里单次消息/事件处理抛错本来就不会真的让 SW 进程崩掉，下一条消息照样能正常处理），是"防止静默消失、留下排查痕迹"**——这正是"优雅降级"字面意思：出错时的行为从"这次操作凭空消失、控制台一行没有业务上下文的堆栈"，变成"打一条清楚的日志、跳过这一次、下一次输入自然会恢复"。
+
+10. **"demo mode 时间缩短太多，演示节奏很忙乱"——把压缩倍数从 120x 调到 30x**。这几天连续几次真机复现（休息提醒、STUCK 视频误判等）都是在 120x 下几秒钟内密集炸出好几个 check-in，这个节奏边操作边讲解根本跟不上，demo 现场会显得很忙乱。
+
+    **改法**：唯一需要改的就是 `src/engine/types.ts` 的 `DEMO_TIME_SCALE` 常量，从 `1/120` 改成 `1/30`——这是全项目压缩逻辑唯一的规范实现（红线5：不许各处各写一份），所有下游（`detector.ts`/`perceiver.ts` 的 `scaled()` 调用点）自动跟着变，不需要改任何判定代码。
+
+    30x 下典型节奏（CREATOR 档）：DRIFT 一般路径（错过页面 5min+纹理 60s+持续 30s）≈13s；STUCK（静止 15min+持续 30s）≈31s；休息提醒首次（15min）≈30s、之后每次（5min）≈10s；黑名单快速通道（15s+30s）≈1.5s——比 120x 慢了 4 倍，边操作边讲解跟得上，又不至于像真实模式那样要等几分钟。
+
+    **顺带修的连锁反映**：好几处 fixture/测试用的是具体压缩后的毫秒数（写死的数字，不是公式），倍数一变这些数字全部对不上，改完之后跑测试直接出了 2 个失败：
+    - `mock/frames.json` 场景24：`initialState` 的 `driftSustainerSinceOffset`/`passiveSinceOffset`（原为 251/501，对应 120x 下 scaled(30s)=250ms/scaled(60s)=500ms）、以及 `now`/`anchorDetachedMs`（原为 4001，对应当时"8min 阈值"的旧假设，其实早就该是 CREATOR 实际的 5min——这处连 120x 时代就是错的，只是凑巧因为阈值早被越过而没暴露）——全部按 30x 重新算：`now`=10001，offset 分别改成 1001/2001。
+    - `mock/events.json`+`integration.test.ts` 场景24：`simulate()` 的 `tailBufferMs`（demoMode 下原为 2000ms，只够 120x 走完整条链路）需要同步放大到 8000ms，否则细粒度步进重放根本采样不到触发时刻，30x 下要等 30/120=4 倍更久的真实时间才会越过阈值。
+    - `metascenario.test.ts`/`pet-state.test.ts` 里几处显式断言"120x 压缩成 Xms"的用例（`graceUntil`、休息提醒节拍、snooze 时长、`observing` 迟滞窗口）全部按新倍数重算数字。
+    - 这类"写死压缩后数字"的 fixture/测试，以后每次调 `DEMO_TIME_SCALE` 都要重新过一遍——`npm test` 会准确报出哪些跟新倍数对不上，不用凭记忆去找。
+
+    同步更新了 `docs/契约v4.md` §3.2（压缩倍数+关键阈值换算表）、§4 场景24 那一行、`docs/分工v2.md`，`perceiver.ts`/`types.ts` 顶部注释——这几处都是明确写死"120x"的说明性文字，不是代码，但既然要改就要如实反映现状，不留一半新一半旧的文档。
+
+11. **真机日志里一条容易被忽略的 `console.warn` 揪出一个真 bug**：`[Anchor SW] Groq classify: response did not parse as expected JSON {"verdict":"IRRELEVANT","confidence`——注意这段文本没有收尾，缺了 `confidence` 的值和结尾的 `}`。模型其实已经算出了正确答案（`IRRELEVANT`），但响应半途被截断，`extractJsonObject()`（`groq.ts`，找第一个 `{...}` 块）找不到匹配的收尾括号，返回 `null`，`classifier.ts` 只能保守落回 `UNKNOWN`——这不是分类判断力不够，是响应压根没写完。
+
+    **根因**：`classifier.ts` 调 `callGroq()` 时一直没传 `maxTokens`，吃 `groq.ts` 里的默认值 200。`gpt-oss-20b`（分类用的模型）是**推理模型**，reasoning 的 token 算进 `max_tokens`——`groq.ts` 顶部注释里其实已经记过同一个坑（起步教练 09-05 之前也在 120b 模型上踩过：200 预算里 182 被 reasoning 吃掉，JSON 写到一半被截断），当时只给起步教练那条调用加了可选的 `maxTokens` 参数，分类这边因为"prompt 短、输出也短，200 够用且省钱"的理由保留了默认值——这次真机复现证明这个假设不总成立：分类 prompt 本身虽短，但模型的 reasoning 长度会随具体问题（这次是"能不能帮我造个句子"这类需要理解语义关联的请求）浮动，200 不是每次都够。
+
+    **修法**：`classifyDomainRelevance()` 调 `callGroq()` 时显式传 `maxTokens: 500`，给足余量（分类走 Groq 本身很快，多这点预算不影响体感速度）。顺带给"解析失败"那条 `console.warn` 加了一个纯字符串判断的提示——响应文本末尾不是 `}` 就在日志里附上"looks truncated — likely ran out of max_tokens before finishing"，下次再撞见不用再靠肉眼数括号猜是不是这个原因。
+
+
+12. **"我选了 Still focused，为什么后面还是一直 check-in"？两个按钮的实际效果差很多、文案没说清楚**。场景：任务"study english"，切到一个 YouTube 视频（用来练英语听力），LLM 判 `IRRELEVANT`（这个判断本身没问题）。第一次 DRIFT check-in 点了"Still focused"，之后同一个视频还是反复被 check-in——demo mode 下每次冷却（10s）一过就再弹一次。
+
+    **查代码确认机制（`applyCheckInFeedback()`，`detector.ts` 442-445行）**：DRIFT 通道下，`FOCUSED`（"Still focused"）**只清空这一次的证据计时器**（`driftSustainer.since = null`），没有任何持久效果——`contextRelevance` 还是 `IRRELEVANT`、`texture` 还是被动，冷却一过证据立刻重新攒够，同一个页面会无限重复触发。真正会让"这个域名以后不再问"的是 `FALSE_POSITIVE`（"Just researching"）——08-28 J6 那次修复让它会把当前域名写进 `sessionWhitelist`，之后同一会话内这个域名直接短路判 `RELEVANT`。
+
+    这不是误判——DRIFT 的文案问的本来就是"你还在原来的任务附近吗，还是被带走了"（`wording.ts` `DRIFT_TEMPLATES`），"Still focused" 回答的是**用户整体状态**的自我报告，不是"这个页面算不算相关"；Jay 这个场景（专门拿这个视频当学习材料）语义上更贴近"这个页面就是我在做的事"，对应的按钮其实是 "Just researching"。但两个按钮原文（"Still focused" vs "Just researching"）都很含糊，容易让人以为随便点一个"正面"答案都会有同样的效果——真机复现的正是这种误用。
+
+    **修改方案**：不改判定逻辑（"记录为已知行为"/"给 FOCUSED 也加持久效果" 两个选项都放弃了），改按钮文案，让两者的实际效果差异在措辞上更直白：DRIFT 通道下 "Still focused"→**"Still on track"**（整体还在状态里，但不代表这个页面）、"Just researching"→**"This counts as work"**（这个页面本身就算工作，写白名单）。STUCK 通道不改——那边 FOCUSED 本来就有持久效果（阶梯往上爬一级），语义没有这个歧义。
+
+    **实现**（`src/pet/cat.tsx`）：两个按钮的文案改成按 `channel` 三元表达式动态选择，DRIFT 通道用新词，其余（STUCK）保持原文，不新增状态、不改 `pet/types.ts`/`detector.ts`/`wording.ts` 任何判定或回复文案（`FALSE_POSITIVE` 的微重启回复"Got it — I'll count that one as work."已经跟新按钮文案的语义对得上，不用改）。
+
+
+13. **紧接上一条：STUCK 通道的两个按钮"也有些表意不明，不知道 just researching 是什么情况点击"，需要纠正**。重新读了一遍 `applyCheckInFeedback()`（`detector.ts`）STUCK 分支：只有 `answer === 'FOCUSED'` 会让 `stuckLadderIndex`/`stuckThresholdMs` 往上升一级（以后要静止更久才会再问，真正有持续效果）；`FALSE_POSITIVE` 在 STUCK 分支里**没有对应的处理**，落到的效果跟"什么都不选、只是清空这次的证据计时器"完全一样——STUCK 的"Just researching"其实是从 DRIFT 那套三按钮布局直接照搬过来的，从来没有为 STUCK 单独设计过语义，这个按钮没有一个"该在什么情况点"的答案，因为它压根不做任何事。
+
+    **直接去掉这个没有实际作用的选项**——STUCK 通道现在只保留两个真正做事的按钮：`FOCUSED`（改名"Deep in thought"，呼应 `wording.ts` `STUCK_TEMPLATES` 自己的措辞"...or just deep in thought?"，点了阈值梯子升级）和 `DRIFTED`（"Drifted - pull me back"，微重启）。DRIFT 通道三个按钮不受影响（`FALSE_POSITIVE` 在那边是真正有效的白名单动作，继续保留）。
+
+    **实现**（`src/pet/cat.tsx`）：`FALSE_POSITIVE` 那个 `<button>` 包了一层 `{channel === 'DRIFT' && (...)}`，STUCK 时这个按钮压根不进 DOM（不是隐藏，彻底不渲染，跟这个文件里"看不见的按钮不能被 Tab 键触发"那条既有原则一致）。不改 `detector.ts`/`pet/types.ts`/`wording.ts`——`FALSE_POSITIVE`/`CheckInAnswer` 类型定义不变，只是 STUCK 场景下 UI 不再暴露这个选项，`onAnswer` 回调签名、消息类型都没有变化。
+
+14. **"任务是 study english，为什么问'how to learn swedish easily'判 RELEVANT"——09-05 那条"前置知识算相关"的 prompt 规则被过度泛化了**：`classifier.ts` `buildPrompt()` 当时加的规则举的例子是"study neural networks"任务下问"要学多少微积分"——微积分是神经网络的真实前置依赖（不懂微积分就学不了神经网络）。但模型把这条规则理解得更宽：只要两件事同属一个大类（这次是"语言学习"），就当成"前置知识"判 RELEVANT——瑞典语跟英语根本不是依赖关系，是同一个类别下两个互不相关的具体语言，学瑞典语对学英语没有任何帮助，这个判断是真错的，不是可以理解的边界情况。
+
+    **修法**：`buildPrompt()` 补一条对照例子，直接用这次真机复现的原句：明确"prerequisite"指的是**对这个具体任务的真实依赖关系**，不是"属于同一个大类"就算数——"study english"任务下问"怎么学瑞典语"是 IRRELEVANT（语言不同，不是通往英语的垫脚石），即使两者都叫"语言学习"；微积分是神经网络的真实依赖，瑞典语不是英语的依赖，它们是同一个类别下的兄弟关系，不是依赖链，不能靠"同属一类"就判 RELEVANT。`docs/分类prompt-v0.md` §1 同步更新。
+
+
+15. **紧接上一条真机场景：任务"study english"，在 youtube.com 上纠正了一个视频（DRIFT+FALSE_POSITIVE"This counts as work"）之后，点进推荐栏第一个完全不相关的视频（"VLOG - a busy day in my life"），是被上一次判定影响，不是 LLM 自己的判断**。
+
+    **根因**（`frame-pipeline.ts` `applyCheckInAnswer()`）：DRIFT+FALSE_POSITIVE 只把 `frame.currentDomain`（裸域名"youtube.com"）写进 `ctx.sessionWhitelist`，`resolveContextRelevance()` 的白名单短路是按 `domainMatches` 匹配域名——纠正一个视频等于把**整个 youtube.com 域名**在当次会话内短路成 `RELEVANT`，之后不管点进哪个视频（包括纯娱乐的）都不会再经过 LLM 判断。这跟项目自己反复强调的设计原则直接冲突：`docs/分类prompt-v0.md` §3.2 明确写过 youtube/bilibili/reddit/x/facebook/pinterest 这类"内容形态因页面而异"的站点**不能域级判定**（这也是它们没进黑名单的原因），但白名单这条路径一直是域级生效的，没人注意到跟这条原则矛盾——直到真机复现才暴露。
+
+    **修法**：区分两种粒度，不是所有域名都改，只改真机证明有问题的这一类：
+    - `heuristics.ts` 新增导出 `MIXED_CONTENT_DOMAINS`：`VIDEO_DOMAINS`（youtube/bilibili）∪ `SOCIAL_DOMAINS`（reddit/x/twitter/facebook/pinterest/threads）∪ `AI_CHAT_DOMAINS` 三份已有列表的并集——这三份清单本来就是分别因为"内容形态因页面而异"这同一个理由被排除在静态黑名单之外的，这次只是把这条已有的设计判断汇总成一份可复用的具体名单，不是新决定。
+    - `types.ts`：`FeatureFrame` 新增 `currentUrl: string`（辅助字段），`perceiver.ts` 的 `computeFeatureFrame()` 填充；`resolveContextRelevance()` 新增按 `pageKey`（`domain+path`）匹配白名单条目的分支，跟原有的按域名匹配并存（数组里混着两种粒度的字符串，形状天然不冲突：域名不含"/"，pageKey 一定含）。
+    - `frame-pipeline.ts` `applyCheckInAnswer()` 新增 `url` 参数：命中 `MIXED_CONTENT_DOMAINS` 时白名单条目写 `pageKey(domain, url)`（只放行这一个具体页面），其余域名维持契约v4 场景4"查资料后白名单"原有的域级行为——这个决定本身也是权衡过的：真正"大部分页面都算同一回事"的域名（比如一个误判的文档站）域级申诉仍然合理，只有证明会出问题的混合内容站点才收紧。
+    - 数据穿线（跟之前 `anchorUrl`/`anchorTabId` 走的是同一条既有管道，模式不变）：`panel.ts` 的 `toPanelState()` 新增 `PanelState.currentUrl` → `AnchorApp.tsx` 的 `handleAnswer()` 原样带回 → `messages.ts` 的 `CheckInAnswerMessage.currentUrl` → `index.ts` 的 `CHECK_IN_ANSWER` 分支传给 `applyCheckInAnswer()`。
+
+
+**09-11 补充：`npm run build` → `chrome://extensions` 点"重新加载"之后，必须手动刷新每一个已经打开的测试标签页，悬浮桌宠才会变成新代码**
 
