@@ -1430,3 +1430,51 @@ J7 走通之后开始真机连测，抓出并修掉了一串「收尾 → 新会
 
 **09-11 补充：`npm run build` → `chrome://extensions` 点"重新加载"之后，必须手动刷新每一个已经打开的测试标签页，悬浮桌宠才会变成新代码**
 
+## 0912
+
+### Joy
+
+复核 Jay 09.11 的修改**找到一个真 bug，已修并加了测试；另有一处设计上的回归风险留给你定。** 其余改动（`runSafely` 统一兜错、`mediaPlaying`、混合站按页面白名单、追问拼接、分类 `maxTokens` 500）都没问题。`npm test` **316/316** 全绿，`npm run typecheck` 两边干净，`npm run build` 正常出包。
+
+1. **★ 真 bug（已修）：休息状态一过 SW 回收就丢**
+
+    09-11 把 `startRest()` 的 `restUntil` 从 `now + 20min` 改成了 **`Infinity`**（"休息到显式点 Back to it 为止"）。设计意图是对的，但 **`chrome.storage.local` 按 JSON 语义序列化，`Infinity` 存进去变成 `null`**：
+
+    ```
+    点 Take a break → persistBState 写入 {restUntil: Infinity}
+                 → storage 里实际是 {restUntil: null}
+    SW 被回收（MV3 空闲 ~30s）→ 心跳唤醒 → 从 storage 水合
+                 → restUntil = null → `null > now` 恒为 false
+                 → 双通道当场恢复监控，休息静默消失
+    ```
+
+    **这正是 09-11 要修的那个现象（"监控悄悄恢复"），只是换了条路径回来。** 而且"休息 15 分钟走开一趟"这个最典型的场景几乎必然触发——人走开 → 没有事件 → SW 被回收。连带 `refreshRestReminder()` 也因为同一道闸门提前返回，**15 分钟提醒在真实使用里基本永远不会弹**。
+
+    先用 node 验证了 `JSON.parse(JSON.stringify({restUntil: Infinity}))` 确实是 `null`，再写成测试（`rest-persistence.test.ts`，用 JSON 往返模拟 storage）——修复前两条断言都挂。
+
+    **修法（最小化，不动原本的设计）**：哨兵值换成 `Number.MAX_SAFE_INTEGER`（导出为 `RESTING_INDEFINITELY`）——JSON 能原样存，跟任何真实时间戳比都是"未来"，语义等价于 Infinity。她的三条测试原来断言字面值 `toBe(Infinity)`，改成断言 `RESTING_INDEFINITELY` + "远在未来"。
+
+    **顺带修了一个一直靠巧合在工作的东西**：其余字段的 `-Infinity` 初值存盘后也会变 `null`，之所以没出过事，是因为 `now - null` / `null > now` / `Math.max(null, x)` 恰好都把 null 当 0 处理，结果碰巧正确。`ensureBStateLoaded()` 现在对 `lastCheckInTs` / `lastAnswerTs` / `restUntil` / `restStartTs` 统一 `?? -Infinity` 还原成真正的初值（她 09-11 已经对新加的两个字段这么做了，我补齐了剩下四个），不再依赖这种巧合。
+
+    **教训**：**任何要过 `chrome.storage` 的值，`Infinity` / `-Infinity` / `NaN` / `undefined` 都活不下来。** 用哨兵值表达"永远"时必须用有限数，水合时必须显式还原——这条以后加字段的人都会撞。
+
+2. **设计回归风险（未改，留给 Jay 定）：pull-back 在单 tab 场景会拒绝把人带回去**
+
+    09-11 给 `pullBackToAnchor` 加了 `targetTabId`，逻辑变成：① 精确匹配**同一 tab 且 URL 完全相同**；② 否则在**其它** tab 里找同域（显式排除原 tab）；③ 都没有 → `false`。
+
+    你要修的 x.com 场景（同一 tab 内 SPA 从相关跳到不相关，域名没变）是真的。**但"URL 变了" ≠ "飘走了"**：
+
+    > 用户在 Notion 一个 tab 里工作，快照 URL 是 `notion.so/page#block1`。滚动/点击后 URL 变成 `#block2`（hash 变了，页面没变、仍然相关）。用户在**另一个** tab 飘去 YouTube，check-in 答 DRIFTED。
+    > → ① tab 对但 URL 不等，跳过；② 排除原 tab，没有别的 Notion tab；③ **返回 false，桌宠说"带不回去"——而 Notion 就在旁边那个 tab 里开着。**
+
+    09-11 之前的"同域即可"能处理这个，现在不能。"在另一个 tab 飘走"是走神的主流形态，"同一 tab 内 SPA 跳题"相对窄。我倾向③改成**退回原 tab（只要它还是同域）**而不是 `false`——最坏是回到 x.com 那种跳题后的页面，但人至少被拉回了工作 tab，也是 09-11 之前的行为。不过这是她有意识做的取舍（"不假装能带回一个已经不在的页面"），**先不动，等你看看**。
+
+3. **一条小的 UX 备注（未改）**
+
+    悬浮形态下 `rest-row` 是悬停才显示（09-06 定的）——**现在休息提醒弹出时，"5 more minutes" / "Back to it" 也是藏着的**：气泡在说"还在休息吗"，回应它的按钮却要把鼠标移到猫上才出来。不是 bug，但提醒场景下这两个按钮大概应该直接可见。一行 CSS 的事，先记着。
+
+4. **顺带确认过、没问题的**（免得下次再查一遍）
+    - `computeMediaPlaying()` 只看当前 URL 上最后一条 PLAY/PAUSE：视频自然播完会发 `pause`，切 tab 后当前事件是新页面的，都对；4 小时/500 条的事件窗口不会截掉一节课的 PLAY 事件。
+    - 混合站按页面白名单：`pathPattern()` 含 query，`youtube.com/watch?v=A` 和 `?v=B` 不会合并；`domainMatches` 是 `===`/`endsWith('.x')`，pageKey 条目（含 `/`）不可能被误当域名匹配。**一个小边界**：同一视频 URL 多了 `&t=`/`&list=` 之类参数就不匹配了，会再问一次——影响小，先不管。
+    - demo mode 下 `restReminderDue` 的取模在 repeat 被压到 10s、容差仍是 60s 时恒为 true——在注释里明确接受了（"提醒常驻直到用户点回去"），不是漏掉。
+

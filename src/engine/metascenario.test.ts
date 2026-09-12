@@ -12,7 +12,7 @@ import {
   PROFILE_PRESETS,
   SignalPolicy,
 } from './types';
-import { startRest, restReminderDue, snoozeRest } from './detector';
+import { startRest, restReminderDue, snoozeRest, RESTING_INDEFINITELY } from './detector';
 
 describe('场景22：无起步教练默认策略', () => {
   const now = 1_000_000;
@@ -135,19 +135,25 @@ describe('场景23：休息模式无人应答提醒（15min 首次，之后每 5
   });
 
   // 09-11：真机复现休息窗口自然到期后监控悄悄恢复、用户还没来得及真的"休息"就被 check-in
-  // 打断——改成不自动到期，restUntil 变成 Infinity 这个哨兵值，双通道保持静默直到用户
+  // 打断——改成不自动到期，restUntil 变成 RESTING_INDEFINITELY 这个哨兵值，双通道保持静默直到用户
   // 显式点"Back to it"（endRest()）。20min 这个数字不再有实际含义，见 detector.ts
   // startRest() 顶部 09-11 的注释。
-  it('restUntil = Infinity，不再是"到点自动恢复"的真实时间戳，供 isDrifting/isStuck 公共闸口无限期静默', () => {
+  it('restUntil = RESTING_INDEFINITELY，不再是"到点自动恢复"的真实时间戳，供 isDrifting/isStuck 公共闸口无限期静默', () => {
     const state = buildRestState();
-    expect(state.restUntil).toBe(Infinity);
+    // 09-12：哨兵值从 Infinity 改成 JSON 能存的有限数（chrome.storage 会把 Infinity 存成 null，
+    // 休息状态一过 SW 回收就丢——见 rest-persistence.test.ts），语义仍是"永远到不了的未来"。
+    expect(state.restUntil).toBe(RESTING_INDEFINITELY);
+    expect(state.restUntil).toBeGreaterThan(Date.now() + 100 * 365 * 24 * 3600 * 1000);
   });
 
   it('startRest 就地写 state，不是返回一个游离对象——调用方不会漏接线', () => {
     const state = createInitialBState('CREATOR');
     expect(state.restUntil).toBe(-Infinity);
     const returned = startRest(state, restStartTs);
-    expect(state.restUntil).toBe(Infinity);
+    // 09-12：哨兵值从 Infinity 改成 JSON 能存的有限数（chrome.storage 会把 Infinity 存成 null，
+    // 休息状态一过 SW 回收就丢——见 rest-persistence.test.ts），语义仍是"永远到不了的未来"。
+    expect(state.restUntil).toBe(RESTING_INDEFINITELY);
+    expect(state.restUntil).toBeGreaterThan(Date.now() + 100 * 365 * 24 * 3600 * 1000);
     expect(returned).toBe(state);
   });
 

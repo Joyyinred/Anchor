@@ -26,8 +26,8 @@ export interface BState {
   restUntil: number;
   restStartTs: number;
   // 09-11：上一次休息"真正结束"的时刻（点 Back to it 或调用 endRest() 的那一刻），
-  // 跟 restUntil 是两码事——restUntil 现在是 Infinity/-Infinity 的哨兵值（见 startRest()
-  // 顶部注释），不再是一个真实时间戳，不能再拿它当"休息刚结束"的基准点用。
+  // 跟 restUntil 是两码事——restUntil 现在是 RESTING_INDEFINITELY/-Infinity 的哨兵值
+  //（见 startRest() 顶部注释），不再是一个真实时间戳，不能再拿它当"休息刚结束"的基准点用。
   restEndedTs: number;
   // 09-11：用户点了"再休息 5 分钟"——restReminderDue() 在这个时刻之前都不判定"该提醒了"，
   // 见 snoozeRest() 顶部注释。
@@ -292,6 +292,22 @@ const REST_REPEAT_REMINDER_MS = 5 * 60_000; // 之后每 5 分钟重复提醒，
 // 1 分钟节拍，不会特意跟 restStartTs 对齐，所以判断不能要求"精确整除"——那样命中概率约等于 0。
 const REST_REMINDER_TOLERANCE_MS = 60_000;
 
+// "休息中、直到用户显式结束"的哨兵值。
+// ★ 09-12 review 修的 bug：09-11 这里写的是 `Infinity`。设计意图没问题，但 BState 会经
+//   setBState() 落进 chrome.storage.local，而 chrome.storage 按 JSON 语义序列化——
+//   **`Infinity` 存进去变成 `null`**。SW 被回收（MV3 空闲 ~30s 就回收）再从 storage 水合
+//   回来时 restUntil 是 null，`null > now` 恒为 false，双通道当场恢复监控，休息静默消失。
+//   这恰恰是 09-11 要修的那个现象（"监控悄悄恢复"），只是换了条路径回来；而"休息 15 分钟
+//   走开一趟"这个最典型的场景几乎必然触发它（人走开 → 没有事件 → SW 被回收）。
+//   见 rest-persistence.test.ts。
+//   MAX_SAFE_INTEGER 是 JSON 能原样表示的最大整数，跟任何真实时间戳比较都是"未来"，
+//   语义上等价于 Infinity，但能活过存盘。
+// ★ 顺带说明：其余字段用的 `-Infinity` 存盘后也会变 null——那些之所以"能用"，是因为 null
+//   在 `now - null`/`null > now`/`Math.max(null, x)` 里恰好都被当成 0 处理，结果碰巧正确。
+//   frame-pipeline.ts ensureBStateLoaded() 水合时已经统一用 `?? -Infinity` 把它们还原成
+//   真正的初值，不再依赖这种巧合。
+export const RESTING_INDEFINITELY = Number.MAX_SAFE_INTEGER;
+
 /**
  * 用户主动点"休息"：就地把 restStartTs/restUntil 写进 BState（不再返回一个调用方需要
  * 自己记得回填的独立对象——之前 createRestState() 就是这样被落下的：返回值算对了，
@@ -300,7 +316,8 @@ const REST_REMINDER_TOLERANCE_MS = 60_000;
  *
  * ★ 09-11：`restUntil` 不再是"now + 20min，到点自动恢复监控"——真机复现：demo mode 下这个
  *   窗口被压缩到 10s，用户还没来得及真的"休息"（开个新标签页、搜点东西）监控就已经悄悄
- *   恢复，弹出了 check-in，体验上完全不像"我说了要休息"该有的样子。改成 `Infinity`：
+ *   恢复，弹出了 check-in，体验上完全不像"我说了要休息"该有的样子。改成"未来某个永远到
+ *   不了的时刻"（RESTING_INDEFINITELY，09-12 从 Infinity 改成有限数，见其注释）：
  *   双通道保持静默，直到用户显式点"Back to it"（`endRest()`）——契约v4 §3.8 原文本来就是
  *   "可随时继续专注或结束专注"，从没说过"到点自动恢复"，这也更贴合契约原意，不是纯 demo
  *   mode 补丁，真实模式下同样受益（之前如果用户忘了点回去，20min 一到监控也会悄悄恢复）。
@@ -309,7 +326,7 @@ const REST_REMINDER_TOLERANCE_MS = 60_000;
  */
 export function startRest(state: BState, now: number): BState {
   state.restStartTs = now;
-  state.restUntil = Infinity;
+  state.restUntil = RESTING_INDEFINITELY;
   return state;
 }
 

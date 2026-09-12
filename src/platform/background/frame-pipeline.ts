@@ -109,6 +109,15 @@ async function ensureBStateLoaded(sessionId: string, archetype: Archetype): Prom
         // 水合回来是 undefined 时 `now < undefined` 恒为 false，等价于"从没 snooze 过"，
         // 本来就是这个字段的初始语义，兜底成 -Infinity 是安全的。
         restSnoozedUntil: persisted.restSnoozedUntil ?? -Infinity,
+        // 09-12 review：这四个字段的初值都是 -Infinity，而 chrome.storage 按 JSON 语义存，
+        // -Infinity 存进去变成 null。之前"能用"纯属巧合——null 在 `now - null`/`null > now`/
+        // `Math.max(null, x)` 里恰好都被当成 0，结果碰巧正确。`null ?? -Infinity` 会把它们
+        // 还原成真正的初值，不再依赖这种巧合（正数哨兵 RESTING_INDEFINITELY 是有限数，
+        // 不会被 ?? 误伤——这也是 detector.ts 里不再用 Infinity 的原因）。
+        lastCheckInTs: persisted.lastCheckInTs ?? -Infinity,
+        lastAnswerTs: persisted.lastAnswerTs ?? -Infinity,
+        restUntil: persisted.restUntil ?? -Infinity,
+        restStartTs: persisted.restStartTs ?? -Infinity,
         driftSustainer: { since: null },
         stuckSustainer: { since: null },
         passiveSince: null,

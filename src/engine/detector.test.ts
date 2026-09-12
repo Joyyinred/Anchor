@@ -6,7 +6,7 @@
 // 误报"是不是卡住了"。修法：STUCK 也改成只放行确认 RELEVANT（`!== 'RELEVANT'` → false），
 // 跟 DRIFT 对 UNKNOWN 的保守程度对齐。
 import { describe, it, expect } from 'vitest';
-import { evaluateFrame, startRest } from './detector';
+import { evaluateFrame, startRest, RESTING_INDEFINITELY } from './detector';
 import { defaultSessionContext, createInitialBState, PROFILE_PRESETS, type FeatureFrame } from './types';
 
 function baseFrame(now: number, contextRelevance: FeatureFrame['contextRelevance']): FeatureFrame {
@@ -185,7 +185,7 @@ describe('DRIFT 通用 anchorDetachedThresholdMs（CREATOR：08-30 从 8min 调�
 //   ①休息结束后 stillnessMs 把休息期间的静止也算进"卡住"证据，修法是净时长从
 //     state.restEndedTs（休息真正结束的时刻）重新起算，跟 state.lastAnswerTs 同一个道理。
 //   ②demo mode 下休息窗口（当时是 20min/120=10s）比一个真人"随便切个标签页"所需的真实时间
-//     还短，"休息"事实上从没真的陪用户休息过。改成 restUntil=Infinity，双通道无限期静默直到
+//     还短，"休息"事实上从没真的陪用户休息过。改成 restUntil=RESTING_INDEFINITELY（09-12 前是 Infinity），双通道无限期静默直到
 //     用户显式点"Back to it"（endRest()，见 rest.ts）——这也是为什么下面的用例不再手写
 //     state.restUntil，而是直接调用 endRest 的等价效果（手动置 -Infinity + 写 restEndedTs）。
 describe('STUCK 净时长扣除休息影响（detector.ts isStuck 的 effectiveStillnessMs，09-11）', () => {
@@ -236,11 +236,14 @@ describe('STUCK 净时长扣除休息影响（detector.ts isStuck 的 effectiveS
     expect(action).toBe('CHECK_IN_STUCK');
   });
 
-  it('休息期间（restUntil=Infinity）：DRIFT/STUCK 双通道无限期静默，不管休息了多久都不会自动恢复', () => {
+  it('休息期间（restUntil=RESTING_INDEFINITELY）：DRIFT/STUCK 双通道无限期静默，不管休息了多久都不会自动恢复', () => {
     const ctx = defaultSessionContext(0);
     const state = createInitialBState('CREATOR');
     startRest(state, 0);
-    expect(state.restUntil).toBe(Infinity);
+    // 09-12：哨兵值从 Infinity 改成 JSON 能存的有限数（chrome.storage 会把 Infinity 存成 null，
+    // 休息状态一过 SW 回收就丢——见 rest-persistence.test.ts），语义仍是"永远到不了的未来"。
+    expect(state.restUntil).toBe(RESTING_INDEFINITELY);
+    expect(state.restUntil).toBeGreaterThan(Date.now() + 100 * 365 * 24 * 3600 * 1000);
 
     // 休息 10 个真实小时也不会自动恢复——旧设计里 20min 一到就会自动恢复，这正是
     // 09-11 第二轮真机反馈要改掉的行为。
