@@ -149,7 +149,7 @@ A deep design session, not typing interface stubs. Decided together, in one sitt
 
 **Outcome:** all landed. Highlights: the hand-written state machine; observing-state animation v2 (strong glow, no colour change — chosen by A); the **floating pet via content script** (drag anywhere, position remembered, hover to reveal controls, transparent cat-only); `RESTING_INDEFINITELY` replacing `Infinity` after it silently became `null` through `chrome.storage`; and the **eval harness** (16 tasks × 12 mechanical checks + an action-shape distribution) once we learned that a pass rate saturates and stops discriminating between prompt versions.
 
-### Track three ｜ Shared: deck + demo (~30% of the score; rolling from Day 11)
+### Track three ｜ Shared: deck + demo (rolling from Day 11)
 
 - Day 11 on: deck skeleton; **drop in real screenshots / numbers weekly**, don't write it at the end.
 - Day 15: demo script first draft; walk it through and let "which contrast moment doesn't play reliably" drive engineering.
@@ -157,8 +157,6 @@ A deep design session, not typing interface stubs. Decided together, in one sitt
 - Day 24–25: final deck + final video + README / docs (hard deliverables).
 
 > **A 15–20 minute daily sync.** The failure mode of three parallel tracks is interfaces drifting apart in silence. One alignment a day is nearly free and pays for itself many times over.
-
-**Outcome:** README rewritten with reviewer setup (09-12), 10-slide deck generated (09-13), Devpost copy written, these English docs added (09-13).
 
 ---
 
@@ -172,26 +170,6 @@ A deep design session, not typing interface stubs. Decided together, in one sitt
 
 A sixth rule we adopted after the fact, learned the hard way between 08-31 and 09-06: **"code exists and tests are green" is not "feature works."** Four times a feature was hollow in the real host because the pipeline that feeds it was never connected. Every feature now gets a real-device check before it is marked done.
 
----
 
-## 6. Milestones
+> **Each of us guards one half of the engine; the two halves meet at a single seam, `FeatureFrame`. Day 5 merges them on fake data, Day 8 on real signals.**
 
-| Date | Milestone | Kind | Outcome |
-|---|---|---|---|
-| Day 2 | Three contracts frozen (`SignalEvent` / `FeatureFrame` / `SessionContext`) → v4 | Contract | ✅ |
-| **Day 5** | **Two halves merged · 25 scenarios end to end, all green** | **★ Key point 1 ★** | ✅ |
-| **Day 8** | **Both contrast moments reproduced in a real browser** | **★ Key point 2 ★** | ✅ (side panel) |
-| Day 10 | start → companion → pull back → summary, end to end | Loop closed | ✅ |
-| Day 11 | deck / demo track starts | Deliverable | ✅ |
-| Day 15 | demo script draft, walkthroughs begin | Deliverable | ✅ |
-| Day 17 (09-06) | Floating pet replaces side panel as the primary host | Not in plan | ✅ |
-| Day 22 | backup demo video recorded | Insurance | ✅ |
-| Day 25 | repo + docs + deck + demo all final | Finish | in progress |
-
----
-
-## 7. Summary
-
-> **Each of us guards one half of the engine; the two halves meet at a single seam, `FeatureFrame`. Day 5 merges them on fake data, Day 8 on real signals — two proofs that "shut up while they're switching, speak up when they've really drifted" is stable. The first eight days are where all the risk lives.**
->
-> Both checks passed → the product stands and the rest is execution. That is what happened.

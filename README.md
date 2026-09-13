@@ -89,7 +89,7 @@ npm run dev
 # then open http://localhost:5173/src/devpreview/index.html
 ```
 
-**Starter-coach eval harness** — 16 fixed tasks, 12 mechanical checks, an action-shape distribution, run against the *production* prompt. Requires a Groq key in the environment (it hits the real API; it is deliberately not part of `npm test`):
+**Starter-coach eval harness** — 17 fixed tasks, 13 mechanical checks, an action-shape distribution, run against the *production* prompt. Requires a Groq key in the environment (it hits the real API; it is deliberately not part of `npm test`):
 
 ```bash
 export GROQ_API_KEY=gsk_...      # PowerShell: $env:GROQ_API_KEY = "gsk_..."
@@ -97,15 +97,6 @@ npm run eval:coach
 npm run eval:coach -- --runs 3   # run the set three times to see variance
 ```
 
-### After every rebuild
-
-Three steps, every time — we lost hours to skipping the last one:
-
-1. `npm run build`
-2. `chrome://extensions/` → reload Anchor
-3. **Hard-refresh any open page** (`Ctrl+Shift+R`). Pages keep running the *old* content script until reloaded.
-
-The floating pet logs a build timestamp to the page console (`[Anchor floating build 2026-09-06 12:51:30] mounted`) so you can confirm which version is actually running.
 
 ### Where the logs are
 
@@ -120,7 +111,9 @@ An error in one will never show up in the other.
 
 ## Architecture
 
-Two halves, one seam.
+Anchor is **not** an app with a server behind it — almost everything runs on your own machine. Two halves, one seam.
+
+![Overview: everything runs on your computer except one LLM call](docs/arch-1-overview.en.svg)
 
 ```
 Chrome APIs ──► perception (A) ──► FeatureFrame ──► decision (B) ──► pet / bubble
@@ -134,14 +127,102 @@ Chrome APIs ──► perception (A) ──► FeatureFrame ──► decision (
 - **The engine** (`src/engine/`) is pure TypeScript with no Chrome or DOM dependency, so it's fully unit-tested against recorded signal streams (`src/mock/`).
 - **The floating pet** renders into a Shadow DOM on the host page; the side panel renders the same React tree. Neither host contains logic.
 
+### Inside the extension
+
+![Anatomy: manifest, service worker, content script, floating pet, side panel](docs/arch-2-anatomy.en.svg)
+
+A Manifest V3 extension isn't one blob — several parts, separate jobs:
+
+- **Service worker** (`src/platform/background/`) — the brain; both halves of the engine run here. Chrome puts it to sleep after ~30 s of idle and wakes it on demand, so every piece of state that matters is written to `chrome.storage.local` and re-hydrated on wake. (`Infinity` doesn't survive that round-trip through JSON — see the rest-mode note in [`contract-v4.md` §3.8](docs/contract-v4.md#38-rest-mode).)
+- **Content script** (`src/platform/content/`) — injected into every page: reports keystrokes/scrolling/video play-pause (the *texture* signal), extracts your latest message on AI-chat sites, and mounts the floating cat.
+- **The floating pet** — a Shadow DOM island on the host page: draggable, remembers its position, and clicks pass through everywhere the cat isn't standing.
+- **Side panel** — the same React tree, kept as a fallback for pages an extension can't inject into (`chrome://`, the Web Store, PDFs).
+- `chrome.tabs` / `chrome.idle` / `chrome.alarms` / `chrome.storage.local` — which tab is active, whether the system is idle, a one-minute heartbeat, and a local store that survives restarts.
+
+### The stack
+
+![Stack: TypeScript engine, React + CSS + Lottie, Groq, Vite](docs/arch-3-stack.en.svg)
+
+- **TypeScript everywhere** — the contract's `interface`s are enforced at compile time; pass the wrong field and the build fails.
+- **Pure-TypeScript engine** — perception and decision touch no Chrome API, data in and data out, which is what makes 316 offline unit tests possible and let two people build both halves in parallel without surprises.
+- **React + plain CSS + Lottie**, no Tailwind or component library. The cat runs on the `lottie_light` build, since MV3's CSP forbids the `eval()` the full build uses.
+- **A 100-line hand-written state machine** (`pet-state.ts`) for the pet's three moods — XState was considered and dropped as overkill.
+- **Vite + `@crxjs/vite-plugin`** compiles everything Chrome can load: `npm run build` → `dist/` → *Load unpacked*.
+
+### What each feature relies on
+
+| What you see | How it works | Built with |
+|---|---|---|
+| It knows which page you're on | Tab activation / navigation events | `chrome.tabs`, `chrome.webNavigation` |
+| It knows you've walked away | System idle state | `chrome.idle` |
+| It knows whether you're typing or scrolling | Content script listens to the page | Content script + Page Visibility |
+| It decides whether a page is relevant | Domain + path + title (+ latest chat message on AI sites) → LLM → cached | Groq `gpt-oss-20b` + `storage.local` |
+| "How long since you touched the anchor" | A timestamp in the perception half, reset on real interaction | Pure TypeScript |
+| Whether to speak at all | Two channels (DRIFT / STUCK), each needing 30 s of sustained evidence, gated by cooldown, grace period and rest | Pure TypeScript (`detector.ts`) |
+| A check-in that sounds like a friend | Templated wording with variant rotation, regex-tested against lecturing words | Pure TypeScript (`wording.ts`) — **not** an LLM |
+| "Pull me back" actually switching tabs | `chrome.tabs.update` on the tab the anchor snapshot came from | `chrome.tabs` |
+| One physical first step to start | One LLM call with the task + open page; falls back to a fixed step | Groq `gpt-oss-120b` |
+| The cat's three moods | State machine over the evidence sustainers | `pet-state.ts` + CSS |
+| "This counts as work" is remembered | Written to the session whitelist (per-page on mixed-content sites like YouTube) | `storage.local` |
+| Still sane when offline | Built-in entertainment blacklist; everything else stays `UNKNOWN` | A constant table |
+| Prompt changes are measured, not eyeballed | 17 fixed tasks, 13 mechanical checks, action-shape distribution | `evals/` (Groq, not part of `npm test`) |
+
+**One honest caveat:** Groq is called directly from the client, which exposes the API key. A shipped product would put a small relay in front of it; for a hackathon the key lives in `chrome.storage.local`, pasted in by the user — and the extension works with no key at all.
+
+### Project layout
+
+```
+Anchor/
+├── manifest.json                  MV3 manifest — permissions, entry points
+│
+├── src/
+│   ├── engine/                    Pure TypeScript, zero Chrome/DOM imports — fully unit-tested
+│   │   ├── types.ts                 FeatureFrame / SessionContext / SignalPolicy — the core contract
+│   │   ├── perceiver.ts             raw signals → FeatureFrame (the four-signal computation)
+│   │   ├── detector.ts              FeatureFrame → DRIFT / STUCK (the sustained-evidence state machine)
+│   │   ├── coach.ts                 starter-coach task parsing — local fallback + validation
+│   │   ├── wording.ts               every user-facing string: check-ins, coach replies, summaries
+│   │   ├── pet-state.ts             the pet's own state machine (idle / observing / checking-in / resting…)
+│   │   └── *.test.ts                316 tests, offline, run against recorded signal streams
+│   │
+│   ├── platform/                  Chrome APIs + DOM — not unit-tested, verified on real devices
+│   │   ├── background/
+│   │   │   ├── index.ts             service-worker entry point, wires up every message listener
+│   │   │   ├── frame-pipeline.ts    SignalEvents → frames; applies check-in answers; writes the whitelist
+│   │   │   ├── classifier.ts        relevance-classification call (gpt-oss-20b)
+│   │   │   ├── starter-coach.ts     task-breakdown call (gpt-oss-120b)
+│   │   │   ├── groq.ts              shared Groq API wrapper both LLM calls go through
+│   │   │   ├── heuristics.ts        domain lists — blacklist, mixed-content domains, AI-chat sites
+│   │   │   ├── pull-back.ts         "Drifted — pull me back" tab-switching logic
+│   │   │   └── rest.ts, session.ts, onboarding.ts, session-summary.ts, panel.ts, state.ts
+│   │   ├── content/
+│   │   │   ├── content-script.ts    injected into every page — captures interaction signals
+│   │   │   ├── mount-floating.ts    mounts the floating pet into a Shadow DOM
+│   │   │   └── chat-sites.ts        AI-chat message extraction (claude.ai selectors, etc.)
+│   │   └── messages.ts            every message type crossing the content-script ↔ service-worker seam
+│   │
+│   ├── pet/
+│   │   ├── cat.tsx                  the floating pet component
+│   │   ├── assets/cat.json          the Lottie animation ("Kitty Cat Error 404")
+│   │   └── types.ts                 pet-facing types — check-in answers, channels
+│   │
+│   ├── sidepanel/                 side-panel entry point — onboarding + session-summary screens
+│   ├── ui/AnchorApp.tsx           shared React tree rendered by both the pet bubble and the side panel
+│   ├── devpreview/                standalone preview of every pet state side by side (npm run dev)
+│   └── mock/                      recorded SignalEvent / FeatureFrame streams the engine tests replay
+│
+├── evals/                         starter-coach prompt eval harness — hits the real Groq API
+├── docs/                          design docs, submission write-up, pitch deck (see table below)
+└── updateNote/updateNote.md       day-by-day engineering log — every bug found, and how
+```
+
 Full design docs (reconciled against the final code):
 
 | Doc | What it covers |
 |---|---|
 | [`docs/contract-v4.md`](docs/contract-v4.md) | The contract: signal definitions, thresholds, both detection channels, rest mode, privacy — every number checked against the code |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System diagrams and what each feature relies on |
 | [`docs/product-plan.md`](docs/product-plan.md) | The product thesis, detection principles, scope and roadmap |
-| [`docs/division-of-work.md`](docs/division-of-work.md) | Division of work, the five red lines, milestones with outcomes |
+| [`docs/division-of-work.md`](docs/division-of-work.md) | Division of work, the five red lines |
 
 
 ---

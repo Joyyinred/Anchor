@@ -3,19 +3,8 @@
 > This file is **what the shipped engine actually does.** Every number below was checked against `src/engine/types.ts`, `detector.ts`, `perceiver.ts` and `src/platform/background/*`. Where the original and the code disagree, the code is stated and the change is marked **(changed)**.
 >
 > Scope: three contract schemas · exact definitions of the four signals · the two-channel decision · clock base · demo mode · privacy statement.
-> Upstream: [`product-plan.md`](product-plan.md), [`division-of-work.md`](division-of-work.md), [`ARCHITECTURE.md`](ARCHITECTURE.md).
+> Upstream: [`product-plan.md`](product-plan.md), [`division-of-work.md`](division-of-work.md), [README.md § Architecture](../README.md#architecture).
 > ★ This is the single source of truth for the seam between the two people: B's decision half implements §3, A's perception half implements §1–§2.
-
----
-
-## 0. Evolution
-
-| Version | Key decisions |
-|---|---|
-| v0 | Domain-level relevance + enum profiles + four-signal skeleton + DRIFT/STUCK channels |
-| v1–v3.2 | Content-level classification, policy tables, evidence sustainers, cooldown/budget, slip tolerance, rest mode (interim, merged into v4) |
-| **v4** | **22 audit revisions:** entryIntent demoted, CREATOR blind-spot fix, clock base, demo time compression, demo preset cache, SignalPolicy validator, `lastAnchorSnapshot`, jumpPattern priority order, SW persistence, privacy statement, metrics, no-coach default |
-| **v4 as shipped** (this file) | Post-v4 changes from real-device testing, 08-28 → 09-11: CREATOR anchor threshold 8→5 min; cooldown 2 min after a confirmed drift; rest never auto-expires (`RESTING_INDEFINITELY`); `restEndedTs` / `mediaPlaying` STUCK exemptions; page-level whitelist for mixed-content sites; `contentSnippet` on AI-chat sites; `tabId` on the anchor snapshot; `DEMO_TIME_SCALE` 1/120 → 1/30; the starter coach receives the open page (`anchorContext`) |
 
 ---
 

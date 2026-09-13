@@ -172,17 +172,6 @@ Every check-in answer feeds back. *"Still on track"* raises the STUCK threshold 
 
 ---
 
-## Demo script (two moments of contrast)
-
-1. **Start (empathy):** *"Problem set due tomorrow, can't begin."* → the pet gives one absurdly small step; thirty seconds later you are physically typing.
-2. **Not interrupting (contrast #1, the most important):** you code, and in front of the judges you **bounce furiously** between IDE, docs, Stack Overflow, AI — the cat **doesn't move, doesn't speak.** Narration: *"Any other tool would have popped three times by now. It knows I'm looking things up."*
-3. **Pulling back (contrast #2, the climax):** you "accidentally" drift to YouTube and start scrolling → seconds later (demo mode, 30× time compression) the cat checks in: *"You left the loop bug a few minutes ago — still researching, or did your mind wander?"* → *"drifted"* → a micro-restart, and it switches you back to that line of code.
-4. **Close:** *"Focused 38 minutes, pulled back once."* One line: *Anchor doesn't nag and doesn't block. It's the friend who knows when you actually need a hand.*
-
-**Demo discipline:** rehearsed, stable scenarios only; the contrast between steps 2 and 3 is the memory; the check-in wording is tuned in advance to sound like a friend, not a supervisor. **Turn on demo mode**, or step 3 takes five minutes of real time.
-
----
-
 ## Roadmap
 
 Anchor's engine — *judge "have they left the anchor" from several signals against a declared task* — applies to any setting where you need to intervene in someone's attention at the right moment, in the right tone. The engine already has no idea what a browser tab is; only the signal collector does.
