@@ -115,12 +115,7 @@ Anchor is **not** an app with a server behind it — almost everything runs on y
 
 ![Overview: everything runs on your computer except one LLM call](docs/arch-1-overview.en.svg)
 
-```
-Chrome APIs ──► perception (A) ──► FeatureFrame ──► decision (B) ──► pet / bubble
-  tabs, idle,     signals.ts         (the contract)    detector.ts        cat.tsx
-  content script  perceiver.ts                          pet-state.ts       AnchorApp.tsx
-                  classifier.ts                         wording.ts
-```
+![](docs/anchor_two_halves_dataflow.svg)
 
 - **Perception** collects four signals — context relevance, anchor detachment, interaction texture, jump pattern — into a `FeatureFrame`.
 - **Decision** runs two independent channels, **DRIFT** and **STUCK**, on evidence *sustainers*: a channel fires only when its condition has held continuously for a 30-second window. After a check-in there's a cooldown, and evidence from before it is discarded.
