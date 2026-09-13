@@ -59,6 +59,8 @@ A five-minute drift now plays out in about ten seconds. Set it back to `false` t
 1. **Declare a task.** The first time the cat appears, it asks what you're working on. Type something like *"study neural networks"* or *"finish chapter 3 of the React docs"*. If it's too vague to ever judge pages against, it asks **one** follow-up — never more.
 2. **Get a first step.** It replies with one physical action (*"Press play on the video you already have open"*). Click **Let's go**.
 3. **Work.** The cat sits quietly. Hover over it for **Take a break** / **Done for today**; hover over the anchor badge by its ear to see how long you've been focused.
+
+   Working with an AI assistant? On claude.ai, Anchor also reads your **latest message** — so if the conversation drifts from "neural networks" to "what's for dinner", the cat notices even though the tab never changed. (Only your most recent message, only on listed AI-chat sites — see [Privacy](#privacy).)
 4. **When you drift**, a bubble appears with three options:
    - **Still on track** — clears this round of evidence
    - **This counts as work** — whitelists that page for the rest of the session
