@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1360" viewBox="0 0 1360 1240" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Anchor · the two halves and the seam between them</title>
+<desc>Left: A watches and records (sensors → perception half → FeatureFrame). Right: B judges and speaks (decision half → action → wording → pet UI). Bottom: at session start the starter coach (B) hands SessionContext to the perception half (A).</desc>
+<style>
+text{font-family:-apple-system,system-ui,'Segoe UI',sans-serif}
+.h1{font-size:30px;font-weight:600;fill:#2b2b28}
+.h2{font-size:22px;fill:#6b6a66}
+.bt{font-size:26px;font-weight:600}
+.bs{font-size:20px}
+.it{font-size:20px}
+.lbl{font-size:20px;fill:#5f5e5a}
+.gray{fill:#F1EFE8;stroke:#8f8d86;stroke-width:2}
+.green{fill:#E8F5EE;stroke:#3a8a5f;stroke-width:2}
+.green-i{fill:#F2FAF5;stroke:#3a8a5f;stroke-width:1.5}
+.blue{fill:#E9F1FB;stroke:#3b6db0;stroke-width:2}
+.blue-i{fill:#F3F8FE;stroke:#3b6db0;stroke-width:1.5}
+.purple{fill:#EFE9FB;stroke:#6f4fc2;stroke-width:2}
+.coral{fill:#FBEDE8;stroke:#b8542f;stroke-width:2}
+.amber{fill:#FBF3E2;stroke:#b07a1e;stroke-width:2}
+.panel{fill:#FAFAF7;stroke:#c9c7bf;stroke-width:2}
+.tx-gray{fill:#3d3d3a}.tx-green{fill:#1f6b45}.tx-blue{fill:#274f8a}.tx-purple{fill:#4b2fa3}.tx-coral{fill:#8c3a1c}.tx-amber{fill:#7d5410}
+.ar{stroke:#8f8d86;stroke-width:3;fill:none;marker-end:url(#m)}
+</style>
+<defs><marker id="m" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#8f8d86"/></marker></defs>
+<rect width="1360" height="1240" fill="#ffffff"/>
+
+<!-- column headers -->
+<text class="h1" x="348" y="52" text-anchor="middle">A ｜ watch + record</text>
+<text class="h2" x="348" y="90" text-anchor="middle">perception + signals + platform</text>
+<text class="h1" x="1004" y="52" text-anchor="middle">B ｜ judge + speak</text>
+<text class="h2" x="1004" y="90" text-anchor="middle">decision + dialogue + presentation</text>
+<line x1="676" y1="120" x2="676" y2="1220" stroke="#d9d7cf" stroke-width="2" stroke-dasharray="8 8"/>
+
+<!-- A: sensors -->
+<rect class="gray" x="120" y="130" width="456" height="104" rx="18"/>
+<text class="bt tx-gray" x="348" y="176" text-anchor="middle">Sensors</text>
+<text class="bs tx-gray" x="348" y="212" text-anchor="middle">tabs · idle · visibility · content script</text>
+<path class="ar" d="M348 234 V282"/>
+<text class="lbl" x="366" y="266">SignalEvent</text>
+
+<!-- A: perception half -->
+<rect class="green" x="120" y="284" width="456" height="374" rx="18"/>
+<text class="bt tx-green" x="348" y="330" text-anchor="middle">Perception half · the four signals</text>
+<rect class="green-i" x="152" y="354" width="392" height="58" rx="12"/>
+<text class="it tx-green" x="348" y="391" text-anchor="middle">relevance (LLM + cache)</text>
+<rect class="green-i" x="152" y="430" width="392" height="58" rx="12"/>
+<text class="it tx-green" x="348" y="467" text-anchor="middle">anchor detachment (stopwatch)</text>
+<rect class="green-i" x="152" y="506" width="392" height="58" rx="12"/>
+<text class="it tx-green" x="348" y="543" text-anchor="middle">texture (typing / scrolling / idle)</text>
+<rect class="green-i" x="152" y="582" width="392" height="58" rx="12"/>
+<text class="it tx-green" x="348" y="619" text-anchor="middle">jump pattern (orbit / rabbit hole)</text>
+
+<!-- seam -->
+<path class="ar" d="M576 470 H596"/>
+<rect class="purple" x="598" y="384" width="156" height="172" rx="18"/>
+<text class="bt tx-purple" x="676" y="448" text-anchor="middle">Feature</text>
+<text class="bt tx-purple" x="676" y="484" text-anchor="middle">Frame</text>
+<text class="bs tx-purple" x="676" y="526" text-anchor="middle">the seam</text>
+<path class="ar" d="M754 470 H778"/>
+
+<!-- B: decision half -->
+<rect class="blue" x="780" y="284" width="456" height="192" rx="18"/>
+<text class="bt tx-blue" x="1008" y="330" text-anchor="middle">Decision half · should it speak?</text>
+<rect class="blue-i" x="812" y="354" width="392" height="46" rx="12"/>
+<text class="it tx-blue" x="1008" y="385" text-anchor="middle">profile muting + two channels + thresholds</text>
+<rect class="blue-i" x="812" y="412" width="392" height="46" rx="12"/>
+<text class="it tx-blue" x="1008" y="443" text-anchor="middle">state machine + adaptive backoff</text>
+<path class="ar" d="M1008 476 V522"/>
+<text class="lbl" x="1120" y="506">action</text>
+
+<!-- B: action -->
+<rect class="blue-i" x="780" y="524" width="456" height="80" rx="18"/>
+<text class="it tx-blue" x="1008" y="574" text-anchor="middle" font-size="16">DO_NOTHING · CHECK_IN_DRIFT · CHECK_IN_STUCK</text>
+<path class="ar" d="M1008 604 V652"/>
+
+<!-- B: wording -->
+<rect class="coral" x="780" y="654" width="456" height="104" rx="18"/>
+<text class="bt tx-coral" x="1008" y="698" text-anchor="middle">Wording (local templates)</text>
+<text class="bs tx-coral" x="1008" y="736" text-anchor="middle">check-in · micro-restart · rest reminder</text>
+<path class="ar" d="M1008 758 V806"/>
+
+<!-- B: pet UI -->
+<rect class="coral" x="780" y="808" width="456" height="104" rx="18"/>
+<text class="bt tx-coral" x="1008" y="852" text-anchor="middle">Pet UI (floating cat)</text>
+<text class="bs tx-coral" x="1008" y="890" text-anchor="middle">three moods · bubble · timer · summary</text>
+
+<!-- bottom panel -->
+<rect class="panel" x="120" y="1000" width="1116" height="200" rx="18"/>
+<text class="bt tx-gray" x="160" y="1050">Session start: B hands A the frame of reference</text>
+<rect class="amber" x="280" y="1082" width="296" height="84" rx="14"/>
+<text class="bt tx-amber" x="428" y="1118" text-anchor="middle">Perception half</text>
+<text class="bs tx-amber" x="428" y="1150" text-anchor="middle">judges against it</text>
+<rect class="amber" x="780" y="1082" width="296" height="84" rx="14"/>
+<text class="bt tx-amber" x="928" y="1118" text-anchor="middle">Starter coach (LLM)</text>
+<text class="bs tx-amber" x="928" y="1150" text-anchor="middle">gets the task + first step</text>
+<path class="ar" d="M780 1124 H580"/>
+<text class="lbl" x="680" y="1112" text-anchor="middle">SessionContext</text>
+</svg>

@@ -40,7 +40,7 @@ Anchor uses [Groq](https://console.groq.com) (free tier is plenty) for two thing
 chrome.storage.local.set({ anchor_groq_api_key: 'gsk_your_key_here' })
 ```
 
-Without a key: relevance classification falls back to a built-in blacklist plus a conservative `UNKNOWN`, and the starter coach falls back to a fixed first action. Nothing breaks — that's a design rule ([`docs/分工v2.md` §5](docs/分工v2.md), red line #2: *the LLM never blocks the engine, and every LLM path has a local fallback*).
+Without a key: relevance classification falls back to a built-in blacklist plus a conservative `UNKNOWN`, and the starter coach falls back to a fixed first action. Nothing breaks — that's a design rule ([`docs/division-of-work.md` §5](docs/division-of-work.md), red line #2: *the LLM never blocks the engine, and every LLM path has a local fallback*).
 
 ### Optional: demo mode (30× faster)
 
@@ -134,16 +134,15 @@ Chrome APIs ──► perception (A) ──► FeatureFrame ──► decision (
 - **The engine** (`src/engine/`) is pure TypeScript with no Chrome or DOM dependency, so it's fully unit-tested against recorded signal streams (`src/mock/`).
 - **The floating pet** renders into a Shadow DOM on the host page; the side panel renders the same React tree. Neither host contains logic.
 
-Full design docs (in Chinese):
+Full design docs (reconciled against the final code):
 
 | Doc | What it covers |
 |---|---|
-| [`docs/契约v4.md`](docs/契约v4.md) | The contract: signal definitions, thresholds, both detection channels, rest mode, privacy |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System diagrams |
-| [`docs/分工v2.md`](docs/分工v2.md) | Division of work and the five red lines |
-| [`docs/起步教练prompt-v0.md`](docs/起步教练prompt-v0.md) | Starter coach prompt, v1 → v5.1, and why each version replaced the last |
-| [`docs/分类prompt-v0.md`](docs/分类prompt-v0.md) | Relevance classifier prompt |
-| [`updateNote/updateNote.md`](updateNote/updateNote.md) | Day-by-day engineering log, including every bug and how it was found |
+| [`docs/contract-v4.md`](docs/contract-v4.md) | The contract: signal definitions, thresholds, both detection channels, rest mode, privacy — every number checked against the code |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System diagrams and what each feature relies on |
+| [`docs/product-plan.md`](docs/product-plan.md) | The product thesis, detection principles, scope and roadmap |
+| [`docs/division-of-work.md`](docs/division-of-work.md) | Division of work, the five red lines, milestones with outcomes |
+
 
 ---
 

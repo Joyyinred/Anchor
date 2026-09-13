@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="680" viewBox="0 0 680 400" role="img" xmlns="http://www.w3.org/2000/svg">
-<title>Anchor 扩展内部解剖</title>
-<desc>扩展由 manifest、后台 service worker、content script、side panel、本地存储与浏览器信号 API 组成，service worker 是中枢。</desc>
+<title>Inside the Anchor extension</title>
+<desc>manifest, background service worker, content script, floating pet, local storage and browser signal APIs — the service worker is the hub.</desc>
 <style>
 text{font-family:-apple-system,system-ui,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
 .th{font-size:14px;font-weight:500}.ts{font-size:12px;font-weight:400}.lbl{fill:#3d3d3a}
@@ -23,30 +23,30 @@ text{font-family:-apple-system,system-ui,'Segoe UI','PingFang SC','Microsoft YaH
 </style>
 <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
 <rect x="30" y="34" width="620" height="352" rx="16" class="boxf" stroke-width="0.5" stroke-dasharray="5 5"/>
-<text class="ts lbl" x="48" y="56">Anchor 扩展 · Chrome 扩展（Manifest V3）</text>
+<text class="ts lbl" x="48" y="56">Anchor · Chrome extension (Manifest V3)</text>
 <rect x="250" y="72" width="180" height="52" rx="8" class="b-purple" stroke-width="0.5"/>
 <text class="th tx-purple" x="340" y="93" text-anchor="middle">manifest.json</text>
-<text class="ts tx-purple" x="340" y="111" text-anchor="middle">扩展说明书 / 权限清单</text>
+<text class="ts tx-purple" x="340" y="111" text-anchor="middle">registration form / permissions</text>
 <line x1="340" y1="124" x2="340" y2="156" stroke="#8a8880" stroke-width="1.5" marker-end="url(#arrow)"/>
 <rect x="44" y="156" width="168" height="72" rx="8" class="b-blue" stroke-width="0.5"/>
 <text class="th tx-blue" x="128" y="184" text-anchor="middle">Content Script</text>
-<text class="ts tx-blue" x="128" y="204" text-anchor="middle">网页里的触角</text>
+<text class="ts tx-blue" x="128" y="204" text-anchor="middle">our feelers inside the page</text>
 <rect x="250" y="156" width="180" height="96" rx="8" class="b-teal" stroke-width="0.5"/>
-<text class="th tx-teal" x="340" y="184" text-anchor="middle">后台 Service Worker</text>
-<text class="ts tx-teal" x="340" y="204" text-anchor="middle">跑感知 + 决策两半</text>
-<text class="ts tx-teal" x="340" y="222" text-anchor="middle">（会被浏览器休眠）</text>
+<text class="th tx-teal" x="340" y="184" text-anchor="middle">Service worker</text>
+<text class="ts tx-teal" x="340" y="204" text-anchor="middle">runs perception + decision</text>
+<text class="ts tx-teal" x="340" y="222" text-anchor="middle">(Chrome puts it to sleep)</text>
 <rect x="468" y="156" width="168" height="72" rx="8" class="b-coral" stroke-width="0.5"/>
-<text class="th tx-coral" x="552" y="184" text-anchor="middle">Side Panel</text>
-<text class="ts tx-coral" x="552" y="204" text-anchor="middle">桌宠 UI（React）</text>
+<text class="th tx-coral" x="552" y="184" text-anchor="middle">Floating pet</text>
+<text class="ts tx-coral" x="552" y="204" text-anchor="middle">pet UI (React)</text>
 <rect x="44" y="300" width="168" height="60" rx="8" class="b-gray" stroke-width="0.5"/>
 <text class="th tx-gray" x="128" y="324" text-anchor="middle">chrome.tabs / idle</text>
-<text class="ts tx-gray" x="128" y="342" text-anchor="middle">浏览器自带信号</text>
+<text class="ts tx-gray" x="128" y="342" text-anchor="middle">signals the browser provides</text>
 <rect x="245" y="300" width="190" height="60" rx="8" class="b-amber" stroke-width="0.5"/>
 <text class="th tx-amber" x="340" y="324" text-anchor="middle">chrome.storage.local</text>
-<text class="ts tx-amber" x="340" y="342" text-anchor="middle">本地记事本</text>
+<text class="ts tx-amber" x="340" y="342" text-anchor="middle">local notebook</text>
 <line x1="212" y1="188" x2="248" y2="188" stroke="#8a8880" stroke-width="1.5" marker-end="url(#arrow)"/>
 <line x1="212" y1="320" x2="250" y2="228" stroke="#8a8880" stroke-width="1.5" marker-end="url(#arrow)"/>
 <line x1="466" y1="192" x2="432" y2="192" stroke="#8a8880" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
 <line x1="340" y1="252" x2="340" y2="298" stroke="#8a8880" stroke-width="1.5" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
-<text class="ts lbl" x="360" y="278">存/取</text>
+<text class="ts lbl" x="360" y="278">read / write</text>
 </svg>
