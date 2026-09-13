@@ -30,9 +30,20 @@ export interface ClassifyInput {
 function buildPrompt(input: ClassifyInput): string {
   // 09-05：有 contentSnippet 时多给一行——判的是"这句话"是不是任务相关，不只是"这个页面"，
   // 对 AI 对话页面尤其重要（标题可能还停在对话刚开始时的主题，但用户已经聊到别的地方了）。
+  // 09-13 真机复现修复：光加这一行不够——之前的问句仍然是笼统的 "Is THIS PAGE relevant"，
+  // 模型会把 title 和 snippet 当成同等权重的两条线索去综合，一个強相关的旧标题（"Basic
+  // English grammar"）就能把一条明显跑题的新消息（"provide a tour plan to Crete"）平均
+  // 成 RELEVANT。真正想问的是"用户刚问的这句话"是否相关，标题只是背景，不该参与投票——
+  // 所以有 snippet 时问句本身要换成问 snippet，并且明说标题可能是旧话题、不能当作当前证据。
+  const hasSnippet = !!input.contentSnippet;
   const snippetLine = input.contentSnippet
     ? `\nThey just typed this in the page: "${input.contentSnippet}"\n`
     : '';
+  const question = hasSnippet
+    ? `Question: Is the message they just typed — NOT the page title — relevant to the declared task?
+This is an ongoing AI chat; the title reflects only the topic the conversation *started* with and may now be stale. Judge the most recent message on its own; a strongly on-task title does not make an off-task message relevant.`
+    : `Question: Is THIS PAGE relevant to the declared task?
+Judge by the page's specific content (title + path), not by the domain's general nature.`;
   return `You are a relevance classifier for a focus-assistant browser extension.
 
 The user declared their current task as:
@@ -42,8 +53,7 @@ They are currently viewing this page:
 - URL: ${input.url}
 - Title: ${input.title}
 ${snippetLine}
-Question: Is THIS PAGE relevant to the declared task?
-Judge by the page's specific content (title + path), not by the domain's general nature.
+${question}
 For example, youtube.com can be relevant (a tutorial) or irrelevant (entertainment) — decide per page.
 A question about prerequisite or foundational knowledge for the task counts as relevant too —
 e.g. if the task is "study neural networks", asking "how much calculus do I need to know" or
@@ -56,8 +66,8 @@ is IRRELEVANT (a different language, not a stepping stone toward English), even 
 of English, they're siblings under the same category. Don't let a shared category alone justify RELEVANT.
 
 Answer with exactly one of:
-RELEVANT   — the page directly supports the task (docs, code, related video/article, AI chat about the task)
-IRRELEVANT — the page is clearly off-task entertainment/social/shopping
+RELEVANT   — it directly supports the task (docs, code, related video/article, an on-task message in an AI chat)
+IRRELEVANT — it is clearly off-task entertainment/social/shopping, or (in a chat) an off-task message
 UNKNOWN    — genuinely ambiguous, or a general-purpose page whose content can't be determined from title alone
 
 Output format (JSON only, no extra text):

@@ -40,7 +40,7 @@ Anchor uses [Groq](https://console.groq.com) (free tier is plenty) for two thing
 chrome.storage.local.set({ anchor_groq_api_key: 'gsk_your_key_here' })
 ```
 
-Without a key: relevance classification falls back to a built-in blacklist plus a conservative `UNKNOWN`, and the starter coach falls back to a fixed first action. Nothing breaks — that's a design rule ([`docs/division-of-work.md` §5](docs/division-of-work.md), red line #2: *the LLM never blocks the engine, and every LLM path has a local fallback*).
+Without a key: relevance classification falls back to a built-in blacklist plus a conservative `UNKNOWN`, and the starter coach falls back to a fixed first action. Nothing breaks — that's a design rule ([`docs/planning/division-of-work.md` §5](docs/planning/division-of-work.md), red line #2: *the LLM never blocks the engine, and every LLM path has a local fallback*).
 
 ### Optional: demo mode (30× faster)
 
@@ -133,7 +133,7 @@ Chrome APIs ──► perception (A) ──► FeatureFrame ──► decision (
 
 A Manifest V3 extension isn't one blob — several parts, separate jobs:
 
-- **Service worker** (`src/platform/background/`) — the brain; both halves of the engine run here. Chrome puts it to sleep after ~30 s of idle and wakes it on demand, so every piece of state that matters is written to `chrome.storage.local` and re-hydrated on wake. (`Infinity` doesn't survive that round-trip through JSON — see the rest-mode note in [`contract-v4.md` §3.8](docs/contract-v4.md#38-rest-mode).)
+- **Service worker** (`src/platform/background/`) — the brain; both halves of the engine run here. Chrome puts it to sleep after ~30 s of idle and wakes it on demand, so every piece of state that matters is written to `chrome.storage.local` and re-hydrated on wake. (`Infinity` doesn't survive that round-trip through JSON — see the rest-mode note in [`contract-v4.md` §3.8](docs/planning/contract-v4.md#38-rest-mode).)
 - **Content script** (`src/platform/content/`) — injected into every page: reports keystrokes/scrolling/video play-pause (the *texture* signal), extracts your latest message on AI-chat sites, and mounts the floating cat.
 - **The floating pet** — a Shadow DOM island on the host page: draggable, remembers its position, and clicks pass through everywhere the cat isn't standing.
 - **Side panel** — the same React tree, kept as a fallback for pages an extension can't inject into (`chrome://`, the Web Store, PDFs).
@@ -212,17 +212,16 @@ Anchor/
 │   └── mock/                      recorded SignalEvent / FeatureFrame streams the engine tests replay
 │
 ├── evals/                         starter-coach prompt eval harness — hits the real Groq API
-├── docs/                          design docs, submission write-up, pitch deck (see table below)
-└── updateNote/updateNote.md       day-by-day engineering log — every bug found, and how
+└── docs/                          design docs, submission write-up, pitch deck (see table below)
 ```
 
 Full design docs (reconciled against the final code):
 
 | Doc | What it covers |
 |---|---|
-| [`docs/contract-v4.md`](docs/contract-v4.md) | The contract: signal definitions, thresholds, both detection channels, rest mode, privacy — every number checked against the code |
-| [`docs/product-plan.md`](docs/product-plan.md) | The product thesis, detection principles, scope and roadmap |
-| [`docs/division-of-work.md`](docs/division-of-work.md) | Division of work, the five red lines |
+| [`docs/planning/contract-v4.md`](docs/planning/contract-v4.md) | The contract: signal definitions, thresholds, both detection channels, rest mode, privacy — every number checked against the code |
+| [`docs/planning/product-plan.md`](docs/planning/product-plan.md) | The product thesis, detection principles, scope and roadmap |
+| [`docs/planning/division-of-work.md`](docs/planning/division-of-work.md) | Division of work, the five red lines |
 
 
 ---

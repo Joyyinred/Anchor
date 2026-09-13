@@ -26,7 +26,11 @@ function sendThrottled(interactionType: InteractionMessage['interactionType']): 
 }
 
 document.addEventListener('keydown', () => sendThrottled('ACTIVE_INPUT'), { passive: true });
-document.addEventListener('scroll', () => sendThrottled('PASSIVE_SCROLL'), { passive: true });
+// 09-13 真机复现：'scroll' 不冒泡，document 级监听只能看见文档本身的滚动——claude.ai 的
+// 消息列表是内部一个自带滚动条的 div，用户倒回去重读之前的内容时，这个监听器完全看不见，
+// anchorDetachedMs 因此从不被重置，导致明明在看相关内容也会被判定 abandoned。scroll 事件
+// 虽不冒泡但会在捕获阶段经过祖先节点，{capture:true} 让 document 也能收到子容器的滚动。
+document.addEventListener('scroll', () => sendThrottled('PASSIVE_SCROLL'), { passive: true, capture: true });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) send('HIDDEN');
 });

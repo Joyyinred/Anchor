@@ -3,7 +3,7 @@
 > This file is **what the shipped engine actually does.** Every number below was checked against `src/engine/types.ts`, `detector.ts`, `perceiver.ts` and `src/platform/background/*`. Where the original and the code disagree, the code is stated and the change is marked **(changed)**.
 >
 > Scope: three contract schemas · exact definitions of the four signals · the two-channel decision · clock base · demo mode · privacy statement.
-> Upstream: [`product-plan.md`](product-plan.md), [`division-of-work.md`](division-of-work.md), [README.md § Architecture](../README.md#architecture).
+> Upstream: [`product-plan.md`](product-plan.md), [`division-of-work.md`](division-of-work.md), [README.md § Architecture](../../README.md#architecture).
 > ★ This is the single source of truth for the seam between the two people: B's decision half implements §3, A's perception half implements §1–§2.
 
 ---
